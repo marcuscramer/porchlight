@@ -27,11 +27,18 @@
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
+    <!-- android:banner is @mipmap, not @drawable: Meta's own Portal
+         design-requirements docs (developers.meta.com/horizon/
+         documentation/android-apps/portal-design-requirements) state
+         Portal's launcher only reads icon/banner assets from
+         mipmap-xxxhdpi/, ignoring every other density folder — that doc
+         also says Portal TV specifically needs this banner (not just
+         android:icon) to appear on the home screen at all. -->
     <application
         android:name=".PorchlightApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:banner="@drawable/banner"
+        android:banner="@mipmap/banner"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Porchlight">

@@ -190,9 +190,27 @@ cargo {
 // is this plugin's own documented hook point, chosen deliberately over
 // hooking a later task: it needs to run early enough that the .so it
 // produces is in place before Android's own jniLibs merge step looks for it.
+//
+// styleDictionaryBuildAndroid is *also* wired directly onto
+// compileDebugKotlin/compileReleaseKotlin below, not just onto
+// javaPreCompileDebug/Release here — found live in CI (not locally, where
+// it passed every time): a real build failed with "Unresolved reference
+// 'Dimens'"/'GeneratedColor'/'GeneratedOpacity', meaning compileDebugKotlin
+// ran before styleDictionaryBuildAndroid had regenerated those files, even
+// though javaPreCompileDebug supposedly depends on it. Gradle's task graph
+// doesn't transitively guarantee "everything javaPreCompileDebug depends on
+// finishes before every *other* task that isn't itself ordered after
+// javaPreCompileDebug" — compileDebugKotlin has no dependency relationship
+// on javaPreCompileDebug at all, so nothing actually forced the order
+// between them. Depending on styleDictionaryBuildAndroid directly from the
+// Kotlin compile tasks closes that gap instead of relying on an indirect
+// path that happened to work locally by luck of task scheduling.
 tasks.whenTaskAdded {
     if (name == "javaPreCompileDebug" || name == "javaPreCompileRelease") {
         dependsOn("cargoBuild")
+        dependsOn("styleDictionaryBuildAndroid")
+    }
+    if (name == "compileDebugKotlin" || name == "compileReleaseKotlin") {
         dependsOn("styleDictionaryBuildAndroid")
     }
 }
