@@ -14,6 +14,15 @@
        strict. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://esm.sh 'wasm-unsafe-eval'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://esm.sh wss://relay.damus.io wss://nos.lol wss://relay.primal.net; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none';" />
   <title>Porchlight</title>
+  <!-- Lets iOS/Android render this fullscreen with no URL bar, but only
+       once added to the home screen — opening the page in the browser
+       itself always shows normal browser chrome, on any platform. -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Porchlight" />
+  <meta name="theme-color" content="#1a1a1a" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
