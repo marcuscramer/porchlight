@@ -31,6 +31,7 @@
         android:name=".PorchlightApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/banner"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Porchlight">
@@ -40,14 +41,29 @@
             android:exported="true"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden">
-            <!-- Must be plain LAUNCHER, not LEANBACK_LAUNCHER: confirmed from
-                 Immortal's own source (ScreensaverDismissAppActivity.kt,
-                 HomeActivity.kt) that its Manage-mode app list and
-                 screensaver-dismiss-target picker both require exactly this
-                 category to find the app at all. -->
+            <!-- Plain LAUNCHER: confirmed from Immortal's own source
+                 (ScreensaverDismissAppActivity.kt, HomeActivity.kt) that its
+                 Manage-mode app list and screensaver-dismiss-target picker
+                 both require exactly this category to find the app at all. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- LEANBACK_LAUNCHER, separately: Meta's own Portal TV app
+                 requirement (developers.meta.com/horizon/documentation/
+                 android-apps/portal-create-app) — a stock Portal TV's own
+                 home screen only surfaces apps declaring this category, not
+                 plain LAUNCHER. Two intent-filters, not one filter with both
+                 categories: Android requires an intent to match every
+                 category *within* one filter, so combining them into a
+                 single filter would demand both categories from whichever
+                 launcher fires the intent, matching neither. This is what
+                 makes Immortal genuinely optional — a stock, un-Immortal'd
+                 Portal TV finds the app through this filter on its own. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
