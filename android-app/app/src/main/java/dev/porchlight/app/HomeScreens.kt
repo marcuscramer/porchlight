@@ -806,7 +806,7 @@ private fun WaitingScreen(
         if (blockedCallMessage == null) onCall(pairingId)
     }
     // Three overlaid corners/center (settings icon / contact list / status
-    // strip), not a Column of three rows sized around each other — the
+    // message), not a Column of three rows sized around each other — the
     // contact list fills the entire screen and the other two float on top
     // of it, same as every other overlaid corner in this app. Mirrors
     // web's identical #screenWaiting restructuring (styles.css).
@@ -832,8 +832,9 @@ private fun WaitingScreen(
                 // This Box is sizeSettingsFab (44dp), bigger than the 24dp
                 // icon it centers, so the icon's own ink sits an extra
                 // (44-24)/2=10dp deeper than the padding value alone
-                // suggests — confirmed live via the icon's own bounds vs
-                // the checklist's. Subtracting that centering gap is what
+                // suggests — confirmed live via the icon's own bounds vs.
+                // spacingStatusRegionLeftOffset's other use (the status
+                // message below). Subtracting that centering gap is what
                 // actually equalizes the two (web's .settings-fab applies
                 // the identical correction).
                 .padding(Dimens.spacingStatusRegionLeftOffset - (Dimens.sizeSettingsFab - Dimens.dimension24) / 2)
