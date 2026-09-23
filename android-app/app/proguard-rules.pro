@@ -11,9 +11,3 @@
 # so R8 renaming the class or its methods would silently break every
 # native call the moment minification is turned on.
 -keep class dev.porchlight.app.CallCoreBridge { *; }
-
-# Ably (gson, msgpack, vcdiff transitive deps)
--dontwarn io.ably.**
--dontwarn com.google.gson.**
--dontwarn org.msgpack.**
--dontwarn com.davidehrmann.vcdiff.**
