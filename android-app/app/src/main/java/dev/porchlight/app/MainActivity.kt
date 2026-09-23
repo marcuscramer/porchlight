@@ -110,11 +110,11 @@ internal object HardwareEnterKeyUpGuard {
  * Minimal multi-contact calling shell: local self-view (small, movable
  * corner), remote video (full-screen once a peer connects), and a setup
  * flow entered once on first run (name, then "Add contact" — see
- * PassphrasePairingScreens.kt) that stays reachable afterward too, via a
- * hold-Back settings screen, since adding more contacts and recovering one
- * after a suspected compromise (Delete, then Add contact again) are both
- * things this device needs to support long after first setup, not just
- * once.
+ * PassphrasePairingScreens.kt) that stays reachable afterward too — Add
+ * contact via its own row in the contact list, renaming via the settings
+ * gear icon — since adding more contacts and recovering one after a
+ * suspected compromise (Delete, then Add contact again) are both things
+ * this device needs to support long after first setup, not just once.
  */
 class MainActivity : ComponentActivity() {
 
@@ -127,11 +127,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private var service by mutableStateOf<CameraAgentService?>(null)
-    // No visible "Settings" icon — but this device's name and contacts
-    // still need to be changeable. A long-press on Back is the same "hidden
-    // but findable when you need it" pattern as Home leading to Immortal:
-    // not something a parent would stumble into by a normal short press,
-    // but there when you need it.
     private var showAdminChoice by mutableStateOf(false)
 
     private val connection = object : ServiceConnection {
@@ -186,25 +181,6 @@ class MainActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         service?.hangUp()
-    }
-
-    /**
-     * A genuine long-press-and-hold, distinct from a normal Back tap (which
-     * stays a no-op on the waiting screen, or hangs up during a call — see
-     * HomeScreen's BackHandler). Hangs up first if a call happens to be
-     * active, since editing settings mid-call makes no sense; returning
-     * true here suppresses the ordinary short-press Back handling for the
-     * same key event. Opens Device settings (see AdminChoiceScreen) rather
-     * than jumping straight into any one specific flow, since there are
-     * several different things you might be here for.
-     */
-    override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            service?.hangUp()
-            showAdminChoice = true
-            return true
-        }
-        return super.onKeyLongPress(keyCode, event)
     }
 
     private fun requestPermissions() {
@@ -339,20 +315,19 @@ internal fun PreviewCorner.toAlignment(): Alignment = when (this) {
 }
 
 /**
- * Every screen reachable from Device settings (hold Back), plus the
- * "Add contact" flow reached directly from WaitingScreen's own contact list
- * now (not from Settings at all — see EnteringPhrase's own doc). Kept as one
+ * Every screen reachable from the settings gear icon, plus the "Add
+ * contact" flow reached directly from WaitingScreen's own contact list now
+ * (not from Settings at all — see EnteringPhrase's own doc). Kept as one
  * sealed type rather than a pile of booleans. Deliberately local
- * (`remember`) state inside AppRoot, not lifted to MainActivity — unlike
- * `showAdminChoice`, nothing here needs to be set from outside Compose
- * (there's no physical-key trigger for any of these), so there's no reason
- * for it to survive process death either.
+ * (`remember`) state inside AppRoot, not lifted to MainActivity like
+ * `showAdminChoice` is — nothing outside AppRoot's own composition ever
+ * needs to read or set which of these screens is showing.
  */
 private sealed interface AdminScreen {
-    // Only ever reached via `showAdminChoice` (hold Back), so Back/Save
-    // always fall through to reopening Device settings — no second entry
-    // point to distinguish, unlike before this screen's own Contacts button
-    // was removed.
+    // Only ever reached via `showAdminChoice` (the settings gear icon), so
+    // Back/Save always fall through to reopening Device settings — no
+    // second entry point to distinguish, unlike before this screen's own
+    // Contacts button was removed.
     data object Rename : AdminScreen
     // "Add contact" only — there's no "Reconnect": a stale contact is just
     // Delete + Add contact again, so this carries no pairing id at all;
@@ -489,6 +464,11 @@ private fun AppRoot(
         !config.hasName -> {
             NameEntryScreen(
                 initial = config.deviceName,
+                // No prior screen to cancel back to at first launch, but
+                // Back still needs to do *something* other than fall
+                // through to the system default and exit the app — see
+                // NameEntryScreen's own doc.
+                onCancel = {},
                 onDone = { name ->
                     val c = config.copy(deviceName = name)
                     Config.save(context, c)
@@ -525,9 +505,7 @@ private fun AppRoot(
                     Config.save(context, c)
                     config = c
                 },
-                // Same destination hold-Back opens (see onKeyLongPress's
-                // doc) — this is just the on-screen, discoverable way in,
-                // mirroring the web client's #settingsBtn gear.
+                // Mirrors the web client's own #settingsBtn gear.
                 onOpenSettings = onReopenAdminChoice,
                 // The one and only entry point into "Add contact" now — a
                 // trailing row in the contact list itself, not a separate
@@ -571,9 +549,13 @@ private fun NameEntryScreen(
     onDone: (String) -> Unit,
 ) {
     var name by remember { mutableStateOf(initial) }
-    // Only the rename entry point (reached from Device settings) has
-    // anywhere sensible to cancel back to — first-launch naming has no
-    // prior screen, so onCancel stays null there and this is a no-op.
+    // Always non-null in practice now (both call sites pass a real
+    // onCancel — first-launch naming has no prior screen, so its own
+    // onCancel is a no-op rather than omitted, to keep Back from falling
+    // through to the system default and exiting the app). The null case
+    // stays supported rather than making the parameter required, since
+    // "no handler at all" and "handler that does nothing" are genuinely
+    // different things worth being able to express separately.
     if (onCancel != null) BackHandler(onBack = onCancel)
     // Shared by the button's onClick and the keyboard's Done action below —
     // see CallCoreBridge.sanitizeName's own doc for why this name (which
@@ -634,8 +616,8 @@ private fun NameEntryScreen(
 }
 
 /**
- * Reached by holding Back (or the on-screen settings gear — see
- * WaitingScreen's own doc). Down to one action now: "Add contact" and
+ * Reached via the on-screen settings gear (see WaitingScreen's own doc).
+ * Down to one action now: "Add contact" and
  * per-contact management (Delete, auto-answer) both moved onto
  * WaitingScreen's own contact list directly, so there's no "Contacts"
  * destination left here to route to. There's no whole-device "I think this

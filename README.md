@@ -98,8 +98,7 @@ fresh, unpaired profile, the same as reinstalling the Android app.
   is required before you can tap Call.
 - **Adding another contact**: tap the "+" button below the contact list.
 - **Renaming this device**: tap the small gear icon on the waiting screen
-  to reach Settings (on the Portal app, holding the remote's Back button
-  does the same thing).
+  to reach Settings.
 - **Removing a contact**: tap the bin icon next to their name. This is
   permanent — to reconnect with them later, pair again with a fresh
   phrase.

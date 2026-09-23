@@ -262,8 +262,18 @@ internal fun HomeScreen(
     // already connected (ends it) — see CameraAgentService.hangUp's doc.
     // While the connected call's own control row is up, Back dismisses
     // *that* first instead of hanging up in the same stroke.
-    BackHandler(enabled = activeContact != null) {
-        if (showCallControls) showCallControls = false else service?.hangUp()
+    //
+    // Always enabled, not just while a call's active: this is a resident
+    // device, not an app you navigate away from — with nothing else to
+    // intercept it, an idle Back press would otherwise fall through to the
+    // system default and exit straight to the launcher. Idle (no
+    // activeContact) is a no-op, absorbing the press instead.
+    BackHandler(enabled = true) {
+        when {
+            activeContact == null -> {}
+            showCallControls -> showCallControls = false
+            else -> service?.hangUp()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -714,11 +724,9 @@ private fun WaitingScreen(
         // below has its own BoxScope receiver, which shadows this one's
         // implicit `maxHeight`.
         val listMaxHeight = maxHeight
-        // Visible, discoverable equivalent of hold-Back (see MainActivity's
-        // onKeyLongPress doc) — mirrors the web client's own #settingsBtn
-        // gear. Hold-Back still works too; this just gives it an on-screen
-        // affordance. A real ImageVector, not a Unicode glyph — renders
-        // consistently on Android's system font, unlike "⚙".
+        // Mirrors the web client's own #settingsBtn gear. A real
+        // ImageVector, not a Unicode glyph — renders consistently on
+        // Android's system font, unlike "⚙".
         val settingsFocusRequester = remember { FocusRequester() }
         val settingsInteractionSource = remember { MutableInteractionSource() }
         val settingsFocused by settingsInteractionSource.collectIsFocusedAsState()
