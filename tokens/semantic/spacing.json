@@ -1,0 +1,44 @@
+{
+  "spacing": {
+    "$type": "dimension",
+    "screenPadding": { "$value": "{dimension.48}" },
+    "panelContentGap": { "$value": "{dimension.16}" },
+    "contactListGap": { "$value": "{dimension.18}" },
+    "statusRowGap": { "$value": "{dimension.24}" },
+    "statusIconGap": { "$value": "{dimension.4}" },
+    "contactRowGap": { "$value": "{dimension.24}" },
+    "manageRowGap": { "$value": "{dimension.8}" },
+    "callOverlayOffset": { "$value": "{dimension.64}" },
+    "callOverlayGap": { "$value": "{dimension.8}" },
+    "rowLabelGap": { "$value": "{dimension.12}" },
+    "statusRegionBottomOffset": { "$value": "{dimension.24}" },
+    "statusRegionLeftOffset": { "$value": "{dimension.24}" },
+    "contactListVerticalGap": { "$value": "{dimension.16}" }
+  },
+  "size": {
+    "$type": "dimension",
+    "localPreview": {
+      "width": { "$value": "{dimension.180}" },
+      "height": { "$value": "{dimension.120}" }
+    },
+    "settingsFab": { "$value": "{dimension.44}" },
+    "maxContentWidth": { "$value": "{dimension.640}" }
+  },
+  "border": {
+    "$type": "dimension",
+    "width": {
+      "default": { "$value": "{dimension.1}" }
+    }
+  },
+  "radius": {
+    "$type": "dimension",
+    "control": { "$value": "{dimension.8}" },
+    "input": { "$value": "{dimension.8}" }
+  },
+  "outline": {
+    "$type": "dimension",
+    "offset": {
+      "focusRing": { "$value": "{dimension.2}" }
+    }
+  }
+}

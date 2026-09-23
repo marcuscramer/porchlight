@@ -1,0 +1,32 @@
+{
+  "font": {
+    "family": {
+      "$type": "fontFamily",
+      "inter": { "$value": "Inter" }
+    },
+    "weight": {
+      "$type": "fontWeight",
+      "regular": { "$value": 400 },
+      "medium": { "$value": 500 },
+      "semibold": { "$value": 600 },
+      "bold": { "$value": 700 }
+    }
+  },
+  "fontSize": {
+    "$type": "fontSize",
+    "10": { "$value": "10px" },
+    "14": { "$value": "14px" },
+    "15": { "$value": "15px" },
+    "16": { "$value": "16px" },
+    "17": { "$value": "17px" },
+    "20": { "$value": "20px" },
+    "22": { "$value": "22px" },
+    "24": { "$value": "24px" },
+    "28": { "$value": "28px" },
+    "36": { "$value": "36px" }
+  },
+  "letterSpacing": {
+    "$type": "letterSpacing",
+    "tight": { "$value": "-0.2px" }
+  }
+}

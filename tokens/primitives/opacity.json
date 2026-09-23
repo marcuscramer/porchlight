@@ -1,0 +1,17 @@
+{
+  "opacity": {
+    "$type": "number",
+    "_comment": "Keys are the value*100 percentage as an integer (0.07 -> \"7\") except \"018\": \"1.8\" would be the literal convention, but Style Dictionary's Android name/camel transform strips the '.' before joining path segments, colliding \"opacity.1.8\" and \"opacity.18\" into the same generated Kotlin property name (opacity18) — confirmed via a real build, not assumed. The leading zero keeps this one visually/numerically distinct with no such collision.",
+    "018": { "$value": 0.018 },
+    "7": { "$value": 0.07 },
+    "8": { "$value": 0.08 },
+    "14": { "$value": 0.14 },
+    "16": { "$value": 0.16 },
+    "18": { "$value": 0.18 },
+    "20": { "$value": 0.2 },
+    "30": { "$value": 0.3 },
+    "32": { "$value": 0.32 },
+    "50": { "$value": 0.5 },
+    "95": { "$value": 0.95 }
+  }
+}

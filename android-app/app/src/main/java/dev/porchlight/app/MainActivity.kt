@@ -1,0 +1,672 @@
+package dev.porchlight.app
+
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Build
+import android.os.Bundle
+import android.os.IBinder
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text as M3Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
+import androidx.tv.material3.Border
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.ClickableSurfaceScale
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.ProvideTextStyle
+import androidx.tv.material3.Text
+import androidx.tv.material3.Surface as TvSurface
+import dev.porchlight.app.ui.theme.Dimens
+import dev.porchlight.app.ui.theme.GeneratedColor
+import dev.porchlight.app.ui.theme.GeneratedOpacity
+import dev.porchlight.app.ui.theme.GeneratedType
+import dev.porchlight.app.ui.theme.PorchlightTheme
+import dev.porchlight.app.ui.theme.porchlightScreenBackground
+import com.vitorpamplona.quartz.nip01Core.core.toHexKey
+import com.vitorpamplona.quartz.nip01Core.crypto.KeyPair
+import java.util.UUID
+
+/**
+ * Closes a real, unresolved upstream Compose bug
+ * (issuetracker.google.com/issues/374031296): a *hardware* Enter/DPAD_CENTER
+ * key press (not a soft-keyboard IME action tap) submitting a text field is
+ * a single physical press, but Android dispatches its KeyDown and KeyUp as
+ * two *separate* events. Consuming the KeyDown only stops *that* event from
+ * propagating — the KeyUp is dispatched independently, a moment later, to
+ * whatever view is focused by then. Since submitting navigates to a new
+ * screen in the same stroke, that's the new screen's own first real
+ * focusable action button (Call, Accept) — and Android's own default
+ * View-level key handling performs a real click on KEYCODE_ENTER/
+ * DPAD_CENTER's key-up if nothing else handles it. Concretely: renaming
+ * this device this way could place a real, unwanted call.
+ *
+ * `arm()` marks "the next Enter/DPAD_CENTER key-up is a known stray from
+ * an already-handled KeyDown, not a real user action" — called immediately
+ * after `submit()` succeeds. `MainActivity.dispatchKeyEvent` (the one place
+ * that sees every key event before *any* View, Compose's own focused node
+ * included) checks this and swallows exactly that one key-up, system-wide,
+ * regardless of which screen or button ends up focused by the time it
+ * arrives. One-shot by design, with a generous safety timeout in case a
+ * KeyUp is ever lost outright (a stuck flag would otherwise silently eat a
+ * future, entirely unrelated Enter press).
+ */
+internal object HardwareEnterKeyUpGuard {
+    private var armedAtMs: Long = 0L
+    private const val MAX_AGE_MS = 2000L
+
+    fun arm() { armedAtMs = SystemClock.uptimeMillis() }
+
+    /** True at most once per [arm] call — disarms itself either way. */
+    fun consumeIfArmed(): Boolean {
+        val was = armedAtMs != 0L && SystemClock.uptimeMillis() - armedAtMs < MAX_AGE_MS
+        armedAtMs = 0L
+        return was
+    }
+}
+
+/**
+ * Minimal multi-contact calling shell: local self-view (small, movable
+ * corner), remote video (full-screen once a peer connects), and a setup
+ * flow entered once on first run (name, then "Add contact" — see
+ * PassphrasePairingScreens.kt) that stays reachable afterward too, via a
+ * hold-Back settings screen, since adding more contacts and recovering one
+ * after a suspected compromise (Delete, then Add contact again) are both
+ * things this device needs to support long after first setup, not just
+ * once.
+ */
+class MainActivity : ComponentActivity() {
+
+    /** See [HardwareEnterKeyUpGuard]'s own doc. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val isEnterUp = event.action == KeyEvent.ACTION_UP &&
+            (event.keyCode == KeyEvent.KEYCODE_ENTER || event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER || event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER)
+        if (isEnterUp && HardwareEnterKeyUpGuard.consumeIfArmed()) return true
+        return super.dispatchKeyEvent(event)
+    }
+
+    private var service by mutableStateOf<CameraAgentService?>(null)
+    // No visible "Settings" icon — but this device's name and contacts
+    // still need to be changeable. A long-press on Back is the same "hidden
+    // but findable when you need it" pattern as Home leading to Immortal:
+    // not something a parent would stumble into by a normal short press,
+    // but there when you need it.
+    private var showAdminChoice by mutableStateOf(false)
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            service = (binder as? CameraAgentService.LocalBinder)?.service
+        }
+        override fun onServiceDisconnected(name: ComponentName?) { service = null }
+    }
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { /* user can retry Connect if denied */ }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        requestPermissions()
+        setContent {
+            PorchlightTheme {
+                Surface(modifier = Modifier.fillMaxSize().porchlightScreenBackground(), color = Color.Transparent) {
+                    AppRoot(
+                        service = service,
+                        showAdminChoice = showAdminChoice,
+                        onAdminChoiceHandled = { showAdminChoice = false },
+                        onReopenAdminChoice = { showAdminChoice = true },
+                        onConnect = { cfg -> Config.save(this, cfg); CameraAgentService.start(this) },
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        bindService(Intent(this, CameraAgentService::class.java), connection, Context.BIND_AUTO_CREATE)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try { unbindService(connection) } catch (_: Exception) {}
+    }
+
+    /**
+     * Fires specifically for a deliberate user navigation away (Home, or
+     * switching to another app) — unlike onPause/onStop, it does NOT fire
+     * for the screensaver taking over or other transient interruptions.
+     * That distinction matters: tying hangup to onStop instead would undo
+     * the whole no-screensaver-during-calls fix by treating a dream taking
+     * over the same as the user actually leaving. Hang-up-only, not a full
+     * stop — see hangUp()'s doc — so this can never strand your parents'
+     * device unreachable if Home gets pressed by accident.
+     */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        service?.hangUp()
+    }
+
+    /**
+     * A genuine long-press-and-hold, distinct from a normal Back tap (which
+     * stays a no-op on the waiting screen, or hangs up during a call — see
+     * HomeScreen's BackHandler). Hangs up first if a call happens to be
+     * active, since editing settings mid-call makes no sense; returning
+     * true here suppresses the ordinary short-press Back handling for the
+     * same key event. Opens Device settings (see AdminChoiceScreen) rather
+     * than jumping straight into any one specific flow, since there are
+     * several different things you might be here for.
+     */
+    override fun onKeyLongPress(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            service?.hangUp()
+            showAdminChoice = true
+            return true
+        }
+        return super.onKeyLongPress(keyCode, event)
+    }
+
+    private fun requestPermissions() {
+        val perms = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        permissionLauncher.launch(perms.toTypedArray())
+    }
+}
+
+/**
+ * What a [TvButton] means, not what color it is — [Neutral] for every
+ * ordinary action (Continue, Confirm, Rename, Add contact, Try again, Call
+ * again, ...; these have no shared meaning beyond "the button on this
+ * screen"), [Success] for the one genuinely positive/"go" action (Call,
+ * Accept — already `colorStatusOk` green in this app before this), [Danger]
+ * for a genuinely destructive or rejecting one (Delete, Decline — already
+ * `colorActionDangerBackground` red before this). All three render as a
+ * translucent tint over whatever's behind the button (see [TvButton]'s own
+ * doc), not a solid fill — color now marks *meaning*, not just "this is a
+ * button," so a screen with one Neutral action and nothing else doesn't
+ * read as any louder than it needs to.
+ */
+internal enum class TvButtonTint { Neutral, Success, Danger }
+
+/**
+ * A Button whose color is a translucent tint of its [tint]'s meaning,
+ * brightening (not glowing outward) on focus. Backed directly by
+ * androidx.tv.material3's `Surface` rather than `Button`: `Button` bakes in
+ * its own internal `Modifier.defaultMinSize(58.dp, 40.dp)` on the Row
+ * wrapping its content, applied to a fresh `Modifier` local to `Button`'s
+ * own implementation, not reachable through this function's own `modifier`
+ * parameter (confirmed via javap on ButtonKt.class) — so every `Button` was
+ * floored at 40dp tall regardless of its own padding tokens. `Surface` has
+ * no such internal minimum, so building the content Row ourselves here lets
+ * height come from content + padding alone, matching web's proportions —
+ * still using `Surface`'s native per-state border/color/scale rather than
+ * hand-tracking `onFocusChanged`, since focused/pressed/disabled are
+ * first-class states there.
+ *
+ * Every state (unfocused fill, unfocused border, focused fill, focused
+ * border) is an alpha-blended version of one single hue per [tint] — focus
+ * here means "more of the same color," solid and contained within the
+ * button's own edge, not a glow extending past it — a hard, high-contrast
+ * border reads far more reliably on a TV panel than a soft outer shadow.
+ * [Neutral]'s tint is a plain white overlay rather than a named hue, since
+ * "no strong meaning" has no color to draw from.
+ *
+ * Shape/padding come from the shared design tokens (`Dimens`) rather than
+ * either library's own unpinned defaults, so a Compose library bump can't
+ * silently drift this from the web client's matching `.tv-button` rule.
+ */
+// Not top-level vals: ClickableSurfaceDefaults.border/colors are @Composable
+// @ReadOnlyComposable (they read the current theme), so they can only be
+// called from within a composable — TvButtonShape is the one plain value
+// here, since RoundedCornerShape itself isn't theme-dependent.
+private val TvButtonShape = RoundedCornerShape(Dimens.buttonRadius)
+
+@Composable
+internal fun TvButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: TvButtonTint = TvButtonTint.Neutral,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val hue = when (tint) {
+        TvButtonTint.Neutral -> Color.White
+        TvButtonTint.Success -> GeneratedColor.colorStatusOk
+        TvButtonTint.Danger -> GeneratedColor.colorActionDangerBackground
+    }
+    val containerAlpha = if (tint == TvButtonTint.Neutral) GeneratedOpacity.buttonTintNeutralContainer else GeneratedOpacity.buttonTintAccentContainer
+    val focusedContainerAlpha = if (tint == TvButtonTint.Neutral) GeneratedOpacity.buttonTintNeutralContainerFocused else GeneratedOpacity.buttonTintAccentContainerFocused
+    val borderAlpha = if (tint == TvButtonTint.Neutral) GeneratedOpacity.buttonTintNeutralBorder else GeneratedOpacity.buttonTintAccentBorder
+    val focusedBorderAlpha = if (tint == TvButtonTint.Neutral) GeneratedOpacity.buttonTintNeutralBorderFocused else GeneratedOpacity.buttonTintAccentBorderFocused
+    val contentColor = if (tint == TvButtonTint.Neutral) GeneratedColor.colorTextPrimary else hue
+
+    TvSurface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        // None, same as Button's own scale = ButtonScale.None used to be —
+        // tv.material3's own default grows a focused surface ~10% larger,
+        // and with several buttons sitting close together on a contact row,
+        // that growth clipped against a neighboring row/the scrollable
+        // list's own bounds. Also contradicts this function's own
+        // documented design above — focus here is meant to read entirely
+        // through color, never size.
+        scale = ClickableSurfaceScale.None,
+        shape = ClickableSurfaceDefaults.shape(shape = TvButtonShape),
+        border = ClickableSurfaceDefaults.border(
+            border = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = borderAlpha)), shape = TvButtonShape),
+            focusedBorder = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = focusedBorderAlpha)), shape = TvButtonShape),
+        ),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = hue.copy(alpha = containerAlpha),
+            contentColor = contentColor,
+            focusedContainerColor = hue.copy(alpha = focusedContainerAlpha),
+            focusedContentColor = contentColor,
+        ),
+    ) {
+        // Mirrors what Button's own internal content Row does (Arrangement.
+        // Center, CenterVertically, contentPadding, ProvideTextStyle(
+        // typography.labelLarge)) — without the last one, any text content
+        // would fall back to whatever LocalTextStyle happens to be ambient
+        // at each call site instead of this button's own fixed label style.
+        ProvideTextStyle(MaterialTheme.typography.labelLarge) {
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(
+                    horizontal = Dimens.buttonPaddingBaseHorizontal,
+                    vertical = Dimens.buttonPaddingBaseVertical,
+                ),
+                content = content,
+            )
+        }
+    }
+}
+
+internal fun PreviewCorner.toAlignment(): Alignment = when (this) {
+    PreviewCorner.TOP_START -> Alignment.TopStart
+    PreviewCorner.TOP_END -> Alignment.TopEnd
+    PreviewCorner.BOTTOM_START -> Alignment.BottomStart
+    PreviewCorner.BOTTOM_END -> Alignment.BottomEnd
+    // Never actually resolved — HomeScreen's call view skips composing the
+    // preview Box entirely for INVISIBLE (see its own doc) rather than
+    // aligning it somewhere and hiding it. A harmless fallback, only here
+    // so this `when` stays exhaustive.
+    PreviewCorner.INVISIBLE -> Alignment.BottomStart
+}
+
+/**
+ * Every screen reachable from Device settings (hold Back), plus the
+ * "Add contact" flow reached directly from WaitingScreen's own contact list
+ * now (not from Settings at all — see EnteringPhrase's own doc). Kept as one
+ * sealed type rather than a pile of booleans. Deliberately local
+ * (`remember`) state inside AppRoot, not lifted to MainActivity — unlike
+ * `showAdminChoice`, nothing here needs to be set from outside Compose
+ * (there's no physical-key trigger for any of these), so there's no reason
+ * for it to survive process death either.
+ */
+private sealed interface AdminScreen {
+    // Only ever reached via `showAdminChoice` (hold Back), so Back/Save
+    // always fall through to reopening Device settings — no second entry
+    // point to distinguish, unlike before this screen's own Contacts button
+    // was removed.
+    data object Rename : AdminScreen
+    // "Add contact" only — there's no "Reconnect": a stale contact is just
+    // Delete + Add contact again, so this carries no pairing id at all;
+    // startPairing always mints a brand-new one. Reached directly from a
+    // trailing row in WaitingScreen's own contact list (both once this
+    // device already has contacts, and pre-onboarding with zero — the
+    // waiting screen renders either way, empty list and all). Per-contact
+    // management (Delete, auto-answer) lives right on each ContactRow now,
+    // not behind a separate Contacts screen. Exactly one entry point means
+    // Back always falls straight back to the waiting screen.
+    data object EnteringPhrase : AdminScreen
+    // A phrase was submitted, minting [pairingId] — waiting on the SPAKE2
+    // exchange to resolve (candidate found, collision, or timeout). See
+    // PairingProgressScreen's doc. Always a brand-new, never-yet-confirmed
+    // contact now, so cancelling (or abandoning via a further retry) always
+    // means fully forgetting it (CameraAgentService.removePairing) rather
+    // than leaving a permanent "Unnamed contact" stub behind.
+    data class PairingInProgress(val pairingId: String) : AdminScreen
+}
+
+@Composable
+private fun AppRoot(
+    service: CameraAgentService?,
+    showAdminChoice: Boolean,
+    onAdminChoiceHandled: () -> Unit,
+    onReopenAdminChoice: () -> Unit,
+    onConnect: (Config) -> Unit,
+) {
+    val context = LocalContext.current
+    var config by remember { mutableStateOf(Config.load(context)) }
+    val state by (service?.state?.collectAsState() ?: remember { mutableStateOf(CameraAgentService.AgentState()) })
+    var adminScreen by remember { mutableStateOf<AdminScreen?>(null) }
+
+    // Keep the screen on while connected so it can't sleep mid-call.
+    LaunchedEffect(state.running) {
+        val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        (context as? android.app.Activity)?.window?.let {
+            if (state.running) it.addFlags(flag) else it.clearFlags(flag)
+        }
+    }
+
+    // `config` only reflects whatever was last explicitly (re)loaded into
+    // it, not the live CameraAgentService state — a peer confirmed via
+    // WaitingScreen's own row tap never touches this `config` variable, so
+    // it stays stale until something reloads it. Reload here too, so
+    // opening Settings can't show a stale name/pairing list.
+    LaunchedEffect(showAdminChoice) {
+        if (showAdminChoice) config = Config.load(context)
+    }
+
+    // Constructs a fresh Pairing directly when the service isn't running
+    // yet — the pre-onboarding case (this device just finished "Initial
+    // setup" but has zero contacts yet, so CameraAgentService hasn't
+    // started: it only starts once Config.isValid). See
+    // CameraAgentService.startFirstPairing's doc for why persisting it and
+    // stashing the passphrase has to happen here.
+    fun startPairing(passphrase: String): Pairing {
+        val svc = service
+        if (svc != null) return svc.startPairing(passphrase)
+        val fresh = Pairing(id = UUID.randomUUID().toString(), ownPrivateKeyHex = KeyPair().privKey!!.toHexKey())
+        CameraAgentService.startFirstPairing(context, fresh, passphrase)
+        return fresh
+    }
+
+    val screen = adminScreen
+    when {
+        showAdminChoice -> {
+            AdminChoiceScreen(
+                onRenameDevice = { adminScreen = AdminScreen.Rename; onAdminChoiceHandled() },
+                onCancel = onAdminChoiceHandled,
+            )
+        }
+        screen is AdminScreen.Rename -> {
+            NameEntryScreen(
+                initial = config.deviceName,
+                isRename = true,
+                // Only ever reached via `showAdminChoice` now (see
+                // AdminScreen.Rename's own doc) — Back/Save always reopen
+                // Device settings, no second context to distinguish.
+                onCancel = {
+                    adminScreen = null
+                    onReopenAdminChoice()
+                },
+                onDone = { name ->
+                    // Reload fresh rather than mutate this composable's own
+                    // (possibly stale) `config` snapshot — CameraAgentService
+                    // can have pinned a peer directly to disk since `config`
+                    // was last refreshed here, so saving a stale copy would
+                    // silently discard that pin.
+                    val c = Config.load(context).copy(deviceName = name)
+                    Config.save(context, c)
+                    config = c
+                    // Restart so the new name actually gets rebroadcast over
+                    // presence now, rather than only on next app launch —
+                    // see CameraAgentService.restartAgent's doc.
+                    service?.restartAgent()
+                    adminScreen = null
+                    onReopenAdminChoice()
+                },
+            )
+        }
+        screen is AdminScreen.EnteringPhrase -> {
+            EnterPhraseScreen(
+                onSubmit = { phrase ->
+                    val pairing = startPairing(phrase)
+                    config = Config.load(context)
+                    adminScreen = AdminScreen.PairingInProgress(pairing.id)
+                },
+                // Falls straight back to the waiting screen (which is where
+                // this was always reached from — see AdminScreen.
+                // EnteringPhrase's own doc), not into Device settings.
+                onCancel = { adminScreen = null },
+            )
+        }
+        screen is AdminScreen.PairingInProgress -> {
+            PairingProgressScreen(
+                pairingId = screen.pairingId,
+                contacts = state.contacts,
+                onConfirm = { id, publicKeyHex -> service?.confirmPeer(id, publicKeyHex); adminScreen = null },
+                // The attempt so far (including its unconfirmed stub) is
+                // forgotten entirely, same as Cancel below — startPairing
+                // mints an unrelated fresh id, so there's nothing to reuse
+                // this one for.
+                onRetry = {
+                    service?.removePairing(screen.pairingId)
+                    adminScreen = AdminScreen.EnteringPhrase
+                },
+                onCancel = {
+                    service?.removePairing(screen.pairingId)
+                    adminScreen = null
+                },
+            )
+        }
+        !config.hasName -> {
+            NameEntryScreen(
+                initial = config.deviceName,
+                onDone = { name ->
+                    val c = config.copy(deviceName = name)
+                    Config.save(context, c)
+                    config = c
+                },
+            )
+        }
+        else -> {
+            // Nothing to press — walk up and it's already trying to connect.
+            //
+            // Only meaningful the very first time this branch is reached
+            // with no service bound yet (a cold launch, or just after this
+            // device's first-ever pairing is submitted). Gated on
+            // `config.isValid` too: with zero contacts there's nothing to
+            // connect *to* yet — CameraAgentService refuses to keep running
+            // with zero pairings, so calling onConnect here before that
+            // would start and immediately self-stop it for nothing. Once
+            // `service` is already bound, re-saving this composable's
+            // separately-remembered `config` snapshot would silently
+            // overwrite whatever CameraAgentService wrote directly in the
+            // meantime — confirmed on-device losing a just-confirmed peer
+            // pin this way.
+            if (service == null && config.isValid) LaunchedEffect(Unit) { onConnect(config) }
+            HomeScreen(
+                service = service,
+                state = state,
+                config = config,
+                onCyclePreviewPosition = {
+                    // Same reasoning as AdminScreen.Rename's onDone above —
+                    // reload fresh so this doesn't stomp a pairing change
+                    // CameraAgentService made directly since `config` was
+                    // last refreshed in this composable.
+                    val c = Config.load(context).copy(previewCorner = config.previewCorner.next())
+                    Config.save(context, c)
+                    config = c
+                },
+                // Same destination hold-Back opens (see onKeyLongPress's
+                // doc) — this is just the on-screen, discoverable way in,
+                // mirroring the web client's #settingsBtn gear.
+                onOpenSettings = onReopenAdminChoice,
+                // The one and only entry point into "Add contact" now — a
+                // trailing row in the contact list itself, not a separate
+                // Settings destination (see AdminScreen.EnteringPhrase's doc).
+                onAddContact = { adminScreen = AdminScreen.EnteringPhrase },
+                // Update this composable's own `config` snapshot directly
+                // from the known change, rather than reloading right after
+                // — removePairing/setAutoAnswer both run on
+                // CameraAgentService's callExecutor asynchronously, so a
+                // same-frame reload here reliably raced ahead of the
+                // background write and read back the pre-change value (for
+                // setAutoAnswer specifically, the switch visibly showed the
+                // *previous* state after every toggle). No race possible
+                // this way: the outcome is already known.
+                onDeleteContact = { id ->
+                    service?.removePairing(id)
+                    config = config.copy(pairings = config.pairings.filterNot { it.id == id })
+                },
+                onToggleAutoAnswer = { id, enabled ->
+                    service?.setAutoAnswer(id, enabled)
+                    config = config.copy(pairings = config.pairings.map { if (it.id == id) it.copy(autoAnswer = enabled) else it })
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Shown once, before this device has any contact — the name rides along on
+ * every pairing attempt (see `call-core`'s `own_name`, passed to
+ * [CallCoreBridge.startAttempt]) so the other side has
+ * something human-readable to show on its own "Pair with [name]?" screen. A
+ * plain on-screen-keyboard text field is all this needs: a short name is a
+ * handful of keystrokes, not something worth building a QR flow to avoid.
+ */
+@Composable
+private fun NameEntryScreen(
+    initial: String,
+    isRename: Boolean = false,
+    onCancel: (() -> Unit)? = null,
+    onDone: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initial) }
+    // Only the rename entry point (reached from Device settings) has
+    // anywhere sensible to cancel back to — first-launch naming has no
+    // prior screen, so onCancel stays null there and this is a no-op.
+    if (onCancel != null) BackHandler(onBack = onCancel)
+    // Shared by the button's onClick and the keyboard's Done action below —
+    // see CallCoreBridge.sanitizeName's own doc for why this name (which
+    // becomes a *peer's* self-reported name from their side the moment it
+    // heartbeats out) needs stripping here too, not just on receipt.
+    val submit = { onDone(CallCoreBridge.sanitizeName(name.trim()).ifBlank { "Device" }) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(Dimens.spacingScreenPadding),
+        verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
+    ) {
+        Text(
+            if (isRename) "Rename this device" else "Name this device",
+            color = GeneratedColor.colorTextPrimary,
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        Text(
+            "Shown to the other device during pairing so you can tell devices " +
+                "apart — e.g. \"Mom's TV\" or \"Living Room.\"",
+            color = GeneratedColor.colorTextDim,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        OutlinedTextField(
+            value = name,
+            // take(maxNameLength) here too, not just at submit — immediate
+            // feedback instead of letting someone type/paste well past the
+            // limit. Reads CallCoreBridge.protocolConstants, not a
+            // hand-copied literal, same as NostrSignalingClient.kt's own
+            // identical cap.
+            onValueChange = { name = it.take(CallCoreBridge.protocolConstants.maxNameLength) },
+            label = { M3Text("Name") },
+            modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
+                // See HardwareEnterKeyUpGuard's own doc for the full
+                // mechanism and why arm() is needed here too, not just
+                // submit(): consuming this KeyDown does *not* stop this
+                // same physical press's KeyUp from being separately,
+                // independently dispatched a moment later, straight to
+                // whatever the *next* screen's first focusable turns out
+                // to be.
+                if (event.type == KeyEventType.KeyDown && (event.key == Key.Enter || event.key == Key.NumPadEnter)) {
+                    submit()
+                    HardwareEnterKeyUpGuard.arm()
+                    true
+                } else {
+                    false
+                }
+            },
+            // singleLine forces the IME to offer a Done action instead of a
+            // newline key for Enter/Return — without it, Enter just inserts
+            // "\n" into a name, with no way to submit from the keyboard.
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { submit() }),
+        )
+        TvButton(onClick = submit) { Text(if (isRename) "Save" else "Continue") }
+    }
+}
+
+/**
+ * Reached by holding Back (or the on-screen settings gear — see
+ * WaitingScreen's own doc). Down to one action now: "Add contact" and
+ * per-contact management (Delete, auto-answer) both moved onto
+ * WaitingScreen's own contact list directly, so there's no "Contacts"
+ * destination left here to route to. There's no whole-device "I think this
+ * was compromised" action either — every `Pairing` is its own independent
+ * identity, so recovering from a suspected compromise is just Delete + Add
+ * contact for the one contact that's actually affected.
+ */
+@Composable
+private fun AdminChoiceScreen(
+    onRenameDevice: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    BackHandler(onBack = onCancel)
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .porchlightScreenBackground()
+            .padding(Dimens.spacingScreenPadding)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
+    ) {
+        // Dimmed like a plain navigational label (matches WaitingScreen's
+        // own title treatment elsewhere), not the app's brightest text —
+        // this is "which screen am I on," not content the user actually
+        // came here to read.
+        Text("Settings", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
+        TvButton(
+            onClick = onRenameDevice,
+            modifier = Modifier.focusRequester(focusRequester),
+        ) { Text("Rename this device") }
+    }
+}

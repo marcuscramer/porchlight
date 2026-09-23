@@ -1,0 +1,698 @@
+/* Design values (color/typography/spacing) come from tokens.css, generated
+   by Style Dictionary from ../tokens/ — the same shared source Android's
+   generated GeneratedColor.kt/GeneratedType.kt/Dimens.kt draw from. See
+   tokens/config/web.config.mjs. */
+
+* { box-sizing: border-box; }
+
+/* Every `.screen` sets its own unconditional `display` below — `!important`
+   here forces [hidden] to always win regardless of rule order, so a screen
+   this app has moved away from never lingers visible underneath the
+   current one. */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--color-background-app);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-inter);
+}
+
+/* clamp() keeps screen padding proportional below ~640-800px instead of
+   eating a large fraction of a narrow phone width — 20px floor keeps
+   content readably inset, 48px ceiling preserves the tablet/desktop value.
+   Overrides tokens.css's static value (web-only; Android stays fixed 48dp
+   since Portal's viewport never varies). --list-side-margin gets the
+   identical treatment — the design artifact's fixed 100px eats over half a
+   ~390px phone's width otherwise (found live: names truncating to "Gra…"). */
+:root {
+  --spacing-screen-padding: clamp(20px, 5vw + 8px, 48px);
+  --list-side-margin: clamp(20px, 10vw, 100px);
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* One dim glow near the top-left corner, fading into the same flat navy
+   every screen uses — see MainActivity.kt/Theme.kt's own
+   porchlightScreenBackground() for the Android side of this identical
+   rule. vh-based ellipse radii (not fixed px) so the glow's proportions
+   hold from a phone viewport up through a TV-shaped desktop one. */
+.screen {
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(ellipse 50vh 90vh at 22% -8%, var(--color-background-glow), transparent 60%),
+    var(--color-background-waiting);
+}
+
+.screen.centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Shared card shape for every text/choice/form screen — mirrors how those
+   all use the same Column(padding(48dp)) shape on the Android side. One
+   width across every screen: 640px comfortably fits the widest content
+   (a contact row: name + a button) without narrower screens looking
+   cramped. */
+.panel {
+  max-width: var(--size-max-content-width);
+  width: 100%;
+  padding: var(--spacing-screen-padding);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-panel-content-gap);
+  text-align: center;
+}
+
+.panel h1 {
+  margin: 0;
+  font-family: var(--typography-display-font-family);
+  font-weight: var(--typography-display-font-weight);
+  font-size: var(--typography-display-font-size);
+  letter-spacing: var(--typography-display-letter-spacing);
+  color: var(--color-text-primary);
+}
+
+/* Upper-left page title — Settings/Contacts/Rename, the three screens that
+   are page-like "go manage something" destinations rather than a single
+   centered prompt/choice. Same corner #settingsBtn anchors to on the
+   waiting screen, so titled screens and the waiting screen read as the
+   same visual language. */
+.screen-title {
+  position: absolute;
+  top: var(--spacing-screen-padding);
+  left: var(--spacing-screen-padding);
+  font-family: var(--typography-display-font-family);
+  font-weight: var(--typography-display-font-weight);
+  font-size: var(--typography-display-font-size);
+  letter-spacing: var(--typography-display-letter-spacing);
+  color: var(--color-text-primary);
+}
+
+.muted {
+  color: var(--color-text-dim);
+  font-size: var(--typography-body-font-size);
+  margin: 0;
+}
+
+.panel input {
+  width: 100%;
+  padding: var(--dimension-10);
+  background: var(--color-background-surface);
+  border: var(--input-border-width) solid var(--color-border-default);
+  border-radius: var(--input-radius);
+  color: var(--color-text-primary);
+  font-size: var(--typography-body-font-size);
+  font-family: inherit;
+}
+
+/* --- Buttons --------------------------------------------------------- */
+
+/* Every button is translucent (never a solid fill), meaning carried by hue
+   — neutral=white for everything except the one or two actions per screen
+   that mean Call/Accept (green) or Delete/Decline (danger red) — with a
+   fixed-width border that only intensifies (not glows outward) on
+   focus/hover. Mirrors TvButton's identical tint system (MainActivity.kt)
+   hue-for-hue and alpha-stop-for-alpha-stop, both reading the same
+   buttonTint.* tokens (tokens/component/button.json). */
+.tv-button {
+  --btn-hue: var(--color-white);
+  --btn-content: var(--color-text-primary);
+  --btn-container-op: var(--button-tint-neutral-container);
+  --btn-container-op-focused: var(--button-tint-neutral-container-focused);
+  --btn-border-op: var(--button-tint-neutral-border);
+  --btn-border-op-focused: var(--button-tint-neutral-border-focused);
+  padding: var(--button-padding-base-vertical) var(--button-padding-base-horizontal);
+  background: color-mix(in srgb, var(--btn-hue) calc(var(--btn-container-op) * 100%), transparent);
+  color: var(--btn-content);
+  border: var(--border-width-default) solid color-mix(in srgb, var(--btn-hue) calc(var(--btn-border-op) * 100%), transparent);
+  border-radius: var(--button-radius);
+  font-family: var(--typography-button-default-font-family);
+  font-weight: var(--typography-button-default-font-weight);
+  font-size: var(--typography-button-default-font-size);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.tv-button:hover,
+.tv-button:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--btn-hue) calc(var(--btn-container-op-focused) * 100%), transparent);
+  border-color: color-mix(in srgb, var(--btn-hue) calc(var(--btn-border-op-focused) * 100%), transparent);
+}
+
+/* Call and Add contact carry an icon instead of a label — sized and tinted
+   to match the button's own current content color (fill: currentColor),
+   so focus/hover still recolor it the same way it recolors button text. */
+.tv-button svg {
+  display: block;
+  width: var(--dimension-20);
+  height: var(--dimension-20);
+  fill: currentColor;
+}
+
+.tv-button.call,
+.tv-button.success {
+  --btn-hue: var(--color-status-ok);
+  --btn-content: var(--color-status-ok);
+  --btn-container-op: var(--button-tint-accent-container);
+  --btn-container-op-focused: var(--button-tint-accent-container-focused);
+  --btn-border-op: var(--button-tint-accent-border);
+  --btn-border-op-focused: var(--button-tint-accent-border-focused);
+}
+
+/* Extra breathing room from the name/badge group, on top of .contact-list's
+   own column-gap — scoped to .call since it's only ever this one
+   contact-row button. */
+.tv-button.call {
+  margin-left: var(--spacing-contact-row-gap);
+}
+
+.tv-button.danger {
+  --btn-hue: var(--color-action-danger-background);
+  --btn-content: var(--color-action-danger-background);
+  --btn-container-op: var(--button-tint-accent-container);
+  --btn-container-op-focused: var(--button-tint-accent-container-focused);
+  --btn-border-op: var(--button-tint-accent-border);
+  --btn-border-op-focused: var(--button-tint-accent-border-focused);
+}
+
+.error {
+  color: var(--color-action-danger-background);
+  min-height: 1.2em;
+  font-family: var(--typography-caption-font-family);
+  font-weight: var(--typography-caption-font-weight);
+  font-size: var(--typography-caption-font-size);
+}
+
+/* --- Settings gear (the web equivalent of "hold Back") ---------------- */
+
+.settings-fab {
+  /* Top-right corner, floating free of #screenWaiting (plain
+     position:absolute — .contact-list fades itself out before reaching
+     this corner instead of a shared grid row stopping short of it). */
+  position: absolute;
+  /* This button's own box is --size-settings-fab (44px), bigger than the
+     24px icon centered inside it, so the icon's own ink sits an extra
+     (44-24)/2=10px deeper than the offset alone suggests — confirmed live.
+     Subtracting that centering gap equalizes it with the checklist's own
+     text, the same fix HomeScreens.kt's own settings Box applies. */
+  top: calc(var(--spacing-status-region-left-offset) - (var(--size-settings-fab) - var(--dimension-24)) / 2);
+  right: calc(var(--spacing-status-region-left-offset) - (var(--size-settings-fab) - var(--dimension-24)) / 2);
+  width: var(--size-settings-fab);
+  height: var(--size-settings-fab);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  z-index: 5;
+}
+
+.settings-fab svg {
+  width: var(--dimension-24);
+  height: var(--dimension-24);
+  fill: currentColor;
+}
+
+.settings-fab:hover { color: var(--color-text-primary); }
+
+/* --- Waiting screen (mirrors WaitingScreen + ContactRow) --------------- */
+
+/* A plain positioning context, not a 3-row grid — the contact list fills
+   the *entire* screen, and the settings icon/status strip float on top of
+   it as absolutely-positioned overlays, same as this app's other overlays.
+   The list fades itself out before it ever reaches them (.contact-list's
+   own fadeHeightTop/Bottom, below) instead of a grid row stopping short of
+   them. Mirrors WaitingScreen's identical Box(contentAlignment)
+   restructuring (HomeScreens.kt). */
+#screenWaiting {
+  position: relative;
+}
+
+/* Fills #screenWaiting edge to edge (position:absolute + inset via
+   top/bottom, left:50%/transform centers its own capped width). width uses
+   min() to keep both bounds: list.sideMargin as the outer gutter on narrow
+   viewports, size.maxContentWidth on anything wider. A real grid, not a
+   flex column of independently-flexed rows: each contact contributes its
+   status-dot/name/Call/Delete directly as grid children (see
+   renderWaitingScreen, app.js), so grid-template-columns sizes each column
+   once across every row — genuine table alignment. Mirrors WaitingScreen's
+   own width(IntrinsicSize.Max) trick (HomeScreens.kt); grid does this
+   natively. */
+.contact-list {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100% - 2 * var(--list-side-margin), var(--size-max-content-width));
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  /* `safe` — plain `center` still tries to center the row-track set even
+     once it's taller than this full-screen container, shifting its start
+     *above* y:0 (scrollTop can't go negative, so the top becomes
+     unreachable while scrolled "to the top" reads scrollTop:0). `safe`
+     falls back to start-alignment exactly when centering would do that. */
+  align-content: safe center;
+  column-gap: var(--spacing-contact-row-gap);
+  row-gap: var(--spacing-contact-list-gap);
+  /* Lets .contact-name inside react to this list's own width rather than
+     the page viewport — see the @container rule near .contact-name below. */
+  container-type: inline-size;
+  container-name: contacts;
+  /* More contacts than fit the visible height shouldn't just get clipped
+     off unreachably — scrolls internally. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  /* Permanent, not toggled by scroll position — the two empty spacer rows
+     appended in renderWaitingScreen (app.js), sized to exactly
+     fadeHeightTop/fadeHeightBottom, sit in these zones whenever there's
+     nothing left to scroll past, so the mask dissolves empty space, not
+     content; real content only enters this zone once scrolled, exactly
+     when a fade should show.
+
+     Each zone is split in half, not one plain linear fade end to end — a
+     straight fade across the entire span stays legible almost to the
+     settings icon/checklist's own edge, so row text and that overlay text
+     read as overlapping. The *outer* half (nearest the icon/checklist) is
+     flat and already fully transparent instead; the *inner* half (nearest
+     the visible rows) is where the actual transition happens. */
+  mask-image: linear-gradient(
+    to bottom,
+    transparent, transparent calc(var(--list-fade-height-top) / 2), black var(--list-fade-height-top),
+    black calc(100% - var(--list-fade-height-bottom)), transparent calc(100% - var(--list-fade-height-bottom) / 2)
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent, transparent calc(var(--list-fade-height-top) / 2), black var(--list-fade-height-top),
+    black calc(100% - var(--list-fade-height-bottom)), transparent calc(100% - var(--list-fade-height-bottom) / 2)
+  );
+}
+.contact-list::-webkit-scrollbar { display: none; }
+
+/* The two empty rows that make .contact-list's own permanent mask-image
+   correct without tracking scroll position — see its own doc. grid-column
+   spans every column, same as .contact-list-spacer below. Heights match
+   the mask's own fadeHeightTop/fadeHeightBottom exactly. */
+.contact-list-fade-spacer {
+  grid-column: 1 / -1;
+}
+.contact-list-fade-spacer.top { height: var(--list-fade-height-top); }
+.contact-list-fade-spacer.bottom { height: var(--list-fade-height-bottom); }
+
+/* Status dot + name as one group — column 1 of .contact-list's grid (1fr),
+   so it absorbs each row's leftover width, docking Call/Delete to the same
+   column position on every row regardless of name length. Mirrors
+   ContactRow's own weight(1f, fill = true)'d Row (HomeScreens.kt). Fixed-
+   size with no flex-grow/shrink of its own, so it can never end up
+   stranded away from a short name by leftover flexible space. */
+.contact-name-group {
+  display: flex;
+  align-items: flex-start;
+  /* This flex container is a grid item of .contact-list's outer 1fr
+     column, which has no minmax(0, ...) of its own — without this, the
+     browser sizes that column off this element's content min-content
+     size, which for a nowrap name is the *full* untruncated text width,
+     blowing the row out past the list's bounds instead of ever reaching
+     .contact-name's own min-width:0/overflow:hidden. */
+  min-width: 0;
+}
+
+.contact-name {
+  font-family: var(--typography-contact-name-font-family);
+  font-weight: var(--typography-contact-name-font-weight);
+  font-size: var(--typography-contact-name-font-size);
+  letter-spacing: var(--typography-contact-name-letter-spacing);
+  color: var(--color-text-primary);
+  /* flex-shrink (the default 1) only, deliberately no flex-grow — see
+     .contact-name-group's own doc above. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A plain filled circle, not the status word spelled out in colored text —
+   the color alone is already the whole signal. Fixed size, no shrink (see
+   .contact-name-group's own doc). */
+.contact-status-dot {
+  width: var(--dimension-10);
+  height: var(--dimension-10);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.contact-status-dot.ok { background: var(--color-status-ok); }
+.contact-status-dot.busy { background: var(--color-status-busy); }
+.contact-status-dot.danger { background: var(--color-action-danger-background); }
+
+/* Delete, as a bare bin icon — no background/pill (that weight stays on
+   Call), grey when idle and brighter on hover/focus. An inline SVG (fill:
+   currentColor), not the bin emoji: browsers render that as a fixed-color
+   glyph regardless of this button's own `color`, which broke the
+   grey/bright swap entirely. */
+.delete-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: var(--dimension-6) 0 var(--dimension-6) var(--dimension-6);
+  margin-right: 0;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.delete-icon-btn svg {
+  width: var(--dimension-20);
+  height: var(--dimension-20);
+  fill: currentColor;
+}
+
+.delete-icon-btn:hover,
+.delete-icon-btn:focus-visible {
+  outline: none;
+  color: var(--color-text-primary);
+}
+
+/* Always rendered (even when a contact isn't currently callable) so
+   column 2 keeps the same width on every row — hidden via visibility, not
+   display:none, so it still reserves its column's space; `disabled` takes
+   it out of tab order. Mirrors ContactRow's own enabled/alpha approach
+   (HomeScreens.kt). */
+.tv-button.call:disabled {
+  visibility: hidden;
+}
+
+/* A blank row above "Add contact" — sets it apart as its own action rather
+   than one more entry in the contact list. grid-column spans every column
+   — a plain grid child would otherwise only occupy column 1. */
+.contact-list-spacer {
+  grid-column: 1 / -1;
+  height: var(--dimension-1);
+}
+
+/* grid-column spans every column, same reason as .contact-list-spacer
+   above; align-self centers it within that full-width row rather than
+   stretching or sitting left like a real contact row's name would. */
+.add-contact {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+
+.checklist {
+  display: flex;
+  gap: var(--spacing-status-row-gap);
+}
+
+/* Small and dim — background info, not a thing you're meant to read from
+   across a room, unlike .contact-name/.contact-status-dot. The ✓/✗ glyph
+   is the same dim color as its label, not a separate ok/bad green/red —
+   .contact-status-dot is where ok/busy/danger color-as-meaning belongs. */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-status-icon-gap);
+  font-family: var(--typography-status-row-font-family);
+  font-weight: var(--typography-status-row-font-weight);
+  font-size: var(--typography-status-row-font-size);
+  color: var(--color-text-dim);
+}
+
+/* Bottom-left, small — mirrors WaitingScreen's own
+   Modifier.align(Alignment.BottomStart) offset: background status, pinned
+   in a corner rather than sharing center billing with the contact list.
+   Explicit z-index so it paints over .contact-list regardless of DOM
+   order. */
+.status-region {
+  position: absolute;
+  left: var(--spacing-status-region-left-offset);
+  bottom: var(--spacing-status-region-bottom-offset);
+  z-index: 5;
+  color: var(--color-text-dim);
+}
+
+.warn-line {
+  margin: var(--dimension-4) 0 0;
+  color: var(--color-action-danger-background);
+  font-size: var(--typography-body-font-size);
+}
+
+/* Real "still working" feedback for the two screens that can legitimately
+   sit static for a while (pairing exchange, outgoing call) — previously
+   just text with an ellipsis, which doesn't distinguish "in progress" from
+   "stuck." Mirrors Android's own CircularProgressIndicator addition in the
+   same two spots. */
+.spinner {
+  width: var(--dimension-32);
+  height: var(--dimension-32);
+  border: 3px solid var(--color-background-surface-alt);
+  border-top-color: var(--color-action-primary-background);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto var(--spacing-panel-content-gap);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Dimmed like a plain navigational label — only applied to genuine "where
+   am I" destination titles (Settings), not prompt-style titles this same
+   class is also used for. */
+.screen-title.dim {
+  color: var(--color-text-dim);
+}
+
+/* Container query, not a page-level media query: a row's available width
+   should key off its own box (.contact-list, container-type: inline-size
+   above), not the viewport. Rows are forced nowrap + ellipsis, so shrinking
+   has a real payoff here. 400px is where a ~36px name + badge +
+   Delete/Call button stop fitting comfortably before truncating too
+   aggressively. */
+@container contacts (max-width: 400px) {
+  .contact-name {
+    font-size: clamp(22px, 9cqw, var(--typography-contact-name-font-size));
+  }
+}
+
+/* --- Pairing screen (mirrors NameConfirmScreen) -------------------------- */
+
+.pair-title {
+  font-family: var(--typography-display-font-family);
+  font-weight: var(--typography-display-font-weight);
+  font-size: var(--typography-display-font-size);
+  letter-spacing: var(--typography-display-letter-spacing);
+  color: var(--color-text-primary);
+}
+
+.pair-muted {
+  color: var(--color-text-dim);
+  font-size: var(--typography-body-font-size);
+  margin: var(--dimension-4) 0;
+}
+
+/* --- Calling screen (mirrors CallingScreen) ----------------------------- */
+
+#screenCalling {
+  position: relative;
+}
+
+#callingLocalVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--color-video-background);
+}
+
+/* Shared by all three video screens (Calling/IncomingCall/live Call) — a
+   translucent black backdrop behind whatever this overlay holds. A video
+   feed behind it can be anything, so contrast can't be guaranteed by this
+   screen's own palette. opacity-50 over black, not a fully opaque card —
+   still reads as "video underneath," just legible. Shrink-to-fit
+   (left:50%/transform) so the backdrop hugs the actual content; max-width
+   keeps a long name from pushing it past the viewport's own edges. Mirrors
+   HomeScreens.kt's identical callOverlayScrim() modifier. */
+.calling-overlay {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 2 * var(--spacing-screen-padding));
+  bottom: var(--spacing-call-overlay-offset);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-call-overlay-gap);
+  background: color-mix(in srgb, var(--color-black) calc(var(--opacity-50) * 100%), transparent);
+  border-radius: var(--radius-control);
+  padding: var(--dimension-16) var(--dimension-24);
+}
+
+.calling-name {
+  font-family: var(--typography-display-font-family);
+  font-weight: var(--typography-display-font-weight);
+  font-size: var(--typography-display-font-size);
+  letter-spacing: var(--typography-display-letter-spacing);
+  color: var(--color-text-primary);
+  text-align: center;
+}
+
+/* The static first line ("Calling"/"Incoming call from") — a caption
+   introducing the name below it, not a second headline, so it's dimmer
+   and smaller. */
+.calling-label {
+  font-family: var(--typography-caption-font-family);
+  font-weight: var(--typography-caption-font-weight);
+  font-size: var(--typography-caption-font-size);
+  color: var(--color-text-dim);
+  text-align: center;
+}
+
+.calling-buttons-row {
+  display: flex;
+  flex-direction: row;
+  gap: var(--spacing-call-overlay-gap);
+}
+
+/* --- Incoming call screen (mirrors IncomingCallScreen) -------------------- */
+
+#screenIncomingCall {
+  position: relative;
+}
+
+#incomingLocalVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--color-video-background);
+}
+
+/* --- Live call view ------------------------------------------------------- */
+
+#screenCall {
+  position: relative;
+}
+
+#remoteVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--color-video-background);
+}
+
+/* Self-view — position cycles through the four corners plus invisible (see
+   app.js's cyclePreviewPosition/PREVIEW_POSITIONS), driven by the
+   "Position self-view" call-control button — mirrors the Android app's
+   own PreviewCorner cycle. */
+#localVideo {
+  position: absolute;
+  /* Fluid below ~563px (where 32vw drops under the 180px ceiling), floors
+     at 112px on the smallest realistic phone widths. */
+  width: clamp(112px, 32vw, var(--size-local-preview-width));
+  background: var(--color-video-background);
+}
+#localVideo.preview-bottom-start { bottom: var(--dimension-24); left: var(--dimension-24); }
+#localVideo.preview-bottom-end { bottom: var(--dimension-24); right: var(--dimension-24); }
+#localVideo.preview-top-start { top: var(--dimension-24); left: var(--dimension-24); }
+#localVideo.preview-top-end { top: var(--dimension-24); right: var(--dimension-24); }
+#localVideo.preview-invisible { display: none; }
+
+/* Call controls (Position self-view/Audio/Video/Disconnect) — reuses
+   .calling-overlay for its scrim/shrink-to-fit background, but overrides
+   its centering: a vertical stack anchored to a bottom corner instead of
+   bottom-center — lower-right by default, lower-left only when the
+   self-view itself is *also* lower-right (the one case that would
+   otherwise sit on top of it). See app.js's renderCallControls for the
+   left/right class toggle. */
+#callControls {
+  bottom: var(--dimension-24);
+}
+#callControls.position-left {
+  left: var(--dimension-24);
+  right: auto;
+  transform: none;
+}
+#callControls.position-right {
+  left: auto;
+  right: var(--dimension-24);
+  transform: none;
+}
+.call-controls-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--dimension-16);
+}
+
+/* Audio/Video — label above a toggle switch, mirrors Android's identical
+   Auto-answer treatment (ContactRow, HomeScreens.kt): a small dim caption
+   naming the control, tight above the switch it describes. */
+.call-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--dimension-4);
+}
+.call-toggle-label {
+  font-family: var(--typography-status-row-font-family);
+  font-weight: var(--typography-status-row-font-weight);
+  font-size: calc(var(--typography-status-row-font-size) * 0.85);
+  color: var(--color-text-dim);
+}
+
+/* A plain checkbox-shaped switch, no native styling to fight — track tints
+   green/status-ok when checked (matches Android's SwitchDefaults.colors
+   checkedTrackColor). */
+.toggle-switch {
+  position: relative;
+  width: var(--dimension-28);
+  height: var(--dimension-16);
+  padding: 0;
+  border-radius: var(--dimension-999);
+  border: var(--border-width-default) solid var(--color-border-default);
+  background: var(--color-background-surface-alt);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.toggle-switch .toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: var(--dimension-12);
+  height: var(--dimension-12);
+  border-radius: 50%;
+  background: var(--color-text-dim);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.toggle-switch.checked {
+  background: var(--color-status-ok);
+  border-color: var(--color-status-ok);
+}
+.toggle-switch.checked .toggle-thumb {
+  background: var(--color-text-primary);
+  /* track(28) - inset(2*2) - thumb(12) */
+  transform: translateX(var(--dimension-12));
+}
+
+/* Everything else here is already single-column by construction, so the
+   one real page-level (viewport, not component) responsive case is a
+   phone rotated to landscape mid-call — a short viewport height risks
+   crowding .calling-overlay's title + "Press Back"/"Cancel" stack. Covers
+   the live Call screen's own #callControls too, since it's just another
+   .calling-overlay. */
+@media (max-height: 420px) {
+  .calling-overlay { bottom: var(--dimension-16); gap: var(--dimension-4); }
+}

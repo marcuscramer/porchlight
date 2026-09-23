@@ -1,0 +1,35 @@
+[package]
+name = "pake-bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# rlib only — this crate is a plain Rust dependency of `call-core`, which
+# owns the sole cdylib entry point for both Android/JNI and WASM.
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# Pinned to the stable 0.4 line, not 0.5.0-pre.0 (not production-ready yet).
+spake2 = "0.4"
+# sha2/hmac/subtle are already pulled in transitively by spake2's own
+# dependency tree — declared explicitly here since this crate's own code
+# uses them directly too, pinned to the same versions already resolved.
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2.6"
+# For NFC normalization of the passphrase before it's used for anything
+# crypto-relevant — see PakeSession::start's doc for why this happens
+# once, in one place, rather than per-platform.
+unicode-normalization = "0.1"
+
+# getrandom's `js` feature is required for wasm32-unknown-unknown —
+# without it, spake2's (transitive) randomness generation compiles fine
+# and panics the first time it's actually called in a browser. Still
+# needed here even though this crate has no wasm-bindgen bindings of its
+# own: its code still runs on wasm32 as part of call-core's WASM build.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+# [profile.release] lives in the workspace root Cargo.toml — Cargo only
+# honors profile settings from a workspace's root.

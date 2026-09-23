@@ -1,0 +1,30 @@
+{
+  "button": {
+    "$type": "dimension",
+    "_comment": "One uniform size for every button (Call/Add contact/Continue/...) — the approved design artifact gives every action button in the 'Quieter' direction the identical chrome (8px/16px padding, 8px radius). A `compact` (8px/4px) tier existed briefly for Delete/Call/Add contact when those carried a text label or sat tightly packed in a contact row; all three are icon-only now and have moved back to this one base size (explicit request — more breathing room around a fixed-size icon), so it's gone rather than kept as an unused tier.",
+    "padding": {
+      "base": {
+        "horizontal": { "$value": "{dimension.16}" },
+        "vertical": { "$value": "{dimension.8}" }
+      }
+    },
+    "radius": { "$value": "{radius.control}" }
+  },
+  "buttonTint": {
+    "$type": "number",
+    "_comment": "Shared alpha stops behind TvButton's tint system (MainActivity.kt) and .tv-button's web equivalent — one translucent fill + intensifying-border language for every button, meaning carried by hue (neutral=white, accent=the button's own status/action color) rather than by a solid fill. 'accent' covers both Success and Danger tints, which share the same alpha stops and differ only in hue. neutralBorder was originally set equal to accentBorder (0.32, after a neutral button like Add contact read as borderless at 0.07 against this app's dark backgrounds), but equal *alpha* isn't equal *luminance*: white pushes all three channels toward 255 while a mid-tone green/red pushes mostly one, so at identical alpha the white neutral border measurably out-luminates (and so out of proportion, looks thicker than) the accent one on the same dark background — confirmed by sampling actual rendered pixels, not just reasoning about it. 0.16 (not a new value — same stop neutralContainerFocused already uses) brings the neutral border's rendered luminance back in line with accentBorder's own, so all tints read as the same visual weight at rest; only neutralBorderFocused is untouched, since that comparison wasn't the complaint.",
+    "neutralContainer": { "$value": "{opacity.8}" },
+    "neutralContainerFocused": { "$value": "{opacity.16}" },
+    "neutralBorder": { "$value": "{opacity.16}" },
+    "neutralBorderFocused": { "$value": "{opacity.50}" },
+    "accentContainer": { "$value": "{opacity.14}" },
+    "accentContainerFocused": { "$value": "{opacity.50}" },
+    "accentBorder": { "$value": "{opacity.32}" },
+    "accentBorderFocused": { "$value": "{opacity.95}" }
+  },
+  "input": {
+    "$type": "dimension",
+    "radius": { "$value": "{radius.input}" },
+    "borderWidth": { "$value": "{border.width.default}" }
+  }
+}

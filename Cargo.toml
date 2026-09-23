@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["pake-bridge", "call-core"]
+
+# Not a virtual-manifest-only workspace forever, necessarily — but for now
+# neither member crate is published, and each keeps its own [package]
+# section (version, edition) rather than inheriting from here.
+
+[profile.release]
+# Small binary matters more than link time here — both crates ship to a
+# resource-constrained TV device and a browser download. Cargo only
+# honors [profile.*] from a workspace's root, so this applies to every
+# member crate uniformly rather than living in each one separately.
+opt-level = "s"
+lto = true

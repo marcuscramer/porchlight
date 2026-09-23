@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Camera + mic for the security feed and two-way audio. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- Networking for WebRTC + signaling. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Always-on capture runs in a foreground service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- POST_NOTIFICATIONS is a no-op below API 33 but harmless to declare. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Self-updating (see UpdateChecker.kt): declaring this alone doesn't
+         grant it — the human must also separately flip "Install unknown
+         apps" on for this app in Settings, a one-time step Android
+         requires regardless of what's declared here, and not something a
+         manifest permission can shortcut. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature android:name="android.hardware.microphone" android:required="true" />
+
+    <application
+        android:name=".PorchlightApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Porchlight">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <!-- Must be plain LAUNCHER, not LEANBACK_LAUNCHER: confirmed from
+                 Immortal's own source (ScreensaverDismissAppActivity.kt,
+                 HomeActivity.kt) that its Manage-mode app list and
+                 screensaver-dismiss-target picker both require exactly this
+                 category to find the app at all. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Camera agent: keeps capture + WebRTC alive while the app is backgrounded.
+             foregroundServiceType camera|microphone is honored on API 29+. -->
+        <service
+            android:name=".CameraAgentService"
+            android:exported="false"
+            android:foregroundServiceType="camera|microphone" />
+
+        <!-- exported=false is correct and secure here, not just a leftover
+             default: manifest-registered receivers for protected system
+             broadcasts like BOOT_COMPLETED still receive them from the
+             system regardless of exported, since that flag only governs
+             whether other apps can target this component directly (e.g. via
+             an explicit intent). Leaving it true would let any co-installed
+             app trigger a launch by sending a spoofed BOOT_COMPLETED intent
+             straight at this receiver. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Fired by tapping the "update available" notification (see
+             UpdateChecker.kt) — exported=false, same reasoning as
+             BootReceiver above: this only ever needs to react to this
+             app's own PendingIntent, not anything another app could send. -->
+        <receiver
+            android:name=".UpdateInstallReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- Hands the downloaded APK (a plain file:// path in this app's
+             own cache dir) to the system package installer as a content://
+             URI — required since API 24, which stopped accepting file://
+             URIs across app boundaries entirely (FileUriExposedException).
+             exported=false is fine here: grantUriPermissions in
+             UpdateChecker.kt's install Intent is what actually lets the
+             installer read this one file temporarily, not this flag. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+    </application>
+</manifest>

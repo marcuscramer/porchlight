@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exposes only this app's own cache dir (where UpdateChecker.kt downloads
+     the update APK to) through FileProvider — nothing broader. -->
+<paths>
+    <cache-path name="updates" path="." />
+</paths>

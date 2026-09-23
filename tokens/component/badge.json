@@ -1,0 +1,9 @@
+{
+  "badge": {
+    "$type": "number",
+    "_comment": "StatusBadge's (HomeScreens.kt) and .contact-badge's shared background alpha — same 'tint' language as buttonTint, just for a status label rather than an action. Each status gets its own alpha (not one shared value) matching the approved design artifact exactly: Offline/danger reads reddest, Busy a touch stronger than Online.",
+    "backgroundOpacityDanger": { "$value": "{opacity.18}" },
+    "backgroundOpacityOk": { "$value": "{opacity.16}" },
+    "backgroundOpacityBusy": { "$value": "{opacity.20}" }
+  }
+}

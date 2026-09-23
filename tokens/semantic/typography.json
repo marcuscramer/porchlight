@@ -1,0 +1,42 @@
+{
+  "typography": {
+    "display": {
+      "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
+      "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.semibold}" },
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.28}" },
+      "letterSpacing": { "$type": "letterSpacing", "$value": "{letterSpacing.tight}" }
+    },
+    "body": {
+      "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
+      "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.regular}" },
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.22}" }
+    },
+    "caption": {
+      "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
+      "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.medium}" },
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.20}" }
+    },
+    "statusRow": {
+      "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
+      "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.medium}" },
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.10}" }
+    },
+    "contactName": {
+      "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
+      "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.semibold}" },
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.36}" },
+      "letterSpacing": { "$type": "letterSpacing", "$value": "{letterSpacing.tight}" }
+    },
+    "badge": {
+      "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
+      "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.semibold}" },
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.10}" },
+      "letterSpacing": { "$type": "letterSpacing", "$value": "{letterSpacing.tight}" }
+    },
+    "buttonDefault": {
+      "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
+      "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.medium}" },
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.22}" }
+    }
+  }
+}

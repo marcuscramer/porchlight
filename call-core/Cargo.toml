@@ -1,0 +1,55 @@
+[package]
+name = "call-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# cdylib for Android (.so) and WASM (.wasm); rlib so `cargo test` works
+# directly on the host with no cross toolchain involved.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Plain Cargo path dependency, not JNI/WASM — a normal Rust-to-Rust link.
+# call-core calls pake-bridge's PakeSession directly as function calls;
+# the JNI/WASM boundary only exists at call-core's own outer edge
+# (Kotlin/JS calling in).
+pake-bridge = { path = "../pake-bridge" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# For call_arbitration's own randomCallId-equivalent (4 random bytes, hex
+# encoded) — the wasm32 "js" feature below is what makes it work in a
+# browser too.
+getrandom = "0.2"
+# Protocol primitives only (keys, events, signing, NIP-44) — no networking/
+# relay-pool code (client/relay use cases are explicitly pointed at the
+# separate `nostr-sdk` crate, which this project doesn't depend on — the
+# actual relay/WebSocket transport stays platform-native, same category as
+# WebRTC's own `PeerConnection`). Under Porchlight's own existing wire
+# format (custom SIGNAL_KIND/WRAP_KIND, not NIP-59's registered kind
+# 1059) — the "nip44" feature is the only NIP this crate needs enabled.
+nostr = { version = "0.45", features = ["nip44"] }
+# Needed directly (not just transitively via `nostr`) for its `Secp256k1`
+# signing context — `nostr`'s own convenience signing path is gated
+# behind its `os-rng` feature, which this crate doesn't enable (see
+# `nostr_protocol`'s own doc: sticks to `getrandom` alone). Pinned to the
+# same `0.30` series `nostr` itself depends on so Cargo unifies them into
+# one instance.
+secp256k1 = "0.30"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+getrandom = { version = "0.2", features = ["js"] }
+# `nostr`'s own `Timestamp::now()` goes through `universal-time`, which
+# requires the embedder to supply a time provider on
+# `wasm32-unknown-unknown` specifically (no working `std::time` there) via
+# its `define_time_provider!` macro — see `wasm.rs`'s own implementation,
+# backed by `js_sys::Date::now()`. Version pinned to match exactly what
+# `nostr` itself depends on so Cargo unifies them into one instance.
+universal-time = "0.3"
+js-sys = "0.3"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
+# [profile.release] lives in the workspace root Cargo.toml.
