@@ -30,7 +30,7 @@ android {
         minSdk = 28
         targetSdk = 29
         versionCode = 2
-        versionName = "0.1.1"
+        versionName = "0.1"
 
         // Quartz's secp256k1 crypto is JNI-native — the Portal only ever
         // reports arm64-v8a/armeabi-v7a (see
