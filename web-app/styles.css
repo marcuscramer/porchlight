@@ -29,10 +29,16 @@ html, body {
    Overrides tokens.css's static value (web-only; Android stays fixed 48dp
    since Portal's viewport never varies). --list-side-margin gets the
    identical treatment — the design artifact's fixed 100px eats over half a
-   ~390px phone's width otherwise (found live: names truncating to "Gra…"). */
+   ~390px phone's width otherwise (found live: names truncating to "Gra…").
+   --list-fade-height-bottom also overrides tokens.css's 100px, which was
+   sized to clear the status checklist that used to occupy this corner —
+   nothing does anymore, so this is just a modest, purely cosmetic edge
+   fade now (see .contact-list's own mask-image doc for why top/bottom are
+   shaped differently). */
 :root {
   --spacing-screen-padding: clamp(20px, 5vw + 8px, 48px);
   --list-side-margin: clamp(20px, 10vw, 100px);
+  --list-fade-height-bottom: 48px;
 }
 
 /* viewport-fit=cover lets the page extend under the notch/home-indicator
@@ -291,23 +297,25 @@ html, body {
      content; real content only enters this zone once scrolled, exactly
      when a fade should show.
 
-     Each zone is split in half, not one plain linear fade end to end — a
-     straight fade across the entire span stays legible almost to the
-     settings icon's own edge (top zone), so row text and that overlay
-     text would read as overlapping. The *outer* half (nearest the icon)
-     is flat and already fully transparent instead; the *inner* half
-     (nearest the visible rows) is where the actual transition happens.
-     The bottom zone uses the identical shape for visual symmetry, not
-     because anything currently overlays that corner. */
+     Top and bottom are shaped differently, not symmetrically. Top is
+     split in half, not one plain linear fade end to end — a straight fade
+     across the entire span stays legible almost to the settings icon's
+     own edge, so row text and that overlay text would read as
+     overlapping. The *outer* half (nearest the icon) is flat and already
+     fully transparent instead; the *inner* half (nearest the visible
+     rows) is where the actual transition happens. Bottom has no overlay
+     to clear, so it's one plain linear fade across the full span — a held
+     flat zone there would just be dead, featureless space for no
+     reason. */
   mask-image: linear-gradient(
     to bottom,
     transparent, transparent calc(var(--list-fade-height-top) / 2), black var(--list-fade-height-top),
-    black calc(100% - var(--list-fade-height-bottom)), transparent calc(100% - var(--list-fade-height-bottom) / 2)
+    black calc(100% - var(--list-fade-height-bottom)), transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent, transparent calc(var(--list-fade-height-top) / 2), black var(--list-fade-height-top),
-    black calc(100% - var(--list-fade-height-bottom)), transparent calc(100% - var(--list-fade-height-bottom) / 2)
+    black calc(100% - var(--list-fade-height-bottom)), transparent 100%
   );
 }
 .contact-list::-webkit-scrollbar { display: none; }

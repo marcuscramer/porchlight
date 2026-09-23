@@ -777,7 +777,14 @@ private fun WaitingScreen(
                     // the content's own top/bottom, not the viewport's, and
                     // scrolling past the first row or two shows only the
                     // gradient's clamped opaque tail.
-                    .fadingEdges(topHeight = Dimens.listFadeHeightTop, bottomHeight = Dimens.listFadeHeightBottom)
+                    // bottomHeight is a plain literal, not
+                    // Dimens.listFadeHeightBottom (100dp) — that generated
+                    // value was sized to clear the status checklist that
+                    // used to occupy this corner; nothing does anymore, so
+                    // this is just a modest, purely cosmetic edge fade now
+                    // (see fadingEdges' own doc for why top/bottom are
+                    // shaped differently).
+                    .fadingEdges(topHeight = Dimens.listFadeHeightTop, bottomHeight = 48.dp)
                     .verticalScroll(listScroll),
             ) {
                 // The first of this Column's two fade spacers — see
@@ -829,8 +836,9 @@ private fun WaitingScreen(
                 // trailing slack is cheaper than fighting the clip itself.
                 Spacer(modifier = Modifier.height(Dimens.dimension4))
                 // The second of this Column's two fade spacers — see the
-                // top one's own doc, and fadingEdges' (Theme.kt).
-                Spacer(modifier = Modifier.height(Dimens.listFadeHeightBottom))
+                // top one's own doc, and fadingEdges' (Theme.kt). Must
+                // match the 48.dp passed to fadingEdges' bottomHeight above.
+                Spacer(modifier = Modifier.height(48.dp))
             }
         }
     }

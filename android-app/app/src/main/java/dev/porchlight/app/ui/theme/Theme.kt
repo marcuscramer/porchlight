@@ -108,19 +108,20 @@ fun Modifier.porchlightScreenBackground(): Modifier = this.drawWithCache {
  * dissolves empty space, not content; scroll past it and real content
  * takes its place there instead.
  *
- * Each zone is split in half, not one plain linear fade end to end — a
- * straight fade across the entire topHeight/bottomHeight span is still
- * clearly legible almost all the way to a screen's own overlaid corner
- * content (the settings gear, in WaitingScreen's case) — a linear ramp is
- * nowhere near transparent until its very last few dp — so real row text
- * and that overlaid content's own text read as overlapping right where
- * they're closest. The *outer* half (nearest whatever this fades behind)
- * is a flat, already-fully-transparent zone instead; the *inner* half
- * (nearest the visible rows) is where the actual black-to-transparent
- * transition happens, compressed into half the space. Caller-supplied
- * topHeight/bottomHeight should be sized so their own half comfortably
- * clears whatever real, measured overlay sits there — see WaitingScreen's
- * own call site for the numbers.
+ * Top and bottom are deliberately shaped differently now, not
+ * symmetrically. Top is split in half, not one plain linear fade end to
+ * end — a straight fade across the entire topHeight span is still clearly
+ * legible almost all the way to the settings gear overlaid in that corner
+ * (a linear ramp is nowhere near transparent until its very last few dp),
+ * so real row text and the gear's own visuals would read as overlapping
+ * right where they're closest. The *outer* half (nearest the gear) is a
+ * flat, already-fully-transparent zone instead; the *inner* half (nearest
+ * the visible rows) is where the actual black-to-transparent transition
+ * happens, compressed into half the space — topHeight should be sized so
+ * that half comfortably clears the gear (see WaitingScreen's own call
+ * site for the number). Bottom has no such overlay to clear, so it's a
+ * plain single linear fade across the full bottomHeight — a held flat
+ * zone there would just be dead, featureless space for no reason.
  *
  * `graphicsLayer(alpha = 0.99f)` forces this subtree onto its own
  * compositing layer, which [BlendMode.DstIn] needs in order to only affect
@@ -141,7 +142,7 @@ fun Modifier.fadingEdges(topHeight: Dp, bottomHeight: Dp): Modifier = this
         val bottomPx = bottomHeight.toPx()
         drawRect(
             brush = Brush.verticalGradient(
-                0f to Color.Black, 0.5f to Color.Transparent, 1f to Color.Transparent,
+                0f to Color.Black, 1f to Color.Transparent,
                 startY = size.height - bottomPx, endY = size.height,
             ),
             blendMode = BlendMode.DstIn,
