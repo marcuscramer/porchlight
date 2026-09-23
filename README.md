@@ -12,9 +12,13 @@ it's set up, and two devices pair by simply agreeing on a shared phrase.
 
 - A **Meta Portal TV**. Porchlight installs and shows up on the stock
   Portal home screen on its own — no third-party launcher required.
-  [Immortal](https://github.com/starbrightlab/immortal) is optional: worth
-  installing if your Portal was discontinued by Meta and needs reviving,
-  or if you'd rather manage sideloaded apps through its own catalog, but
+  [Immortal](https://github.com/starbrightlab/immortal) is still worth
+  considering for reasons that have nothing to do with running Porchlight
+  itself: its provisioning kit can freeze the device against further Meta
+  OS updates (worth having on a device Meta has stopped supporting, since
+  a future update is Meta's to push, not yours to preview), it revives a
+  Portal whose own stock experience has otherwise degraded, and it gives
+  you a proper on-device catalog for managing whatever else you sideload.
   Porchlight doesn't depend on it either way.
 - **Developer Options → USB debugging** enabled on the Portal, with a
   one-time USB trust prompt accepted. Porchlight is sideload-only — it
