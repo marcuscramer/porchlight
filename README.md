@@ -10,10 +10,12 @@ it's set up, and two devices pair by simply agreeing on a shared phrase.
 
 ## What you need
 
-- A **Meta Portal TV**, with [Immortal](https://github.com/starbrightlab/immortal)
-  installed as its launcher (Immortal revives these devices after Meta
-  discontinued them — install it first, following its own instructions,
-  before coming back here).
+- A **Meta Portal TV**. Porchlight installs and shows up on the stock
+  Portal home screen on its own — no third-party launcher required.
+  [Immortal](https://github.com/starbrightlab/immortal) is optional: worth
+  installing if your Portal was discontinued by Meta and needs reviving,
+  or if you'd rather manage sideloaded apps through its own catalog, but
+  Porchlight doesn't depend on it either way.
 - **Developer Options → USB debugging** enabled on the Portal, with a
   one-time USB trust prompt accepted. Porchlight is sideload-only — it
   will never be on the Google Play Store, since the Portal has no Google
@@ -34,9 +36,9 @@ installed:
 adb install porchlight.apk
 ```
 
-If Porchlight is ever listed in Immortal's own on-device app store, it can
-install from there instead, like any other catalog app — no computer
-needed at that point.
+The app appears on the Portal's own home screen once installed. If you use
+Immortal, it also shows up in its app list/catalog the same way any other
+sideloaded app does.
 
 On first launch, grant the camera, microphone, and notification
 permissions the app asks for.
@@ -112,20 +114,16 @@ app, and nobody needs an account to use it.
 If you think a specific contact's security has been compromised, delete
 that contact and pair again with a fresh phrase — every contact is its
 own independent identity, so this never affects any of your other
-contacts. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full design
-rationale and what this does and doesn't protect against.
+contacts. See [SECURITY.md](SECURITY.md) for the full threat model and
+what this does and doesn't protect against.
 
 ## Troubleshooting
 
-- **"Camera & mic" shows a red X on the waiting screen**: the app was
-  denied camera/microphone permission, or the camera is currently in use
-  by something else on the device. Re-grant permissions in Android
-  Settings if needed.
-- **"Connected" shows a red X**: the device can't currently reach any
-  relay — check its internet connection.
-- **A call never connects ("Couldn't connect")**: both devices need a
-  working internet connection, and network setups that block STUN can
-  prevent a direct connection between two devices from ever forming. Try
+- **A call never connects ("Couldn't connect"), or tapping Call doesn't
+  seem to do anything**: check that camera/microphone permission is
+  granted for Porchlight in Android Settings, and that both devices have a
+  working internet connection. Network setups that block STUN can also
+  prevent a direct connection between two devices from ever forming — try
   again once both sides confirm they're online.
 - **Renaming or pairing seems to do nothing when pressing a remote's
   center button**: wait a moment and try again — a stray leftover key
@@ -141,14 +139,15 @@ pipeline could work at all. It's since diverged substantially: two-way
 (not just one-way) calling, symmetric peer roles, Nostr-based signaling
 with no self-hosted server and no account of any kind, per-device signing
 identity with explicit human-confirmed pairing, boot-launch and crash
-recovery, and the sideload/Immortal-specific work (screensaver handling,
-launcher category quirks, wake-lock behavior).
+recovery, and sideload-specific work (screensaver handling, dual stock/
+Immortal launcher support, wake-lock behavior).
 
 Implementation was done with [Claude](https://claude.com/claude-code)
 (Anthropic).
 
 ---
 
-Looking to build or contribute to Porchlight itself? See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the developer-facing setup, and
-[CALL_STATE.md](CALL_STATE.md) for the call state machine's invariants.
+This is an independent hobby project, not affiliated with, endorsed by,
+or sponsored by Meta. "Meta" and "Portal" are trademarks of Meta
+Platforms, Inc., used here only to describe the hardware this software
+runs on.
