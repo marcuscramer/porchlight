@@ -1674,18 +1674,6 @@ async function startApp() {
 window.addEventListener('online', render);
 window.addEventListener('offline', render);
 
-// Classic iOS Safari trick: body::after in styles.css makes the document
-// exactly 1px taller than the viewport, and scrolling by that 1px is
-// enough to collapse Safari's own address bar/toolbar in a plain browser
-// tab — the page never asked to be added to the home screen, so this is
-// the only lever available there. Standalone (home-screen) launches
-// already have no browser chrome to collapse, so this is skipped there.
-if (!window.navigator.standalone && !window.matchMedia('(display-mode: standalone)').matches) {
-  window.addEventListener('load', () => {
-    setTimeout(() => window.scrollTo(0, 1), 0);
-  });
-}
-
 if (deviceName) {
   screen = 'waiting';
   startApp();

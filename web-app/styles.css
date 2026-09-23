@@ -19,15 +19,6 @@ html, body {
   font-family: var(--font-family-inter);
 }
 
-/* A pseudo-element rather than a taller `body` — pushes the document 1px
-   past the viewport for app.js's scrollTo(0, 1) nudge without disturbing
-   body's own height:100%, which #app/.screen's height:100% depend on. */
-body::after {
-  content: "";
-  display: block;
-  height: 1px;
-}
-
 /* clamp() keeps screen padding proportional below ~640-800px instead of
    eating a large fraction of a narrow phone width — 20px floor keeps
    content readably inset, 48px ceiling preserves the tablet/desktop value.
