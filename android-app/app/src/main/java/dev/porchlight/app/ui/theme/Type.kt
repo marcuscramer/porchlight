@@ -55,11 +55,10 @@ object Type {
         fontWeight = FontWeight(GeneratedType.typographyCaptionFontWeight),
         fontSize = GeneratedType.typographyCaptionFontSize,
     )
-    // WaitingScreen's bottom-left status checklist only — a dedicated role
-    // (not a reuse of `caption`, which also styles the Auto-answer toggle
-    // label and would shrink that too) so this one corner of background
-    // info can be pinned to its own, much smaller size independent of
-    // everything else.
+    // Small toggle-switch labels (CallToggle's Audio/Video, WaitingScreen's
+    // Auto-answer) — a dedicated role, not a reuse of `caption`, so these
+    // can be pinned to their own smaller size independent of everything
+    // else `caption` also styles.
     val statusRow = TextStyle(
         fontFamily = Inter,
         fontWeight = FontWeight(GeneratedType.typographyStatusRowFontWeight),

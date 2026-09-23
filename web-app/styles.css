@@ -209,8 +209,9 @@ html, body {
   /* This button's own box is --size-settings-fab (44px), bigger than the
      24px icon centered inside it, so the icon's own ink sits an extra
      (44-24)/2=10px deeper than the offset alone suggests — confirmed live.
-     Subtracting that centering gap equalizes it with the checklist's own
-     text, the same fix HomeScreens.kt's own settings Box applies. */
+     Subtracting that centering gap is what actually matches the offset
+     used elsewhere in this corner, the same fix HomeScreens.kt's own
+     settings Box applies. */
   top: calc(var(--spacing-status-region-left-offset) - (var(--size-settings-fab) - var(--dimension-24)) / 2);
   right: calc(var(--spacing-status-region-left-offset) - (var(--size-settings-fab) - var(--dimension-24)) / 2);
   width: var(--size-settings-fab);
@@ -236,12 +237,12 @@ html, body {
 /* --- Waiting screen (mirrors WaitingScreen + ContactRow) --------------- */
 
 /* A plain positioning context, not a 3-row grid — the contact list fills
-   the *entire* screen, and the settings icon/status strip float on top of
-   it as absolutely-positioned overlays, same as this app's other overlays.
-   The list fades itself out before it ever reaches them (.contact-list's
-   own fadeHeightTop/Bottom, below) instead of a grid row stopping short of
-   them. Mirrors WaitingScreen's identical Box(contentAlignment)
-   restructuring (HomeScreens.kt). */
+   the *entire* screen, and the settings icon floats on top of it as an
+   absolutely-positioned overlay, same as this app's other overlays. The
+   list fades itself out before it ever reaches that corner
+   (.contact-list's own fadeHeightTop/Bottom, below) instead of a grid row
+   stopping short of it. Mirrors WaitingScreen's identical
+   Box(contentAlignment) restructuring (HomeScreens.kt). */
 #screenWaiting {
   position: relative;
 }
@@ -292,10 +293,12 @@ html, body {
 
      Each zone is split in half, not one plain linear fade end to end — a
      straight fade across the entire span stays legible almost to the
-     settings icon/checklist's own edge, so row text and that overlay text
-     read as overlapping. The *outer* half (nearest the icon/checklist) is
-     flat and already fully transparent instead; the *inner* half (nearest
-     the visible rows) is where the actual transition happens. */
+     settings icon's own edge (top zone), so row text and that overlay
+     text would read as overlapping. The *outer* half (nearest the icon)
+     is flat and already fully transparent instead; the *inner* half
+     (nearest the visible rows) is where the actual transition happens.
+     The bottom zone uses the identical shape for visual symmetry, not
+     because anything currently overlays that corner. */
   mask-image: linear-gradient(
     to bottom,
     transparent, transparent calc(var(--list-fade-height-top) / 2), black var(--list-fade-height-top),
@@ -417,30 +420,6 @@ html, body {
 .add-contact {
   grid-column: 1 / -1;
   justify-self: center;
-}
-
-/* Only ever shown when a Call attempt gets blocked (see requestCall's
-   blockedCallReason()) — danger-toned rather than .check-row's old dim
-   gray, since its mere presence is now the signal. */
-.status-message {
-  margin: 0;
-  font-family: var(--typography-status-row-font-family);
-  font-weight: var(--typography-status-row-font-weight);
-  font-size: var(--typography-status-row-font-size);
-  color: var(--color-action-danger-background);
-}
-
-/* Bottom-left, small — mirrors WaitingScreen's own
-   Modifier.align(Alignment.BottomStart) offset: background status, pinned
-   in a corner rather than sharing center billing with the contact list.
-   Explicit z-index so it paints over .contact-list regardless of DOM
-   order. */
-.status-region {
-  position: absolute;
-  left: var(--spacing-status-region-left-offset);
-  bottom: var(--spacing-status-region-bottom-offset);
-  z-index: 5;
-  color: var(--color-text-dim);
 }
 
 .warn-line {

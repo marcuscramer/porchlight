@@ -1,10 +1,5 @@
 package dev.porchlight.app
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -62,7 +57,6 @@ import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -70,7 +64,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
 import dev.porchlight.app.ui.theme.Dimens
 import dev.porchlight.app.ui.theme.GeneratedColor
@@ -78,7 +71,6 @@ import dev.porchlight.app.ui.theme.GeneratedOpacity
 import dev.porchlight.app.ui.theme.Type
 import dev.porchlight.app.ui.theme.fadingEdges
 import dev.porchlight.app.ui.theme.porchlightScreenBackground
-import kotlinx.coroutines.delay
 import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoSink
@@ -231,74 +223,17 @@ private fun Modifier.scaledSize(scale: Float): Modifier = layout { measurable, c
 // purely for file size/navigability; no behavior here depends on the split.
 // ---------------------------------------------------------------------------
 
-private fun hasInternet(context: Context): Boolean {
-    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
-    val network = cm.activeNetwork ?: return false
-    val caps = cm.getNetworkCapabilities(network) ?: return false
-    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-}
-
-private fun hasPermissions(context: Context): Boolean {
-    fun granted(p: String) = ContextCompat.checkSelfPermission(context, p) == PackageManager.PERMISSION_GRANTED
-    return granted(Manifest.permission.CAMERA) && granted(Manifest.permission.RECORD_AUDIO)
-}
-
-/**
- * Whether the camera is currently reachable, not just whether the
- * permission was granted — `hasPermissions` above only checks the
- * permission, which stays true regardless of whether the hardware itself
- * is presently blocked or reserved (e.g. by a device-admin policy — the
- * same kind separately seen killing the camera mid-call, see
- * WebRtcEngine's CameraEventsHandler doc). Uses CameraManager's own
- * availability tracking rather than polling.
- *
- * Deliberately a pure, live, self-healing check — no history folded in: it
- * should recover the instant the OS reports the camera reachable again,
- * not stay stuck on a past outcome. See `WebRtcEngine.onMediaFailure` for
- * where failure history still gets logged, for developer diagnostics only.
- *
- * `capturing` has to be treated as an override, not just another input:
- * the moment our own WebRtcEngine opens the camera for a real call, this
- * same callback reports the camera "unavailable" too (it doesn't
- * distinguish "someone else has it" from "we have it") — without this
- * override, the row would flash ✗ during normal call setup.
- *
- * One accepted, permanent limitation: a purely mechanical/optical lens
- * shutter is invisible to this check either way — the OS has no API for
- * "is the lens physically covered," only for "is some client using the
- * camera right now."
- */
-@Composable
-private fun rememberCameraAvailable(context: Context, capturing: Boolean): Boolean {
-    var available by remember { mutableStateOf(true) }
-    DisposableEffect(Unit) {
-        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
-        val cameraId = runCatching { cameraManager?.cameraIdList?.firstOrNull() }.getOrNull()
-        if (cameraManager == null || cameraId == null) {
-            onDispose {}
-        } else {
-            val callback = object : android.hardware.camera2.CameraManager.AvailabilityCallback() {
-                override fun onCameraAvailable(id: String) { if (id == cameraId) available = true }
-                override fun onCameraUnavailable(id: String) { if (id == cameraId) available = false }
-            }
-            cameraManager.registerAvailabilityCallback(callback, null)
-            onDispose { cameraManager.unregisterAvailabilityCallback(callback) }
-        }
-    }
-    return available || capturing
-}
-
 /**
  * Three states, not two, now that calling is always explicit: idle
  * (contact list), calling (self-view only, waiting on a peer who may not
  * even be reachable yet — no timeout, see CallingScreen's doc), and
- * connected (full remote video). `internetOk`/`permissionsOk`/
- * `cameraAvailable` don't gate which of these shows or whether the Call
- * button is enabled — they're only checked at the moment of an actual tap
- * (WaitingScreen's attemptCall), which blocks the attempt with a message
- * instead of proceeding into an idle "calling" state with no way to
- * succeed.
+ * connected (full remote video). Call is always available and just takes
+ * however long it takes — no internet/permission/signaling pre-check here:
+ * a pre-check would only ever read cached state, not request anything,
+ * so blocking on it would leave no way to actually grant a missing
+ * permission — the real camera/mic prompt only fires from inside a real
+ * call attempt (WebRtcEngine's actual getUserMedia-equivalent), which a
+ * pre-check would prevent from ever running.
  */
 @Composable
 internal fun HomeScreen(
@@ -311,10 +246,6 @@ internal fun HomeScreen(
     onDeleteContact: (String) -> Unit,
     onToggleAutoAnswer: (String, Boolean) -> Unit,
 ) {
-    val context = LocalContext.current
-    var internetOk by remember { mutableStateOf(true) }
-    var permissionsOk by remember { mutableStateOf(true) }
-    val cameraAvailable = rememberCameraAvailable(context, capturing = state.capturing)
     val activeContact = state.contacts.find { it.id == state.activePairingId }
     val peerConnectedOk = activeContact?.connected == true
     val incoming = state.incomingCall
@@ -333,17 +264,6 @@ internal fun HomeScreen(
     // *that* first instead of hanging up in the same stroke.
     BackHandler(enabled = activeContact != null) {
         if (showCallControls) showCallControls = false else service?.hangUp()
-    }
-
-    // Only meaningful while idle now — kept fresh here so a Call tap
-    // (WaitingScreen's attemptCall) always checks a value at most 3s stale,
-    // not the value from whenever the screen first appeared.
-    LaunchedEffect(activeContact == null) {
-        while (activeContact == null) {
-            internetOk = hasInternet(context)
-            permissionsOk = hasPermissions(context)
-            delay(3000)
-        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -366,11 +286,6 @@ internal fun HomeScreen(
                 WaitingScreen(
                     contacts = state.contacts,
                     pairings = config.pairings,
-                    signalingOnline = state.signalingOnline,
-                    internetOk = internetOk,
-                    // Permission grant alone isn't enough — see
-                    // rememberCameraAvailable's doc.
-                    permissionsOk = permissionsOk && cameraAvailable,
                     onCall = { pairingId -> service?.requestCall(pairingId) },
                     onOpenSettings = onOpenSettings,
                     onAddContact = onAddContact,
@@ -739,9 +654,8 @@ private fun CallOutcomeScreen(
 
 /**
  * Contacts is the main content of this screen, centered — who you can call,
- * and whether each is currently reachable. Whether *this* device itself is
- * in working order (internet/permissions/relay connection) isn't shown here
- * at all unless it actually blocks a Call attempt — see attemptCall's doc.
+ * and whether each is currently reachable. Nothing about this device's own
+ * internet/permission/relay state is shown here at all.
  *
  * A row shows a badge only for one state that needs explaining — Busy (no
  * button, wait it out). The ordinary case (paired, not currently
@@ -759,9 +673,6 @@ private fun CallOutcomeScreen(
 private fun WaitingScreen(
     contacts: List<CameraAgentService.ContactState>,
     pairings: List<Pairing>,
-    signalingOnline: Boolean,
-    internetOk: Boolean,
-    permissionsOk: Boolean,
     onCall: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onAddContact: () -> Unit,
@@ -790,26 +701,11 @@ private fun WaitingScreen(
         )
         return
     }
-    // Checked at the moment of the attempt, not shown continuously — a call
-    // would otherwise just hang with no feedback against a cause the user
-    // can't see. One reason at a time, in root-cause order: no internet
-    // implies signaling can't be up either, so leading with it avoids
-    // reporting both as if they're independent problems.
-    var blockedCallMessage by remember { mutableStateOf<String?>(null) }
-    fun attemptCall(pairingId: String) {
-        blockedCallMessage = when {
-            !internetOk -> "No internet connection"
-            !permissionsOk -> "Camera & microphone access needed"
-            !signalingOnline -> "Not connected — check your network"
-            else -> null
-        }
-        if (blockedCallMessage == null) onCall(pairingId)
-    }
-    // Three overlaid corners/center (settings icon / contact list / status
-    // message), not a Column of three rows sized around each other — the
-    // contact list fills the entire screen and the other two float on top
-    // of it, same as every other overlaid corner in this app. Mirrors
-    // web's identical #screenWaiting restructuring (styles.css).
+    // Two overlaid corners/center (settings icon / contact list), not a
+    // Column sized around each other — the contact list fills the entire
+    // screen and the settings icon floats on top of it, same as every
+    // other overlaid corner in this app. Mirrors web's identical
+    // #screenWaiting restructuring (styles.css).
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize().porchlightScreenBackground(),
     ) {
@@ -832,11 +728,10 @@ private fun WaitingScreen(
                 // This Box is sizeSettingsFab (44dp), bigger than the 24dp
                 // icon it centers, so the icon's own ink sits an extra
                 // (44-24)/2=10dp deeper than the padding value alone
-                // suggests — confirmed live via the icon's own bounds vs.
-                // spacingStatusRegionLeftOffset's other use (the status
-                // message below). Subtracting that centering gap is what
-                // actually equalizes the two (web's .settings-fab applies
-                // the identical correction).
+                // suggests — confirmed live. Subtracting that centering gap
+                // is what actually matches the offset used elsewhere in
+                // this corner (web's .settings-fab applies the identical
+                // correction).
                 .padding(Dimens.spacingStatusRegionLeftOffset - (Dimens.sizeSettingsFab - Dimens.dimension24) / 2)
                 .size(Dimens.sizeSettingsFab)
                 .focusRequester(settingsFocusRequester)
@@ -909,7 +804,7 @@ private fun WaitingScreen(
                         // because anything enforces it.
                         canCall = contact.isPaired && !contact.connected && !anyCallActive,
                         status = contact.status,
-                        onCall = { attemptCall(contact.id) },
+                        onCall = { onCall(contact.id) },
                         autoAnswer = pairings.find { it.id == contact.id }?.autoAnswer == true,
                         onToggleAutoAnswer = { enabled -> onToggleAutoAnswer(contact.id, enabled) },
                         onDelete = { pendingDelete = contact },
@@ -937,15 +832,6 @@ private fun WaitingScreen(
                 // top one's own doc, and fadingEdges' (Theme.kt).
                 Spacer(modifier = Modifier.height(Dimens.listFadeHeightBottom))
             }
-        }
-        val message = blockedCallMessage
-        if (message != null) {
-            Text(
-                text = message,
-                color = GeneratedColor.colorActionDangerBackground,
-                style = Type.statusRow,
-                modifier = Modifier.align(Alignment.BottomStart).padding(start = Dimens.spacingStatusRegionLeftOffset, bottom = Dimens.spacingStatusRegionBottomOffset),
-            )
         }
     }
 }

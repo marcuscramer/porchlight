@@ -134,10 +134,6 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         // Set by a ShowCallOutcome effect, cleared by dismissCallOutcome() —
         // drives HomeScreen's full-screen "why did this call end" prompt.
         val pendingCallOutcome: PendingCallOutcome? = null,
-        // Whether the shared relay connection has at least one relay up —
-        // genuinely global, since there's exactly one NostrSignalingClient
-        // for the whole service.
-        val signalingOnline: Boolean = false,
         val statusText: String = "Disconnected",
         // Mirror of WebRtcEngine's own local-track enabled state, published
         // here so CallScreen's Audio/Video toggles can reflect it — reset to
@@ -764,9 +760,13 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
 
     // --- NostrSignalingClient.Listener --------------------------------------
 
-    override fun onSignalingConnected() = updateState { it.copy(signalingOnline = true) }
+    // Required overrides, but nothing in this app currently needs to react
+    // to relay-connection transitions specifically (as opposed to a real
+    // signal actually being processed, which onSignalProcessed below does
+    // drive UI from).
+    override fun onSignalingConnected() {}
 
-    override fun onSignalingDisconnected() = updateState { it.copy(signalingOnline = false) }
+    override fun onSignalingDisconnected() {}
 
     override fun onSignalProcessed(pairingId: String, createdAt: Long, eventId: String) {
         Config.updateLastSignal(this, pairingId, createdAt, eventId)

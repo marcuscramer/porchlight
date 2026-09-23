@@ -173,7 +173,6 @@ let wrapSub = null;
 let bootstrapSub = null;
 let heartbeatTimeoutHandle = null;
 let onlineCheckTimer = null;
-let signalingOk = false;
 
 function confirmedPeers() {
   return pairings.filter(isConfirmed).map((p) => (
@@ -241,21 +240,13 @@ function connectRelayClient() {
   // WebSocket only actually opens once something subscribes or publishes to
   // it. resubscribe() below skips calling pool.subscribe() at all when
   // there's nothing to filter for yet, so a brand-new profile with no
-  // contacts would otherwise never open any relay connection and
-  // "Connected" would incorrectly read red. ensureRelay() opens the
-  // connection directly, independent of any subscription.
+  // contacts would otherwise never open any relay connection at all.
+  // ensureRelay() opens the connection directly, independent of any
+  // subscription.
   for (const url of RELAYS) pool.ensureRelay(url).catch(() => {});
   resubscribe();
   onlineCheckTimer = setInterval(monitorOnlineTimeouts, ONLINE_CHECK_INTERVAL_MS);
-  setInterval(pollSignalingStatus, 3000);
   scheduleHeartbeat(0);
-  pollSignalingStatus();
-}
-
-function pollSignalingStatus() {
-  if (!pool) return;
-  const nowOk = [...pool.listConnectionStatus().values()].some(Boolean);
-  if (nowOk !== signalingOk) { signalingOk = nowOk; render(); }
 }
 
 function handleIncomingEvent(event) {
@@ -722,44 +713,6 @@ async function acceptIncomingCall() {
 }
 let localStream = null;
 let callActive = false;
-// Whether the one-time startup probe (see checkPermissions) confirmed
-// camera/mic access works — drives the waiting screen's "Camera & mic"
-// check now that localStream itself is no longer held open at idle.
-let permissionsOk = false;
-
-/**
- * Reflects whether camera/mic access is already granted, for the waiting
- * screen's checkmark — via the read-only Permissions API, which reports
- * state without ever showing a dialog, rather than calling getUserMedia()
- * just to find out. That distinction matters on Safari specifically: unlike
- * Chrome/Firefox, Safari doesn't durably cache a grant once every track
- * from a prior getUserMedia() call has been stopped, so a real probe here
- * would be an extra, needless prompt on top of whatever the first real call
- * triggers.
- */
-async function checkPermissions() {
-  if (navigator.permissions?.query) {
-    try {
-      const status = await navigator.permissions.query({ name: 'camera' });
-      permissionsOk = status.state === 'granted';
-      status.onchange = () => { permissionsOk = status.state === 'granted'; render(); };
-      render();
-      return;
-    } catch (err) {
-      // Older Safari/WebKit doesn't support querying 'camera' this way —
-      // fall through to the real-probe fallback below.
-    }
-  }
-  try {
-    const probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    probe.getTracks().forEach((t) => t.stop());
-    permissionsOk = true;
-  } catch (err) {
-    console.error('camera/mic permission check failed', err);
-    permissionsOk = false;
-  }
-  render();
-}
 
 // In-flight acquisition, if any — requestCall() calls acquireLocalStream()
 // eagerly (fire-and-forget, for the self-view) while ensurePeerConnection()
@@ -891,34 +844,16 @@ function applyCallEffects(effectsJson) {
   render();
 }
 
-/**
- * One reason at a time, in root-cause order — no internet implies signaling
- * can't be up either, so leading with it avoids reporting both as if
- * they're independent problems. null once everything checks out.
- */
-function blockedCallReason() {
-  if (!navigator.onLine) return 'No internet connection';
-  if (!permissionsOk) return 'Camera & microphone access needed';
-  if (!signalingOk) return 'Not connected — check your network';
-  return null;
-}
-
 /** Starts a call attempt — the only way any call ever starts. See
  * callCore.requestCall's own doc for the tie-break/deferred-call design (now
  * unified there, no longer split between this section and this file's old
- * setPeerOnline). Checked here, at the moment of the attempt, rather than
- * shown continuously — a call would otherwise just hang with no feedback
- * against a cause the user can't see. */
+ * setPeerOnline). Always attempted, regardless of known internet/signaling
+ * state — deliberately not pre-checked: acquireLocalStream(), triggered
+ * downstream via the StartRinging effect below, is what actually triggers
+ * the browser's real camera/mic permission prompt when needed, and a
+ * pre-check blocking this call would mean that prompt never fires at all,
+ * leaving no way to grant access in the first place. */
 function requestCall(pairingId) {
-  const reason = blockedCallReason();
-  const statusEl = el('statusMessage');
-  if (reason) {
-    statusEl.textContent = reason;
-    statusEl.hidden = false;
-    return;
-  }
-  statusEl.hidden = true;
-
   const peer = findPairing(pairingId);
   if (!peer) return;
   const ownPubkeyHex = ownPubkeyHexFor(peer.ownPrivateKeyHex);
@@ -1674,20 +1609,10 @@ el('callOutcomeCancel').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 
 async function startApp() {
-  // Deliberately NOT awaited before connecting to relays: on a browser
-  // without the Permissions API, checkPermissions() falls back to a real
-  // getUserMedia() call that blocks on a human answering an actual
-  // permission popup — awaiting it here would leave relay connection (and
-  // the "Connected" status check) hanging behind that unrelated dialog. The
-  // two checks are logically independent and must run concurrently.
-  checkPermissions();
   screen = 'waiting';
   render();
   connectRelayClient();
 }
-
-window.addEventListener('online', render);
-window.addEventListener('offline', render);
 
 if (deviceName) {
   screen = 'waiting';

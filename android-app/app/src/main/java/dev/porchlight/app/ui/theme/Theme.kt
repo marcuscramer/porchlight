@@ -108,19 +108,19 @@ fun Modifier.porchlightScreenBackground(): Modifier = this.drawWithCache {
  * dissolves empty space, not content; scroll past it and real content
  * takes its place there instead.
  *
- * Each zone is split in half, not one plain linear fade end to end — found
- * live: a straight fade across the entire topHeight/bottomHeight span is
- * still clearly legible almost all the way to a screen's own overlaid
- * corner content (the settings gear/status strip, in WaitingScreen's case)
- * — a linear ramp is nowhere near transparent until its very last few dp —
- * so real row text and that overlaid content's own text read as
- * overlapping right where they're closest. The *outer* half (nearest
- * whatever this fades behind) is a flat, already-fully-transparent zone
- * instead; the *inner* half (nearest the visible rows) is where the actual
- * black-to-transparent transition happens, compressed into half the space.
- * Caller-supplied topHeight/bottomHeight should be sized so their own
- * half comfortably clears whatever real, measured overlay sits there — see
- * WaitingScreen's own call site for the numbers.
+ * Each zone is split in half, not one plain linear fade end to end — a
+ * straight fade across the entire topHeight/bottomHeight span is still
+ * clearly legible almost all the way to a screen's own overlaid corner
+ * content (the settings gear, in WaitingScreen's case) — a linear ramp is
+ * nowhere near transparent until its very last few dp — so real row text
+ * and that overlaid content's own text read as overlapping right where
+ * they're closest. The *outer* half (nearest whatever this fades behind)
+ * is a flat, already-fully-transparent zone instead; the *inner* half
+ * (nearest the visible rows) is where the actual black-to-transparent
+ * transition happens, compressed into half the space. Caller-supplied
+ * topHeight/bottomHeight should be sized so their own half comfortably
+ * clears whatever real, measured overlay sits there — see WaitingScreen's
+ * own call site for the numbers.
  *
  * `graphicsLayer(alpha = 0.99f)` forces this subtree onto its own
  * compositing layer, which [BlendMode.DstIn] needs in order to only affect
