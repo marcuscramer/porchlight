@@ -294,9 +294,11 @@ private fun rememberCameraAvailable(context: Context, capturing: Boolean): Boole
  * (contact list), calling (self-view only, waiting on a peer who may not
  * even be reachable yet — no timeout, see CallingScreen's doc), and
  * connected (full remote video). `internetOk`/`permissionsOk`/
- * `cameraAvailable` don't gate which of these shows — they're
- * informational only (WaitingScreen's status strip); Call is always
- * available and just takes however long it takes.
+ * `cameraAvailable` don't gate which of these shows or whether the Call
+ * button is enabled — they're only checked at the moment of an actual tap
+ * (WaitingScreen's attemptCall), which blocks the attempt with a message
+ * instead of proceeding into an idle "calling" state with no way to
+ * succeed.
  */
 @Composable
 internal fun HomeScreen(
@@ -333,9 +335,9 @@ internal fun HomeScreen(
         if (showCallControls) showCallControls = false else service?.hangUp()
     }
 
-    // Only meaningful while idle now — this is purely feeding
-    // WaitingScreen's status strip, not gating anything about whether a
-    // call can be attempted.
+    // Only meaningful while idle now — kept fresh here so a Call tap
+    // (WaitingScreen's attemptCall) always checks a value at most 3s stale,
+    // not the value from whenever the screen first appeared.
     LaunchedEffect(activeContact == null) {
         while (activeContact == null) {
             internetOk = hasInternet(context)
@@ -737,9 +739,9 @@ private fun CallOutcomeScreen(
 
 /**
  * Contacts is the main content of this screen, centered — who you can call,
- * and whether each is currently reachable. Status (is *this* device itself
- * in working order) is secondary background info, pinned to the bottom in
- * a smaller, muted style.
+ * and whether each is currently reachable. Whether *this* device itself is
+ * in working order (internet/permissions/relay connection) isn't shown here
+ * at all unless it actually blocks a Call attempt — see attemptCall's doc.
  *
  * A row shows a badge only for one state that needs explaining — Busy (no
  * button, wait it out). The ordinary case (paired, not currently
@@ -752,10 +754,6 @@ private fun CallOutcomeScreen(
  * There's no "needs verification" state anymore — a SPAKE2-confirmed
  * candidate is only ever surfaced live, on [PairingProgressScreen] itself,
  * never as something that lingers here waiting to be picked back up later.
- *
- * "Connected" is one shared relay-connection indicator, not a per-contact
- * breakdown — there's only one NostrSignalingClient for the whole device
- * (see its class doc).
  */
 @Composable
 private fun WaitingScreen(
@@ -791,6 +789,21 @@ private fun WaitingScreen(
             onCancel = { pendingDelete = null },
         )
         return
+    }
+    // Checked at the moment of the attempt, not shown continuously — a call
+    // would otherwise just hang with no feedback against a cause the user
+    // can't see. One reason at a time, in root-cause order: no internet
+    // implies signaling can't be up either, so leading with it avoids
+    // reporting both as if they're independent problems.
+    var blockedCallMessage by remember { mutableStateOf<String?>(null) }
+    fun attemptCall(pairingId: String) {
+        blockedCallMessage = when {
+            !internetOk -> "No internet connection"
+            !permissionsOk -> "Camera & microphone access needed"
+            !signalingOnline -> "Not connected — check your network"
+            else -> null
+        }
+        if (blockedCallMessage == null) onCall(pairingId)
     }
     // Three overlaid corners/center (settings icon / contact list / status
     // strip), not a Column of three rows sized around each other — the
@@ -895,7 +908,7 @@ private fun WaitingScreen(
                         // because anything enforces it.
                         canCall = contact.isPaired && !contact.connected && !anyCallActive,
                         status = contact.status,
-                        onCall = { onCall(contact.id) },
+                        onCall = { attemptCall(contact.id) },
                         autoAnswer = pairings.find { it.id == contact.id }?.autoAnswer == true,
                         onToggleAutoAnswer = { enabled -> onToggleAutoAnswer(contact.id, enabled) },
                         onDelete = { pendingDelete = contact },
@@ -924,21 +937,14 @@ private fun WaitingScreen(
                 Spacer(modifier = Modifier.height(Dimens.listFadeHeightBottom))
             }
         }
-        Row(
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = Dimens.spacingStatusRegionLeftOffset, bottom = Dimens.spacingStatusRegionBottomOffset),
-            horizontalArrangement = Arrangement.spacedBy(Dimens.spacingStatusRowGap),
-        ) {
-            StatusRow("Internet", internetOk)
-            StatusRow("Camera & mic", permissionsOk)
-            // One shared relay connection now, not one per contact.
-            StatusRow("Connected", signalingOnline)
-
-            // No "third device" warning here: that concept doesn't
-            // translate from Ably's shared-key model, where a leaked key
-            // let a stranger show up inside the same channel as your real
-            // peer. Nostr has no shared secret to leak — a message only
-            // ever routes to a confirmed contact by matching their exact
-            // pubkey, which a stranger can't forge.
+        val message = blockedCallMessage
+        if (message != null) {
+            Text(
+                text = message,
+                color = GeneratedColor.colorActionDangerBackground,
+                style = Type.statusRow,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = Dimens.spacingStatusRegionLeftOffset, bottom = Dimens.spacingStatusRegionBottomOffset),
+            )
         }
     }
 }
@@ -1113,25 +1119,6 @@ private fun DeleteIconButton(onClick: () -> Unit, contentDescription: String, mo
     }
 }
 
-// Small and muted on purpose — this is background health info pinned to the
-// bottom of the waiting screen, not the point of it (Contacts is). See
-// WaitingScreen's doc.
-@Composable
-private fun StatusRow(label: String, ok: Boolean) {
-    // Without this, TalkBack would read the ✓/✗ glyph and the label as two
-    // separate, unlabeled nodes — one merged description instead.
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Dimens.spacingStatusIconGap),
-        modifier = Modifier.clearAndSetSemantics { contentDescription = "$label: ${if (ok) "OK" else "Not OK"}" },
-    ) {
-        // Same dim color as the label, not a separate ok/bad green/red — a
-        // colored icon here would read as a louder status signal than this
-        // corner checklist is meant to carry.
-        Text(if (ok) "✓" else "✗", color = GeneratedColor.colorTextDim, style = Type.statusRow)
-        Text(label, color = GeneratedColor.colorTextDim, style = Type.statusRow)
-    }
-}
 
 /**
  * Shared implementation behind [RemoteVideoView] and [LocalPreviewView] —

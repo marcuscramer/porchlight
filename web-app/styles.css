@@ -419,23 +419,15 @@ html, body {
   justify-self: center;
 }
 
-.checklist {
-  display: flex;
-  gap: var(--spacing-status-row-gap);
-}
-
-/* Small and dim — background info, not a thing you're meant to read from
-   across a room, unlike .contact-name/.contact-status-dot. The ✓/✗ glyph
-   is the same dim color as its label, not a separate ok/bad green/red —
-   .contact-status-dot is where ok/busy/danger color-as-meaning belongs. */
-.check-row {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-status-icon-gap);
+/* Only ever shown when a Call attempt gets blocked (see requestCall's
+   blockedCallReason()) — danger-toned rather than .check-row's old dim
+   gray, since its mere presence is now the signal. */
+.status-message {
+  margin: 0;
   font-family: var(--typography-status-row-font-family);
   font-weight: var(--typography-status-row-font-weight);
   font-size: var(--typography-status-row-font-size);
-  color: var(--color-text-dim);
+  color: var(--color-action-danger-background);
 }
 
 /* Bottom-left, small — mirrors WaitingScreen's own

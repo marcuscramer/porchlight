@@ -891,11 +891,34 @@ function applyCallEffects(effectsJson) {
   render();
 }
 
+/**
+ * One reason at a time, in root-cause order — no internet implies signaling
+ * can't be up either, so leading with it avoids reporting both as if
+ * they're independent problems. null once everything checks out.
+ */
+function blockedCallReason() {
+  if (!navigator.onLine) return 'No internet connection';
+  if (!permissionsOk) return 'Camera & microphone access needed';
+  if (!signalingOk) return 'Not connected — check your network';
+  return null;
+}
+
 /** Starts a call attempt — the only way any call ever starts. See
  * callCore.requestCall's own doc for the tie-break/deferred-call design (now
  * unified there, no longer split between this section and this file's old
- * setPeerOnline). */
+ * setPeerOnline). Checked here, at the moment of the attempt, rather than
+ * shown continuously — a call would otherwise just hang with no feedback
+ * against a cause the user can't see. */
 function requestCall(pairingId) {
+  const reason = blockedCallReason();
+  const statusEl = el('statusMessage');
+  if (reason) {
+    statusEl.textContent = reason;
+    statusEl.hidden = false;
+    return;
+  }
+  statusEl.hidden = true;
+
   const peer = findPairing(pairingId);
   if (!peer) return;
   const ownPubkeyHex = ownPubkeyHexFor(peer.ownPrivateKeyHex);
@@ -1373,10 +1396,6 @@ el('settingsBtn').addEventListener('click', () => { screen = 'settings'; render(
  * Android/TV-only), and the list ends with a plain "Add contact" row.
  */
 function renderWaitingScreen() {
-  setCheck(el('chkInternet'), navigator.onLine);
-  setCheck(el('chkPermissions'), permissionsOk);
-  setCheck(el('chkSignaling'), signalingOk);
-
   const listEl = el('contactList');
   // Rebuilding from scratch (innerHTML = '') on every call resets scrollTop
   // to 0 the moment real layout happens — confirmed live once a presence
@@ -1487,10 +1506,6 @@ function renderWaitingScreen() {
   // See savedScrollTop's own doc above — an out-of-range scrollTop clamps
   // to the real max on its own.
   listEl.scrollTop = savedScrollTop;
-}
-
-function setCheck(node, ok) {
-  node.textContent = ok ? '✓' : '✗';
 }
 
 // --- Device settings (mirrors AdminChoiceScreen) ------------------------
