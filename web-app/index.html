@@ -21,7 +21,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Porchlight" />
-  <meta name="theme-color" content="#16202b" />
+  <!-- theme-color is a flat color, but the top edge of every .screen isn't
+       — its glow (centered just above the top edge) sits at close to full
+       intensity there, so this matches the glow itself rather than the
+       screen's base navy, to avoid a visible seam right at the chrome. -->
+  <meta name="theme-color" content="#212f3f" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
