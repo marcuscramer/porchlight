@@ -14,7 +14,11 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: var(--color-background-app);
+  /* Matches every .screen's own actual background (not
+     --color-background-app) — this is what shows at any exposed edge:
+     Safari's chrome via <meta name="theme-color">, rubber-band overscroll,
+     letterboxed margins on a standalone iOS launch. */
+  background: var(--color-background-waiting);
   color: var(--color-text-primary);
   font-family: var(--font-family-inter);
 }
