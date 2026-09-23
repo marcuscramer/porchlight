@@ -88,16 +88,18 @@ fresh, unpaired profile, the same as reinstalling the Android app.
 - **Calling**: tap a contact's Call button. If they're not reachable right
   this second, the call just waits — there's no need for them to already
   be "online."
-- **Incoming calls**: ring for a manual Accept/Decline, unless
-  auto-answer is turned on for that contact (Settings, per contact), in
-  which case the call connects automatically after a short countdown.
-- **Status dots** next to each contact are purely informational — a
-  green dot means they're currently reachable, orange means they're on
-  another call right now, and neither is required before you can tap
-  Call.
-- **Renaming this device** or **adding another contact**: hold the Back
-  button (or tap the small gear icon on the waiting screen) to reach
-  Settings.
+- **Incoming calls**: ring for a manual Accept/Decline. On the Portal app
+  (not the web version), auto-answer can be turned on for a contact — a
+  toggle right on their row in the contact list — so a call from them
+  connects automatically after a short countdown instead.
+- **Status dots** next to each contact are purely informational — green
+  means they're currently reachable, orange means they're on another call
+  right now, red means they're not currently reachable, and none of this
+  is required before you can tap Call.
+- **Adding another contact**: tap the "+" button below the contact list.
+- **Renaming this device**: tap the small gear icon on the waiting screen
+  to reach Settings (on the Portal app, holding the remote's Back button
+  does the same thing).
 - **Removing a contact**: tap the bin icon next to their name. This is
   permanent — to reconnect with them later, pair again with a fresh
   phrase.
