@@ -47,17 +47,14 @@ html, body {
     env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
-/* One dim glow near the top-left corner, fading into the same flat navy
-   every screen uses — see MainActivity.kt/Theme.kt's own
-   porchlightScreenBackground() for the Android side of this identical
-   rule. vh-based ellipse radii (not fixed px) so the glow's proportions
-   hold from a phone viewport up through a TV-shaped desktop one. */
+/* Flat navy, no glow — web-only difference from Android's identical
+   porchlightScreenBackground() (MainActivity.kt/Theme.kt), which keeps its
+   glow. A gradient here left no solid color that theme-color (browser
+   chrome/home-screen edges) could ever match without a visible seam. */
 .screen {
   width: 100%;
   height: 100%;
-  background:
-    radial-gradient(ellipse 50vh 90vh at 22% -8%, var(--color-background-glow), transparent 60%),
-    var(--color-background-waiting);
+  background: var(--color-background-waiting);
 }
 
 .screen.centered {
