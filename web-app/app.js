@@ -507,6 +507,22 @@ function announceLeaving() {
 }
 window.addEventListener('beforeunload', announceLeaving);
 
+// Mobile browsers throttle/pause background tabs — timers (including
+// scheduleHeartbeat's own setTimeout) can stall for far longer than their
+// nominal delay, and the relay WebSocket connection can drop entirely,
+// while the phone is asleep or the tab is backgrounded. Without this, a
+// contact looks stuck "offline" (and a call placed right away can fail to
+// connect) for however long it takes the *next* naturally-scheduled
+// heartbeat to fire after coming back — found live: calling right after
+// waking the phone didn't connect, but trying again immediately after did,
+// since that second attempt's own kickHeartbeat (sendCall's own call) was
+// what actually got a fresh heartbeat out. kickHeartbeat() here does the
+// same thing proactively, the moment the tab is actually looked at again,
+// instead of waiting for a retry to stumble into it.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') kickHeartbeat();
+});
+
 // ---------------------------------------------------------------------------
 // Pairing (SPAKE2) — mirrors CameraAgentService.kt's PakeAttempt/
 // beginPakeAttempt/onPairingBootstrapMessage/confirmPeer. Fully symmetric,
