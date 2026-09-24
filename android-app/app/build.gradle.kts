@@ -34,15 +34,14 @@ android {
 
         // Quartz's secp256k1 crypto is JNI-native — the Portal only ever
         // reports arm64-v8a/armeabi-v7a (see
-        // `adb shell getprop ro.product.cpu.abilist`). x86_64 is built too
-        // (not just arm/arm64) so the app actually installs and runs on
-        // the Android emulator for real UI verification — this machine's
-        // emulator can't run arm64 images at all on an x86_64 host, and
-        // Quartz's own secp256k1-kmp-jni-android AAR already ships an
-        // x86_64 slice, so there's no native-library gap here, just this
-        // filter.
+        // `adb shell getprop ro.product.cpu.abilist`). x86_64 isn't a real
+        // device ABI at all — it's added only for the debug build type
+        // below, so the app installs and runs on the Android emulator for
+        // UI verification (this machine's emulator can't run arm64 images
+        // on an x86_64 host). Release only ever ships what real Portal
+        // hardware can use.
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
 
         // Where UpdateChecker.kt looks for new releases — a GitHub
@@ -99,6 +98,12 @@ android {
 
     buildTypes {
         debug {
+            // x86_64 only, on top of defaultConfig's real-device ABIs — see
+            // that block's own doc. Debug-only because it exists purely for
+            // running on this machine's x86_64 emulator.
+            ndk {
+                abiFilters += listOf("x86_64")
+            }
             // Local convenience: pre-fill this device's name so a
             // fresh debug install skips the name-entry screen. Set it in the
             // gitignored local.properties (porchlight.deviceName=...) or pass
@@ -157,8 +162,11 @@ kotlin {
 //   sdkmanager --install "ndk;27.3.13750724"   # or record whatever exact
 //                                               # version was actually used
 // "arm"/"arm64"/"x86_64" below are this plugin's own target aliases for
-// armeabi-v7a/arm64-v8a/x86_64 — matches this module's existing
-// ndk.abiFilters above exactly, on purpose.
+// armeabi-v7a/arm64-v8a/x86_64 — the union of defaultConfig's real-device
+// ABIs and debug's added x86_64 above, on purpose. Cargo builds all three
+// for any variant regardless (this plugin isn't variant-aware); Android's
+// own per-buildType abiFilters is what actually keeps x86_64 out of a
+// release APK.
 cargo {
     module = "../../call-core"
     libname = "call_core"
