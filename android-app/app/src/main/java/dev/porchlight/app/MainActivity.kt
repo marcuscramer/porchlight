@@ -365,11 +365,17 @@ private fun AppRoot(
     val state by (service?.state?.collectAsState() ?: remember { mutableStateOf(CameraAgentService.AgentState()) })
     var adminScreen by remember { mutableStateOf<AdminScreen?>(null) }
 
-    // Keep the screen on while connected so it can't sleep mid-call.
-    LaunchedEffect(state.running) {
+    // Keep the screen on while a call is active so it can't sleep mid-call.
+    // Keyed on activePairingId (same signal HomeScreens.kt's own
+    // activeContact uses), not state.running — found live on real Portal
+    // hardware that running stays true the entire time the background
+    // service is connected to signaling, not just during a call, which
+    // kept the screen (and Immortal's screensaver) from ever going idle
+    // while just sitting on the waiting screen.
+    LaunchedEffect(state.activePairingId) {
         val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         (context as? android.app.Activity)?.window?.let {
-            if (state.running) it.addFlags(flag) else it.clearFlags(flag)
+            if (state.activePairingId != null) it.addFlags(flag) else it.clearFlags(flag)
         }
     }
 
