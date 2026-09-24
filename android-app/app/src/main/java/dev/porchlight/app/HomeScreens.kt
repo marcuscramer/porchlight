@@ -42,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentWithReceiverOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -301,17 +302,31 @@ internal fun HomeScreen(
     // added after RemoteVideoView) does. movableContentOf relocates the
     // same renderer to whichever position is actually invoked below,
     // with no dispose/recreate either way.
+    // remember{}'s initializer runs exactly once — without these, the
+    // movableContentWithReceiverOf closure below would permanently close
+    // over whichever peerConnectedOk/config/state/service values existed
+    // at that one moment (plain local vals, not observable State), never
+    // seeing a later real call actually connect. Found live: the
+    // self-view rendered full-screen-sized forever regardless of call
+    // state, because remember's block happened to first run before any
+    // call had ever connected. rememberUpdatedState is the standard fix
+    // for "a memoized-once lambda needs to see this recomposition's
+    // actual value."
+    val latestService by rememberUpdatedState(service)
+    val latestState by rememberUpdatedState(state)
+    val latestConfig by rememberUpdatedState(config)
+    val latestPeerConnectedOk by rememberUpdatedState(peerConnectedOk)
     val selfView = remember {
         movableContentWithReceiverOf<BoxScope> {
-            val previewModifier = if (peerConnectedOk) {
+            val previewModifier = if (latestPeerConnectedOk) {
                 Modifier
-                    .align(config.previewCorner.toAlignment())
+                    .align(latestConfig.previewCorner.toAlignment())
                     .padding(Dimens.spacingContactRowGap)
                     .size(Dimens.sizeLocalPreviewWidth, Dimens.sizeLocalPreviewHeight)
             } else {
                 Modifier.fillMaxSize()
             }
-            LocalPreviewView(service = service, ready = state.capturing, modifier = previewModifier)
+            LocalPreviewView(service = latestService, ready = latestState.capturing, modifier = previewModifier)
         }
     }
 
