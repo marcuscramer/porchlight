@@ -29,8 +29,8 @@ android {
         // Portal devices run older AOSP. minSdk 28, target 29 per Portal guidance.
         minSdk = 28
         targetSdk = 29
-        versionCode = 2
-        versionName = "0.1"
+        versionCode = 3
+        versionName = "0.2"
 
         // Quartz's secp256k1 crypto is JNI-native — the Portal only ever
         // reports arm64-v8a/armeabi-v7a (see
