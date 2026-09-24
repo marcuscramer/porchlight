@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -1069,7 +1070,25 @@ private fun SurfaceVideoView(
     val renderer = remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     val initialized = remember { mutableStateOf(false) }
     AndroidView(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().onSizeChanged { size ->
+            // Found live on real Portal hardware: this being the SAME
+            // renderer instance across a layout-only resize (full-screen
+            // while ringing -> a small corner box once connected, see
+            // HomeScreen's own doc for why it's one instance now, not a
+            // fresh one per screen) left the self-view invisible until
+            // some LATER, unrelated layout change (cycling preview
+            // position) happened to kick it. This hardware-overlay
+            // SurfaceView's actual buffer geometry apparently isn't
+            // always re-negotiated with the compositor by a plain
+            // View layout pass alone — setFixedSize() explicitly forces
+            // that renegotiation on every real size change, not just the
+            // first. A no-op-ish redundant call on the size that already
+            // applied automatically (e.g. plain corner-to-corner moves)
+            // is harmless.
+            if (initialized.value && size.width > 0 && size.height > 0) {
+                runCatching { renderer.value?.holder?.setFixedSize(size.width, size.height) }
+            }
+        },
         factory = { ctx -> SurfaceViewRenderer(ctx).also { renderer.value = it } },
         // Runs exactly once, when this leaves composition for good —
         // unlike the DisposableEffect below, which re-fires on every
