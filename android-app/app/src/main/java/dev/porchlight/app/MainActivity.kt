@@ -716,8 +716,8 @@ private fun AdminChoiceScreen(
         null -> "Checking for updates…"
         UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
         UpdateCheckResult.UpToDate -> "You're on the latest version$versionSuffix"
-        is UpdateCheckResult.Downloading -> "Downloading ${result.tag}…"
-        is UpdateCheckResult.Ready -> "${result.tag} downloaded."
+        is UpdateCheckResult.Downloading -> "Downloading ${result.versionName}…"
+        is UpdateCheckResult.Ready -> "${result.versionName} downloaded."
         is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
     }
 
