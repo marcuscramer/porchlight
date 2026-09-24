@@ -205,6 +205,19 @@ cargo {
 // between them. Depending on styleDictionaryBuildAndroid directly from the
 // Kotlin compile tasks closes that gap instead of relying on an indirect
 // path that happened to work locally by luck of task scheduling.
+// mergeReleaseJniLibFolders needs the exact same direct-dependency
+// treatment as compileReleaseKotlin above, for the exact same reason —
+// found live on real Portal TV hardware (not caught by any emulator
+// testing, which only ever installs debug builds): a real assembleRelease
+// scheduled mergeReleaseJniLibFolders/mergeReleaseNativeLibs *before*
+// cargoBuild even started, so the release APK packaged zero bytes of
+// libcall_core.so for every ABI — installs fine, then crashes on first
+// launch with UnsatisfiedLinkError the moment CallCoreBridge's static
+// initializer runs, and this app's own crash handler (PorchlightApplication)
+// restarts it, producing an infinite relaunch loop. The debug variant's
+// mergeDebugJniLibFolders happened to already run after cargoBuild in
+// practice, which is exactly the "worked locally by luck of scheduling"
+// trap this file already has one prior example of.
 tasks.whenTaskAdded {
     if (name == "javaPreCompileDebug" || name == "javaPreCompileRelease") {
         dependsOn("cargoBuild")
@@ -212,6 +225,9 @@ tasks.whenTaskAdded {
     }
     if (name == "compileDebugKotlin" || name == "compileReleaseKotlin") {
         dependsOn("styleDictionaryBuildAndroid")
+    }
+    if (name == "mergeDebugJniLibFolders" || name == "mergeReleaseJniLibFolders") {
+        dependsOn("cargoBuild")
     }
 }
 
