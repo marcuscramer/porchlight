@@ -151,3 +151,11 @@ This is an independent hobby project, not affiliated with, endorsed by,
 or sponsored by Meta. "Meta" and "Portal" are trademarks of Meta
 Platforms, Inc., used here only to describe the hardware this software
 runs on.
+
+Meta Portal hardware is discontinued and no longer gets meaningful
+security updates from Meta, whether it's running stock or with Immortal.
+Porchlight is third-party, unofficial software, sideloaded outside
+Meta's own app ecosystem — directly via Developer Options on a stock
+Portal, or through Immortal's catalog on a Portal already set up with
+it. Either way, you're installing it at your own risk, the same as any
+other sideloaded app.
