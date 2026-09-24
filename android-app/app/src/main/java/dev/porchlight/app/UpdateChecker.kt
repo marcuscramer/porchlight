@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import android.util.Log
 import androidx.core.content.FileProvider
 import java.io.File
@@ -278,10 +280,32 @@ object UpdateChecker {
     }
 
     /**
+     * Installs the already-downloaded update APK if this app currently has
+     * install permission, otherwise sends the user to the one Settings
+     * screen that grants it. Shared by [UpdateInstallReceiver] (a tap on
+     * the "update ready" notification) and Settings' own in-app "Install
+     * now" button — the notification alone isn't a reliable path on
+     * Android TV: confirmed live that a correctly-posted notification
+     * never surfaces in the Google TV notification panel at all, leaving
+     * no way to reach it, so the in-app button is the path that actually
+     * works on this platform.
+     */
+    fun installOrRequestPermission(context: Context) {
+        if (context.packageManager.canRequestPackageInstalls()) {
+            launchInstall(context)
+        } else {
+            context.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+
+    /**
      * Launches the system package installer for the already-downloaded
-     * APK — called from [UpdateInstallReceiver] once install permission is
-     * confirmed. Separated out so both it and any future caller (e.g. a
-     * manual "Install now" action) share one path.
+     * APK — called once install permission is confirmed. Separated out so
+     * both [installOrRequestPermission] and any future caller share one
+     * path.
      */
     fun launchInstall(context: Context) {
         val file = apkFile(context)

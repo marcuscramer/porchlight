@@ -727,11 +727,16 @@ private fun AdminChoiceScreen(
             UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
             UpdateCheckResult.UpToDate -> "You're on the latest version."
             is UpdateCheckResult.Downloading -> "Downloading ${result.tag}…"
-            is UpdateCheckResult.Ready -> "${result.tag} downloaded — check your notifications to install."
+            is UpdateCheckResult.Ready -> "${result.tag} downloaded."
             is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
         }
         if (message != null) {
             Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodySmall)
+        }
+        if (checkResult is UpdateCheckResult.Ready) {
+            TvButton(onClick = { UpdateChecker.installOrRequestPermission(context) }) {
+                Text("Install now")
+            }
         }
     }
 }
