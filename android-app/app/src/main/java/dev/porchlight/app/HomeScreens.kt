@@ -1108,22 +1108,31 @@ private fun SurfaceVideoView(
     val initialized = remember { mutableStateOf(false) }
     AndroidView(
         modifier = modifier.fillMaxSize().onSizeChanged { size ->
-            // Found live on real Portal hardware: this being the SAME
-            // renderer instance across a layout-only resize (full-screen
-            // while ringing -> a small corner box once connected, see
-            // HomeScreen's own doc for why it's one instance now, not a
-            // fresh one per screen) left the self-view invisible until
-            // some LATER, unrelated layout change (cycling preview
-            // position) happened to kick it. This hardware-overlay
-            // SurfaceView's actual buffer geometry apparently isn't
-            // always re-negotiated with the compositor by a plain
-            // View layout pass alone — setFixedSize() explicitly forces
-            // that renegotiation on every real size change, not just the
-            // first. A no-op-ish redundant call on the size that already
-            // applied automatically (e.g. plain corner-to-corner moves)
-            // is harmless.
-            if (initialized.value && size.width > 0 && size.height > 0) {
-                runCatching { renderer.value?.holder?.setFixedSize(size.width, size.height) }
+            // Found live on real Portal hardware, across several attempts:
+            // this being the SAME renderer instance across a layout-only
+            // resize (full-screen while ringing -> a small corner box once
+            // connected, see HomeScreen's own doc for why it's one
+            // instance now, not a fresh one per screen) left the self-view
+            // invisible — confirmed via logcat that frames *were* still
+            // being decoded and rendered into a correctly-sized, zero-drop
+            // surface the whole time, so this isn't a data/frame problem,
+            // and a plain holder.setFixedSize() call didn't fix it either.
+            // What empirically did fix it, observed live: a real
+            // EglRenderer release()+init() cycle (which happened by
+            // accident from unrelated button presses during testing).
+            // This makes that teardown+recreate deliberate and reliable on
+            // every genuine size change instead of accidental — same
+            // renderer object throughout, so the video-track sink
+            // registration (attach/detach, see the DisposableEffect below)
+            // is never touched, only this renderer's own EGL surface.
+            val view = renderer.value
+            val eglContext = service?.eglContext
+            if (initialized.value && view != null && eglContext != null && size.width > 0 && size.height > 0) {
+                runCatching { view.release() }
+                runCatching { view.init(eglContext, null) }
+                view.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                if (mirror) view.setMirror(true)
+                view.setZOrderMediaOverlay(true)
             }
         },
         factory = { ctx -> SurfaceViewRenderer(ctx).also { renderer.value = it } },
