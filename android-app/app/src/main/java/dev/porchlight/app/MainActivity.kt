@@ -719,16 +719,18 @@ private fun AdminChoiceScreen(
                 mainHandler.post { checkResult = result }
             }
         }
-        Text("v${BuildConfig.VERSION_NAME}", color = GeneratedColor.colorTextDim)
+        val versionSuffix = " (v${BuildConfig.VERSION_NAME})"
         val message = when (val result = checkResult) {
             null -> "Checking for updates…"
             UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
-            UpdateCheckResult.UpToDate -> "You're on the latest version."
+            UpdateCheckResult.UpToDate -> "You're on the latest version$versionSuffix"
             is UpdateCheckResult.Downloading -> "Downloading ${result.tag}…"
             is UpdateCheckResult.Ready -> "${result.tag} downloaded."
             is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
         }
-        Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodySmall)
+        // Same styling as "Launch on boot" above, not the dimmed/small
+        // treatment this used to have.
+        Text(message, color = GeneratedColor.colorTextPrimary)
         // The only update-related control now — nothing to tap unless
         // there's actually something to install.
         if (checkResult is UpdateCheckResult.Ready) {
