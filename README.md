@@ -8,6 +8,12 @@ and two devices pair by simply agreeing on a shared phrase.
 The two ends of a call don't need matching setups: Portal to Portal,
 Portal to browser, or browser to browser all work the same way.
 
+Calls connect directly between the two devices whenever a direct
+connection is possible. There's no fallback relay yet for the networks
+where it isn't (for example, both people on separate, more restrictive
+office or mobile networks) — in that case the call may simply fail to
+connect. See [SECURITY.md](SECURITY.md) for the technical detail.
+
 ## What you need
 
 - **Just a browser** — the web version needs nothing installed. See
@@ -28,6 +34,10 @@ Portal to browser, or browser to browser all work the same way.
     Google Play Services at all.
   - A computer to run `adb install` from, for the initial install (see
     below).
+  - Only tested on the remote-driven **Portal TV**. The touchscreen Portal
+    models (Portal, Portal+, Portal Go, Portal Mini) haven't been tried —
+    the app's on-screen controls are built for a remote's D-pad and may
+    not respond to touch at all.
 
 ## Installing on a Portal TV
 
@@ -52,8 +62,10 @@ permissions the app asks for.
 same pairing flow, same calling. It's a real, full option for regular
 calls, not a fallback or a developer testing tool.
 
-To use it, host `web-app/` somewhere reachable (any static web host), or
-open `web-app/index.html` directly for a quick local test.
+The easiest way to use it: **[marcuscramer.github.io/porchlight](https://marcuscramer.github.io/porchlight/)**
+— nothing to install, just open it. If you'd rather run your own copy,
+host `web-app/` somewhere reachable (any static web host), or open
+`web-app/index.html` directly for a quick local test.
 
 The web version stores its name and contacts in that browser's own local
 storage — clearing the browser's site data for that page resets it to a
