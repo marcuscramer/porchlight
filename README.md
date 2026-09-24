@@ -57,6 +57,38 @@ sideloaded app does.
 On first launch, grant the camera, microphone, and notification
 permissions the app asks for.
 
+### Letting the app update itself
+
+Porchlight checks for new releases and can install them for you from
+Settings. For that to actually work, Meta's own on-device install
+verifier needs to be turned off once — otherwise it silently rejects
+*any* sideloaded app's install, including Porchlight's own updates, no
+matter how the install is triggered. This is a one-time step, run from
+the same computer you used for the initial `adb install`:
+
+```
+adb shell pm disable-user --user 0 com.facebook.appverifier
+adb shell settings put global package_verifier_enable 0
+```
+
+The first command turns off the specific app that does the rejecting;
+the second turns off Android's own install-verification system as a
+whole, which is what asks that app to approve or reject installs in the
+first place. Both are one-time, reversible (`adb shell pm enable
+com.facebook.appverifier` and setting the value back to `1` restore
+them), and only work from `adb shell` since they touch protected system
+settings no ordinary app is allowed to change.
+
+If you'd rather not touch that setting, that's fine — just skip this
+step. In-app updates won't install (they'll download, then silently do
+nothing when you tap Install), but you can still update the same way
+you installed: download the new APK and run `adb install -r` yourself.
+
+If you're using [Immortal](https://github.com/starbrightlab/immortal),
+you don't need to do this manually — its provisioning kit disables the
+same verifier automatically as part of setup, for the same reason (it
+needs to install and update apps on-device too).
+
 ## Using the web version
 
 `web-app/` is a browser page that works exactly like the Android app —
