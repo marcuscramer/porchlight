@@ -241,6 +241,7 @@ internal fun HomeScreen(
     state: CameraAgentService.AgentState,
     config: Config,
     onCyclePreviewPosition: () -> Unit,
+    onResetPreviewPosition: () -> Unit,
     onOpenSettings: () -> Unit,
     onAddContact: () -> Unit,
     onDeleteContact: (String) -> Unit,
@@ -256,6 +257,16 @@ internal fun HomeScreen(
     // fresh every new call with no separate reset effect needed and never
     // flashes a stale `true` from a just-ended call.
     var showCallControls by remember(state.activePairingId) { mutableStateOf(false) }
+
+    // Every new call starts with the self-view in the same place
+    // (lower-left) regardless of wherever a *previous* call was cycled to
+    // — cycling mid-call still works and still persists, just not as the
+    // starting point for the next one. Keyed on activePairingId, same
+    // reasoning as showCallControls above: fires once per new call, not
+    // on every recomposition of an ongoing one.
+    LaunchedEffect(state.activePairingId) {
+        if (state.activePairingId != null) onResetPreviewPosition()
+    }
 
     // Back is however you get off a call now, whether it's a pending
     // outgoing attempt, a not-yet-accepted incoming one (declines it), or

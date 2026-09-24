@@ -541,6 +541,19 @@ private fun AppRoot(
                     Config.save(context, c)
                     config = c
                 },
+                onResetPreviewPosition = {
+                    // Same reload-fresh reasoning as onCyclePreviewPosition
+                    // above. A no-op write (skipped, not just harmless) when
+                    // already BOTTOM_START — the common case, since this
+                    // fires at the start of every call — avoids a pointless
+                    // SharedPreferences write most of the time.
+                    val fresh = Config.load(context)
+                    if (fresh.previewCorner != PreviewCorner.BOTTOM_START) {
+                        val c = fresh.copy(previewCorner = PreviewCorner.BOTTOM_START)
+                        Config.save(context, c)
+                        config = c
+                    }
+                },
                 // Mirrors the web client's own #settingsBtn gear.
                 onOpenSettings = onReopenAdminChoice,
                 // The one and only entry point into "Add contact" now — a
