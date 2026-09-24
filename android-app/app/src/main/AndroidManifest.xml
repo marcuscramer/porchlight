@@ -108,22 +108,5 @@
             android:enabled="true"
             android:exported="false" />
 
-        <!-- Hands the downloaded APK (a plain file:// path in this app's
-             own cache dir) to the system package installer as a content://
-             URI — required since API 24, which stopped accepting file://
-             URIs across app boundaries entirely (FileUriExposedException).
-             exported=false is fine here: grantUriPermissions in
-             UpdateChecker.kt's install Intent is what actually lets the
-             installer read this one file temporarily, not this flag. -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
-
     </application>
 </manifest>

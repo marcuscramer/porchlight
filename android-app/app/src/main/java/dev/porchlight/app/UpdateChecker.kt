@@ -4,12 +4,15 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageInstaller
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
-import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
 import okhttp3.Call
@@ -55,8 +58,12 @@ sealed interface UpdateCheckResult {
      * turned off entirely. */
     data object Disabled : UpdateCheckResult
     data object UpToDate : UpdateCheckResult
-    data class Downloading(val tag: String) : UpdateCheckResult
-    data class Ready(val tag: String) : UpdateCheckResult
+    // The release's human-readable name ("v0.7"), not its git tag ("v8",
+    // the v<versionCode> convention — see this file's own doc). Found
+    // live: showing the raw tag here read as a typo/confusing next to
+    // Settings' own "v0.7" version line.
+    data class Downloading(val versionName: String) : UpdateCheckResult
+    data class Ready(val versionName: String) : UpdateCheckResult
     data class Failed(val reason: String) : UpdateCheckResult
 }
 
@@ -149,6 +156,12 @@ object UpdateChecker {
             return
         }
         val tag = release.optString("tag_name")
+        // The release's own title ("v0.7") — what every display/notification
+        // site below shows, as opposed to [tag] (only ever used here, to
+        // parse latestCode against the v<versionCode> convention). Falls
+        // back to the tag itself if a release was ever published with no
+        // name set.
+        val versionName = release.optString("name").ifBlank { tag }
         // startsWith("v") checked explicitly, not just removePrefix: a tag
         // with no "v" at all would otherwise still parse (removePrefix is a
         // no-op when the prefix isn't present) — looser than the documented
@@ -185,12 +198,12 @@ object UpdateChecker {
             return
         }
 
-        onResult(UpdateCheckResult.Downloading(tag))
+        onResult(UpdateCheckResult.Downloading(versionName))
         downloadApk(context, downloadUrl) { success ->
             if (success) {
                 prefs.edit().putInt(KEY_NOTIFIED_CODE, latestCode).apply()
-                postUpdateNotification(context, tag)
-                onResult(UpdateCheckResult.Ready(tag))
+                postUpdateNotification(context, versionName)
+                onResult(UpdateCheckResult.Ready(versionName))
             } else {
                 onResult(UpdateCheckResult.Failed("download failed"))
             }
@@ -250,7 +263,7 @@ object UpdateChecker {
 
     private fun apkFile(context: Context): File = File(context.cacheDir, APK_FILE_NAME)
 
-    private fun postUpdateNotification(context: Context, tag: String) {
+    private fun postUpdateNotification(context: Context, versionName: String) {
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
             mgr.createNotificationChannel(
@@ -271,7 +284,7 @@ object UpdateChecker {
         )
         val notification = Notification.Builder(context, CHANNEL_ID)
             .setContentTitle("Porchlight update ready")
-            .setContentText("$tag downloaded — tap to install")
+            .setContentText("$versionName downloaded — tap to install")
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
@@ -301,19 +314,94 @@ object UpdateChecker {
         }
     }
 
+    private const val INSTALL_RESULT_ACTION = "dev.porchlight.app.UPDATE_INSTALL_RESULT"
+
     /**
      * Launches the system package installer for the already-downloaded
      * APK — called once install permission is confirmed. Separated out so
      * both [installOrRequestPermission] and any future caller share one
      * path.
+     *
+     * A real [PackageInstaller] session, not a plain `ACTION_VIEW` intent
+     * handing the APK to whatever resolves it (the previous approach,
+     * which needed [FileProvider] to share a `content://` URI across that
+     * app boundary — no longer needed, since a session reads the file
+     * itself). Found live on real Portal TV hardware: `ACTION_VIEW`
+     * resolves to `com.android.packageinstaller`'s standard UI flow,
+     * which on Portal is intercepted by a Meta-proprietary
+     * `FacebookAppVerifier` system service that checks the APK's signing
+     * certificate against a whitelist of Meta's own internal keys and
+     * unconditionally rejects anything else ("App certificate rejected",
+     * confirmed directly in logcat) — nothing an app can do about that
+     * from user space. `adb install` was never affected (it never goes
+     * through that UI flow at all), which is why every manual install
+     * this project has ever done worked fine while this in-app button
+     * silently failed. Immortal's own self-update/app-store install path
+     * (`PackageInstallSessions.kt`/`HeadlessInstaller.kt` in its own
+     * repo) uses this exact same session API for the identical reason —
+     * confirmed against its real source, not guessed.
      */
     fun launchInstall(context: Context) {
         val file = apkFile(context)
         if (!file.exists()) return
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        context.startActivity(intent)
+        val appContext = context.applicationContext
+        val installer = appContext.packageManager.packageInstaller
+        val sessionId = runCatching {
+            installer.createSession(PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL))
+        }.getOrElse {
+            Log.e(TAG, "couldn't create install session", it)
+            return
+        }
+
+        // Registered fresh per install attempt, not a persistent
+        // manifest-declared receiver — this only ever needs to react to
+        // the one PendingIntent [session.commit] below creates for this
+        // specific sessionId, and unregisters itself once that session
+        // reaches a terminal state (or hands off to the system's own
+        // confirmation UI, which the human taps same as before).
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context, intent: Intent) {
+                when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, Int.MIN_VALUE)) {
+                    PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                        val confirm = if (Build.VERSION.SDK_INT >= 33) {
+                            intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                        } else {
+                            @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                        }
+                        confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { appContext.startActivity(confirm) }
+                            .onFailure { Log.w(TAG, "couldn't launch install confirmation UI", it) }
+                    }
+                    else -> runCatching { appContext.unregisterReceiver(this) }
+                }
+            }
+        }
+        val filter = IntentFilter(INSTALL_RESULT_ACTION)
+        if (Build.VERSION.SDK_INT >= 33) {
+            appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            appContext.registerReceiver(receiver, filter)
+        }
+
+        runCatching {
+            installer.openSession(sessionId).use { session ->
+                session.openWrite("base.apk", 0, file.length()).use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                    session.fsync(out)
+                }
+                val flags = if (Build.VERSION.SDK_INT >= 31) {
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
+                val resultIntent = Intent(INSTALL_RESULT_ACTION).setPackage(appContext.packageName)
+                val pending = PendingIntent.getBroadcast(appContext, sessionId, resultIntent, flags)
+                session.commit(pending.intentSender)
+            }
+        }.onFailure {
+            Log.e(TAG, "install session failed", it)
+            runCatching { appContext.unregisterReceiver(receiver) }
+        }
     }
 }
