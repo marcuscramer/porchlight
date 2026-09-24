@@ -679,7 +679,9 @@ private fun CallOutcomeScreen(
             verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
             modifier = Modifier.padding(horizontal = Dimens.spacingScreenPadding),
         ) {
-            Text(title, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
+            // Dimmed like every other screen's own title now, not the
+            // app's brightest text (matches Settings' own title).
+            Text(title, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
             Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
             Text("Press Back to continue", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
         }

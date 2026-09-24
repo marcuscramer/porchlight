@@ -19,6 +19,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -255,6 +258,10 @@ internal fun TvButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     tint: TvButtonTint = TvButtonTint.Neutral,
+    // Exposed so a caller can observe this button's own focus state
+    // externally (e.g. brightening a label elsewhere on the same row) —
+    // same pattern WaitingScreen's own Auto-answer Switch already uses.
+    interactionSource: MutableInteractionSource? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val hue = when (tint) {
@@ -272,6 +279,7 @@ internal fun TvButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
+        interactionSource = interactionSource,
         // None, same as Button's own scale = ButtonScale.None used to be —
         // tv.material3's own default grows a focused surface ~10% larger,
         // and with several buttons sitting close together on a contact row,
@@ -297,7 +305,10 @@ internal fun TvButton(
         // typography.labelLarge)) — without the last one, any text content
         // would fall back to whatever LocalTextStyle happens to be ambient
         // at each call site instead of this button's own fixed label style.
-        ProvideTextStyle(MaterialTheme.typography.labelLarge) {
+        // Regular weight, not the token's own Medium — a local override
+        // here rather than touching GeneratedType (shared with the web
+        // client's own button styling via the same token source).
+        ProvideTextStyle(MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight(GeneratedType.fontWeightRegular))) {
             Row(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
@@ -587,56 +598,61 @@ private fun NameEntryScreen(
     // becomes a *peer's* self-reported name from their side the moment it
     // heartbeats out) needs stripping here too, not just on receipt.
     val submit = { onDone(CallCoreBridge.sanitizeName(name.trim()).ifBlank { "Device" }) }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(Dimens.spacingScreenPadding),
-        verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
-    ) {
+    Column(modifier = Modifier.fillMaxSize().padding(Dimens.spacingScreenPadding)) {
+        // Dimmed like Settings' own title — every screen's title uses this
+        // exact color/style now, not just Settings.
         Text(
             if (isRename) "Rename this device" else "Name this device",
-            color = GeneratedColor.colorTextPrimary,
+            color = GeneratedColor.colorTextDim,
             style = MaterialTheme.typography.headlineSmall,
         )
-        Text(
-            "Shown to the other device during pairing so you can tell devices " +
-                "apart — e.g. \"Mom's TV\" or \"Living Room.\"",
-            color = GeneratedColor.colorTextDim,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        OutlinedTextField(
-            value = name,
-            // take(maxNameLength) here too, not just at submit — immediate
-            // feedback instead of letting someone type/paste well past the
-            // limit. Reads CallCoreBridge.protocolConstants, not a
-            // hand-copied literal, same as NostrSignalingClient.kt's own
-            // identical cap.
-            onValueChange = { name = it.take(CallCoreBridge.protocolConstants.maxNameLength) },
-            label = { M3Text("Name") },
-            modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
-                // See HardwareEnterKeyUpGuard's own doc for the full
-                // mechanism and why arm() is needed here too, not just
-                // submit(): consuming this KeyDown does *not* stop this
-                // same physical press's KeyUp from being separately,
-                // independently dispatched a moment later, straight to
-                // whatever the *next* screen's first focusable turns out
-                // to be.
-                if (event.type == KeyEventType.KeyDown && (event.key == Key.Enter || event.key == Key.NumPadEnter)) {
-                    submit()
-                    HardwareEnterKeyUpGuard.arm()
-                    true
-                } else {
-                    false
-                }
-            },
-            // singleLine forces the IME to offer a Done action instead of a
-            // newline key for Enter/Return — without it, Enter just inserts
-            // "\n" into a name, with no way to submit from the keyboard.
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { submit() }),
-        )
-        TvButton(onClick = submit) { Text(if (isRename) "Save" else "Continue") }
+        // Everything below the title centered as a block, same
+        // width(IntrinsicSize.Max)-in-a-centered-Box pattern Settings uses.
+        Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Column(
+                modifier = Modifier.width(IntrinsicSize.Max),
+                verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
+            ) {
+                Text(
+                    "Shown to other devices during pairing and in their contacts list.",
+                    color = GeneratedColor.colorTextDim,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = name,
+                    // take(maxNameLength) here too, not just at submit — immediate
+                    // feedback instead of letting someone type/paste well past the
+                    // limit. Reads CallCoreBridge.protocolConstants, not a
+                    // hand-copied literal, same as NostrSignalingClient.kt's own
+                    // identical cap.
+                    onValueChange = { name = it.take(CallCoreBridge.protocolConstants.maxNameLength) },
+                    label = { M3Text("Name") },
+                    modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
+                        // See HardwareEnterKeyUpGuard's own doc for the full
+                        // mechanism and why arm() is needed here too, not just
+                        // submit(): consuming this KeyDown does *not* stop this
+                        // same physical press's KeyUp from being separately,
+                        // independently dispatched a moment later, straight to
+                        // whatever the *next* screen's first focusable turns out
+                        // to be.
+                        if (event.type == KeyEventType.KeyDown && (event.key == Key.Enter || event.key == Key.NumPadEnter)) {
+                            submit()
+                            HardwareEnterKeyUpGuard.arm()
+                            true
+                        } else {
+                            false
+                        }
+                    },
+                    // singleLine forces the IME to offer a Done action instead of a
+                    // newline key for Enter/Return — without it, Enter just inserts
+                    // "\n" into a name, with no way to submit from the keyboard.
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
+                )
+                TvButton(onClick = submit) { Text(if (isRename) "Save" else "Continue") }
+            }
+        }
     }
 }
 
@@ -711,26 +727,42 @@ private fun AdminChoiceScreen(
                 modifier = Modifier.width(IntrinsicSize.Max),
                 verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
             ) {
+                // Each row's own left-column label stays muted until the
+                // right-column control it describes actually has focus —
+                // same "label brightens with its control's own focus"
+                // pattern WaitingScreen's Auto-answer switch already uses.
+                val renameInteractionSource = remember { MutableInteractionSource() }
+                val renameFocused by renameInteractionSource.collectIsFocusedAsState()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
                 ) {
-                    Text("Rename this device", color = GeneratedColor.colorTextPrimary, modifier = Modifier.weight(1f))
+                    Text(
+                        "Rename this device",
+                        color = if (renameFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        modifier = Modifier.weight(1f),
+                    )
                     TvButton(
                         onClick = onRenameDevice,
+                        interactionSource = renameInteractionSource,
                         modifier = Modifier.focusRequester(focusRequester),
                     ) { Icon(Icons.Filled.ArrowForward, contentDescription = "Rename this device", modifier = Modifier.size(Dimens.dimension20)) }
                 }
+                val launchOnBootInteractionSource = remember { MutableInteractionSource() }
+                val launchOnBootFocused by launchOnBootInteractionSource.collectIsFocusedAsState()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Launch on boot", color = GeneratedColor.colorTextPrimary)
                         Text(
-                            "Bring this screen up automatically after every reboot — for a device that's only ever used for calling.",
+                            "Launch on boot",
+                            color = if (launchOnBootFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        )
+                        Text(
+                            "Bring Porchlight up automatically after (re)boot",
                             color = GeneratedColor.colorTextDim,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -750,22 +782,28 @@ private fun AdminChoiceScreen(
                             uncheckedTrackColor = GeneratedColor.colorBackgroundSurfaceAlt,
                             uncheckedBorderColor = GeneratedColor.colorBorderDefault,
                         ),
+                        interactionSource = launchOnBootInteractionSource,
                     )
                 }
+                val installInteractionSource = remember { MutableInteractionSource() }
+                val installFocused by installInteractionSource.collectIsFocusedAsState()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
                 ) {
-                    // Same styling as "Launch on boot" above, not the
-                    // dimmed/small treatment this used to have.
-                    Text(message, color = GeneratedColor.colorTextPrimary, modifier = Modifier.weight(1f))
+                    Text(
+                        message,
+                        color = if (installFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        modifier = Modifier.weight(1f),
+                    )
                     // Only enabled once there's actually something to
                     // install — always present, so the table's right
                     // column stays put rather than the row reflowing.
                     TvButton(
                         enabled = checkResult is UpdateCheckResult.Ready,
                         onClick = { UpdateChecker.installOrRequestPermission(context) },
+                        interactionSource = installInteractionSource,
                     ) { Text("Install") }
                 }
             }

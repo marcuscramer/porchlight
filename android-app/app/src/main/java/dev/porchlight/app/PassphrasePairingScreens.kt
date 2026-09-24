@@ -67,9 +67,10 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
     ) {
+        // Dimmed like every other screen's own title (matches Settings').
         Text(
             "Add contact",
-            color = GeneratedColor.colorTextPrimary,
+            color = GeneratedColor.colorTextDim,
             style = MaterialTheme.typography.headlineSmall,
         )
         Text(
@@ -183,7 +184,7 @@ fun PairingProgressScreen(
                     // Same reasoning as CallingScreen's own spinner —
                     // distinguishes "still working" from "stuck."
                     CircularProgressIndicator(color = GeneratedColor.colorActionPrimaryBackground)
-                    Text("Waiting for the other device…", color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
+                    Text("Waiting for the other device…", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
                 }
             }
         }
@@ -209,7 +210,7 @@ internal fun NameConfirmScreen(candidate: CandidatePeer, onConfirm: () -> Unit, 
             verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
             modifier = Modifier.padding(horizontal = Dimens.spacingScreenPadding),
         ) {
-            Text("Pair with ${candidate.name.ifBlank { "this device" }}?", color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
+            Text("Pair with ${candidate.name.ifBlank { "this device" }}?", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
             Text(
                 "Both sides typed the same phrase.",
                 color = GeneratedColor.colorTextDim,
@@ -250,7 +251,10 @@ internal fun OutcomeScreen(
             verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
             modifier = Modifier.padding(horizontal = Dimens.spacingScreenPadding),
         ) {
-            Text(title, color = if (titleIsAlert) GeneratedColor.colorActionDangerBackground else GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
+            // Dimmed like every other screen's own title (matches
+            // Settings') — except a real alert, which keeps its
+            // intentional danger-red instead.
+            Text(title, color = if (titleIsAlert) GeneratedColor.colorActionDangerBackground else GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
             Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
             TvButton(onClick = onAction, tint = tint, modifier = Modifier.focusRequester(focusRequester)) { Text(actionLabel) }
         }
