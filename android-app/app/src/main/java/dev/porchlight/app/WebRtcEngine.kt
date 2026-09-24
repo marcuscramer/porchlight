@@ -244,6 +244,13 @@ class WebRtcEngine(
 
     /** Attach a local self-view renderer (already init()'d with eglBase context). */
     fun attachLocalPreview(sink: VideoSink) {
+        // Remove whatever was attached before adding the new one — found
+        // live on real Portal hardware: a second attach without this left
+        // the previous (by then invalid/released) renderer's sink
+        // permanently registered on the track, since overwriting
+        // localPreviewSink loses the only reference anything could have
+        // called removeSink with.
+        localPreviewSink?.let { localVideoTrack?.removeSink(it) }
         localPreviewSink = sink
         localVideoTrack?.addSink(sink)
     }
@@ -255,6 +262,8 @@ class WebRtcEngine(
 
     /** Attach the renderer that shows the remote peer's video (already init()'d). */
     fun attachRemoteView(sink: VideoSink) {
+        // Same reasoning as attachLocalPreview above.
+        remoteViewSink?.let { remoteVideoTrack?.removeSink(it) }
         remoteViewSink = sink
         remoteVideoTrack?.addSink(sink)
     }
