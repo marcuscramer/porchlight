@@ -19,18 +19,22 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text as M3Text
@@ -56,6 +60,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ClickableSurfaceScale
+import androidx.tv.material3.Icon
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.ProvideTextStyle
 import androidx.tv.material3.Switch
@@ -657,85 +662,112 @@ private fun AdminChoiceScreen(
     BackHandler(onBack = onCancel)
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .porchlightScreenBackground()
-            .padding(Dimens.spacingScreenPadding)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
-    ) {
+
+    val context = LocalContext.current
+    // OkHttp's own callback thread, not callExecutor — UpdateChecker's
+    // own doc is explicit that it never touches callExecutor, so
+    // hopping to the main thread has to happen here, at the UI-state
+    // boundary, the same way CameraAgentService's mainHandler does it.
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var checkResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
+    // Checks the moment Settings opens, no button to tap first — force
+    // = true so this always gives a real answer, even for a release
+    // the silent scheduled check already found and notified about once
+    // (see UpdateChecker.checkNow's own doc). Keyed on Unit: Settings
+    // is a fresh composition every time it's opened (see AppRoot's own
+    // reload-on-open comment above), so this naturally re-checks each
+    // visit without a separate trigger.
+    LaunchedEffect(Unit) {
+        UpdateChecker.checkNow(context, force = true) { result ->
+            mainHandler.post { checkResult = result }
+        }
+    }
+    val versionSuffix = " (v${BuildConfig.VERSION_NAME})"
+    val message = when (val result = checkResult) {
+        null -> "Checking for updates…"
+        UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
+        UpdateCheckResult.UpToDate -> "You're on the latest version$versionSuffix"
+        is UpdateCheckResult.Downloading -> "Downloading ${result.tag}…"
+        is UpdateCheckResult.Ready -> "${result.tag} downloaded."
+        is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
+    }
+
+    Column(modifier = Modifier.fillMaxSize().porchlightScreenBackground().padding(Dimens.spacingScreenPadding)) {
         // Dimmed like a plain navigational label (matches WaitingScreen's
         // own title treatment elsewhere), not the app's brightest text —
         // this is "which screen am I on," not content the user actually
         // came here to read.
         Text("Settings", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
-        TvButton(
-            onClick = onRenameDevice,
-            modifier = Modifier.focusRequester(focusRequester),
-        ) { Text("Rename this device") }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap)) {
-            Switch(
-                checked = launchOnBoot,
-                onCheckedChange = onToggleLaunchOnBoot,
-                // Same explicit color set as WaitingScreen's Auto-answer
-                // switch — tv.material3's own theme-derived neutral grays
-                // read as mismatched against this screen's blue-tinted
-                // background.
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = GeneratedColor.colorTextPrimary,
-                    checkedTrackColor = GeneratedColor.colorStatusOk,
-                    checkedBorderColor = GeneratedColor.colorStatusOk,
-                    uncheckedThumbColor = GeneratedColor.colorTextDim,
-                    uncheckedTrackColor = GeneratedColor.colorBackgroundSurfaceAlt,
-                    uncheckedBorderColor = GeneratedColor.colorBorderDefault,
-                ),
-            )
-            Column {
-                Text("Launch on boot", color = GeneratedColor.colorTextPrimary)
-                Text(
-                    "Bring this screen up automatically after every reboot — for a device that's only ever used for calling.",
-                    color = GeneratedColor.colorTextDim,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-        val context = LocalContext.current
-        // OkHttp's own callback thread, not callExecutor — UpdateChecker's
-        // own doc is explicit that it never touches callExecutor, so
-        // hopping to the main thread has to happen here, at the UI-state
-        // boundary, the same way CameraAgentService's mainHandler does it.
-        val mainHandler = remember { Handler(Looper.getMainLooper()) }
-        var checkResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
-        // Checks the moment Settings opens, no button to tap first — force
-        // = true so this always gives a real answer, even for a release
-        // the silent scheduled check already found and notified about once
-        // (see UpdateChecker.checkNow's own doc). Keyed on Unit: Settings
-        // is a fresh composition every time it's opened (see AppRoot's own
-        // reload-on-open comment above), so this naturally re-checks each
-        // visit without a separate trigger.
-        LaunchedEffect(Unit) {
-            UpdateChecker.checkNow(context, force = true) { result ->
-                mainHandler.post { checkResult = result }
-            }
-        }
-        val versionSuffix = " (v${BuildConfig.VERSION_NAME})"
-        val message = when (val result = checkResult) {
-            null -> "Checking for updates…"
-            UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
-            UpdateCheckResult.UpToDate -> "You're on the latest version$versionSuffix"
-            is UpdateCheckResult.Downloading -> "Downloading ${result.tag}…"
-            is UpdateCheckResult.Ready -> "${result.tag} downloaded."
-            is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
-        }
-        // Same styling as "Launch on boot" above, not the dimmed/small
-        // treatment this used to have.
-        Text(message, color = GeneratedColor.colorTextPrimary)
-        // The only update-related control now — nothing to tap unless
-        // there's actually something to install.
-        if (checkResult is UpdateCheckResult.Ready) {
-            TvButton(onClick = { UpdateChecker.installOrRequestPermission(context) }) {
-                Text("Install now")
+
+        // A 2-column, 3-row table, centered in whatever space is left below
+        // the title — label left, control right. width(IntrinsicSize.Max)
+        // + fillMaxWidth() per row is the same "every row shares the widest
+        // row's width" trick WaitingScreen's own contact rows already use
+        // (see that file's own doc), so the right-column controls (arrow
+        // button / switch / Install) land on a consistent right edge
+        // despite each row's own content differing.
+        Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Column(
+                modifier = Modifier.width(IntrinsicSize.Max),
+                verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
+                ) {
+                    Text("Rename this device", color = GeneratedColor.colorTextPrimary, modifier = Modifier.weight(1f))
+                    TvButton(
+                        onClick = onRenameDevice,
+                        modifier = Modifier.focusRequester(focusRequester),
+                    ) { Icon(Icons.Filled.ArrowForward, contentDescription = "Rename this device", modifier = Modifier.size(Dimens.dimension20)) }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Launch on boot", color = GeneratedColor.colorTextPrimary)
+                        Text(
+                            "Bring this screen up automatically after every reboot — for a device that's only ever used for calling.",
+                            color = GeneratedColor.colorTextDim,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Switch(
+                        checked = launchOnBoot,
+                        onCheckedChange = onToggleLaunchOnBoot,
+                        // Same explicit color set as WaitingScreen's Auto-answer
+                        // switch — tv.material3's own theme-derived neutral grays
+                        // read as mismatched against this screen's blue-tinted
+                        // background.
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = GeneratedColor.colorTextPrimary,
+                            checkedTrackColor = GeneratedColor.colorStatusOk,
+                            checkedBorderColor = GeneratedColor.colorStatusOk,
+                            uncheckedThumbColor = GeneratedColor.colorTextDim,
+                            uncheckedTrackColor = GeneratedColor.colorBackgroundSurfaceAlt,
+                            uncheckedBorderColor = GeneratedColor.colorBorderDefault,
+                        ),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
+                ) {
+                    // Same styling as "Launch on boot" above, not the
+                    // dimmed/small treatment this used to have.
+                    Text(message, color = GeneratedColor.colorTextPrimary, modifier = Modifier.weight(1f))
+                    // Only enabled once there's actually something to
+                    // install — always present, so the table's right
+                    // column stays put rather than the row reflowing.
+                    TvButton(
+                        enabled = checkResult is UpdateCheckResult.Ready,
+                        onClick = { UpdateChecker.installOrRequestPermission(context) },
+                    ) { Text("Install") }
+                }
             }
         }
     }
