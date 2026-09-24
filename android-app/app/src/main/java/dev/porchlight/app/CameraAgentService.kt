@@ -130,6 +130,16 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         // call — null means idle (nobody in a call right now).
         val activePairingId: String? = null,
         val incomingCall: IncomingCall? = null,
+        // True from the moment an incoming call is accepted (manual tap or
+        // auto-answer countdown) until it either connects or ends — lets
+        // HomeScreen tell "we accepted, still negotiating" apart from "we
+        // placed an outgoing call, still ringing," both of which otherwise
+        // look identical (activePairingId set, not yet peerConnectedOk).
+        // Found live on real Portal hardware: without this, an accepted
+        // auto-answer call rendered CallingScreen's "Calling" text — as if
+        // the Portal were the one placing the call — for the whole
+        // negotiation window.
+        val acceptedIncoming: Boolean = false,
         val contacts: List<ContactState> = emptyList(),
         // Set by a ShowCallOutcome effect, cleared by dismissCallOutcome() —
         // drives HomeScreen's full-screen "why did this call end" prompt.
@@ -226,12 +236,14 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
             is CallCoreBridge.AcceptOutcome.ApplyOffer -> {
                 clearIncomingCall()
                 activePairingId = result.pairingId
+                updateState { it.copy(acceptedIncoming = true) }
                 engine?.handleRemoteOffer(result.pairingId, result.callId, result.sdp)
                 for (ice in result.iceBuffer) engine?.addRemoteIce(ice.sdpMid, ice.sdpMLineIndex, ice.candidate)
             }
             is CallCoreBridge.AcceptOutcome.CreateOffer -> {
                 clearIncomingCall()
                 activePairingId = result.pairingId
+                updateState { it.copy(acceptedIncoming = true) }
                 engine?.createOffer(result.pairingId, result.callId)
             }
         }
@@ -325,7 +337,10 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         val ownPubkeyHex = KeyPair(privKey = pairing.ownPrivateKeyHex.hexToByteArray()).pubKey!!.toHexKey()
         val peerOnline = CallCoreBridge.isOnline(pairingId)
         val result = CallCoreBridge.requestCall(pairingId, ownPubkeyHex, pairing.peerPublicKey, peerOnline)
-        if (result.callId != null) activePairingId = pairingId
+        if (result.callId != null) {
+            activePairingId = pairingId
+            updateState { it.copy(acceptedIncoming = false) }
+        }
         applyCallEffects(result.effects)
     } ?: Unit
 
@@ -908,7 +923,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         } else {
             applyCallEffects(CallCoreBridge.peerConnectionClosed())
             activePairingId = null
-            updateState { it.copy(audioEnabled = true, videoEnabled = true) }
+            updateState { it.copy(audioEnabled = true, videoEnabled = true, acceptedIncoming = false) }
             releaseCallWakeLock()
             // A peer ending a call needs its next heartbeat kicked out
             // immediately, not left to the slow idle cadence — being on an

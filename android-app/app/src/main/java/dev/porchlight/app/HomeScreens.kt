@@ -314,6 +314,7 @@ internal fun HomeScreen(
                 contactName = activeContact.name,
                 service = service,
                 capturing = state.capturing,
+                label = if (state.acceptedIncoming) "Connecting" else "Calling",
             )
             else -> {
                 // Full remote video, plus local self-view. Rectangular, not
@@ -541,7 +542,7 @@ private fun PositionSelfViewIcon(corner: PreviewCorner, modifier: Modifier = Mod
  * physical Back key rather than a dedicated Cancel target.
  */
 @Composable
-private fun CallingScreen(contactName: String, service: CameraAgentService?, capturing: Boolean) {
+private fun CallingScreen(contactName: String, service: CameraAgentService?, capturing: Boolean, label: String = "Calling") {
     Box(modifier = Modifier.fillMaxSize()) {
         LocalPreviewView(service = service, ready = capturing)
         Column(
@@ -554,10 +555,12 @@ private fun CallingScreen(contactName: String, service: CameraAgentService?, cap
             // window, so without this a stall here looks identical to a
             // frozen app.
             CircularProgressIndicator(color = GeneratedColor.colorActionPrimaryBackground)
-            // "Calling" as its own caption, the name as the headline below
-            // it — mirrors web's identical .calling-label/.calling-name
+            // [label] distinguishes "we placed this call" from "we just
+            // accepted an incoming one" (see AgentState.acceptedIncoming) —
+            // otherwise identical negotiating-state screen either way.
+            // "Calling" mirrors web's identical .calling-label/.calling-name
             // split (index.html).
-            Text("Calling", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            Text(label, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
             Text(
                 contactName.ifBlank { "Unnamed contact" },
                 color = GeneratedColor.colorTextPrimary,
