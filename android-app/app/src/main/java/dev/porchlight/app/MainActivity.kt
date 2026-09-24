@@ -56,6 +56,8 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.ClickableSurfaceScale
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.ProvideTextStyle
+import androidx.tv.material3.Switch
+import androidx.tv.material3.SwitchDefaults
 import androidx.tv.material3.Text
 import androidx.tv.material3.Surface as TvSurface
 import dev.porchlight.app.ui.theme.Dimens
@@ -396,6 +398,16 @@ private fun AppRoot(
     when {
         showAdminChoice -> {
             AdminChoiceScreen(
+                launchOnBoot = config.launchOnBoot,
+                onToggleLaunchOnBoot = { enabled ->
+                    // Same reasoning as onCyclePreviewPosition below —
+                    // reload fresh so this doesn't stomp a pairing change
+                    // CameraAgentService made directly since `config` was
+                    // last refreshed in this composable.
+                    val c = Config.load(context).copy(launchOnBoot = enabled)
+                    Config.save(context, c)
+                    config = c
+                },
                 onRenameDevice = { adminScreen = AdminScreen.Rename; onAdminChoiceHandled() },
                 onCancel = onAdminChoiceHandled,
             )
@@ -617,16 +629,20 @@ private fun NameEntryScreen(
 
 /**
  * Reached via the on-screen settings gear (see WaitingScreen's own doc).
- * Down to one action now: "Add contact" and
- * per-contact management (Delete, auto-answer) both moved onto
- * WaitingScreen's own contact list directly, so there's no "Contacts"
- * destination left here to route to. There's no whole-device "I think this
- * was compromised" action either — every `Pairing` is its own independent
- * identity, so recovering from a suspected compromise is just Delete + Add
- * contact for the one contact that's actually affected.
+ * Down to two things now: "Rename this device", and the launch-on-boot
+ * toggle (see Config.launchOnBoot's own doc for why this is opt-in, not
+ * automatic). "Add contact" and per-contact management (Delete,
+ * auto-answer) both moved onto WaitingScreen's own contact list directly,
+ * so there's no "Contacts" destination left here to route to. There's no
+ * whole-device "I think this was compromised" action either — every
+ * `Pairing` is its own independent identity, so recovering from a
+ * suspected compromise is just Delete + Add contact for the one contact
+ * that's actually affected.
  */
 @Composable
 private fun AdminChoiceScreen(
+    launchOnBoot: Boolean,
+    onToggleLaunchOnBoot: (Boolean) -> Unit,
     onRenameDevice: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -650,5 +666,31 @@ private fun AdminChoiceScreen(
             onClick = onRenameDevice,
             modifier = Modifier.focusRequester(focusRequester),
         ) { Text("Rename this device") }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap)) {
+            Switch(
+                checked = launchOnBoot,
+                onCheckedChange = onToggleLaunchOnBoot,
+                // Same explicit color set as WaitingScreen's Auto-answer
+                // switch — tv.material3's own theme-derived neutral grays
+                // read as mismatched against this screen's blue-tinted
+                // background.
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = GeneratedColor.colorTextPrimary,
+                    checkedTrackColor = GeneratedColor.colorStatusOk,
+                    checkedBorderColor = GeneratedColor.colorStatusOk,
+                    uncheckedThumbColor = GeneratedColor.colorTextDim,
+                    uncheckedTrackColor = GeneratedColor.colorBackgroundSurfaceAlt,
+                    uncheckedBorderColor = GeneratedColor.colorBorderDefault,
+                ),
+            )
+            Column {
+                Text("Launch on boot", color = GeneratedColor.colorTextPrimary)
+                Text(
+                    "Bring this screen up automatically after every reboot — for a device that's only ever used for calling.",
+                    color = GeneratedColor.colorTextDim,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
     }
 }

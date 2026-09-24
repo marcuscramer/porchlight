@@ -64,6 +64,14 @@ data class Config(
     val deviceName: String = "",
     val pairings: List<Pairing> = emptyList(),
     val previewCorner: PreviewCorner = PreviewCorner.BOTTOM_START,
+    // Off by default — BootReceiver always restarts the background call-
+    // answering service after a reboot regardless (silent, nothing shows
+    // on screen), but forcing this app's UI to the foreground on top of
+    // whatever else was there is a deliberate, device-specific choice, not
+    // something every install should get unasked. Meant for a device set
+    // up as a single-purpose calling appliance (e.g. for a relative who
+    // only ever uses it for this), not the default experience.
+    val launchOnBoot: Boolean = false,
 ) {
     /** True once a name has been entered — gates the first-launch name screen. */
     val hasName: Boolean get() = deviceName.isNotBlank()
@@ -93,8 +101,9 @@ data class Config(
             val previewCorner = runCatching {
                 PreviewCorner.valueOf(p.getString("previewCorner", null) ?: "")
             }.getOrDefault(PreviewCorner.BOTTOM_START)
+            val launchOnBoot = p.getBoolean("launchOnBoot", false)
 
-            Config(deviceName, pairings, previewCorner)
+            Config(deviceName, pairings, previewCorner, launchOnBoot)
         }
 
         fun save(context: Context, config: Config): Unit = synchronized(lock) {
@@ -102,6 +111,7 @@ data class Config(
                 .putString("deviceName", config.deviceName)
                 .putString("pairings", serializePairings(config.pairings))
                 .putString("previewCorner", config.previewCorner.name)
+                .putBoolean("launchOnBoot", config.launchOnBoot)
                 .apply()
         }
 
