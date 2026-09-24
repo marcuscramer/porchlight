@@ -63,6 +63,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.roundToInt
 import dev.porchlight.app.ui.theme.Dimens
@@ -277,6 +278,37 @@ internal fun HomeScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // The self-view, as ONE composable call site for the whole
+        // ringing→connected lifecycle of a call — not one embedded in
+        // IncomingCallScreen, another in CallingScreen, and a third here,
+        // each a separate SurfaceViewRenderer torn down and recreated at
+        // every screen transition. Found live on real Portal hardware:
+        // that churn raced the old renderer's async EGL teardown against
+        // the new one's init on the one shared EglBase.Context, leaving
+        // the video surface permanently unattached ("Dropping frame - No
+        // surface" for the rest of the call, every time). Only the
+        // modifier (full-screen while ringing, a small corner box once
+        // connected) changes now — same underlying node throughout, via
+        // zIndex(1f) so it still paints above RemoteVideoView once
+        // connected despite being declared before it here. Cycling
+        // previewCorner to/from INVISIBLE mid-call still tears this down/
+        // recreates it (unmounted entirely in that case) — a real, but
+        // separate and far lower-frequency, user-triggered churn point,
+        // not the automatic one this fixes.
+        if (activeContact != null && state.pendingCallOutcome == null &&
+            (!peerConnectedOk || config.previewCorner != PreviewCorner.INVISIBLE)
+        ) {
+            val previewModifier = if (peerConnectedOk) {
+                Modifier
+                    .align(config.previewCorner.toAlignment())
+                    .padding(Dimens.spacingContactRowGap)
+                    .size(Dimens.sizeLocalPreviewWidth, Dimens.sizeLocalPreviewHeight)
+                    .zIndex(1f)
+            } else {
+                Modifier.fillMaxSize()
+            }
+            LocalPreviewView(service = service, ready = state.capturing, modifier = previewModifier)
+        }
         when {
             state.pendingCallOutcome != null -> {
                 val outcome = state.pendingCallOutcome
@@ -288,11 +320,12 @@ internal fun HomeScreen(
                 )
             }
             activeContact == null -> {
-                // No SurfaceView at all while waiting — a small corner
-                // self-view alongside plain Compose UI (with no full-screen
-                // SurfaceView to go with it) blanks that UI on this
-                // hardware's compositor; not worth chasing for a
-                // nice-to-have.
+                // No SurfaceView at all while waiting (the hoisted
+                // self-view above only mounts once activeContact is
+                // non-null) — a small corner self-view alongside plain
+                // Compose UI (with no full-screen SurfaceView to go with
+                // it) blanks that UI on this hardware's compositor; not
+                // worth chasing for a nice-to-have.
                 WaitingScreen(
                     contacts = state.contacts,
                     pairings = config.pairings,
@@ -308,21 +341,18 @@ internal fun HomeScreen(
                 info = incoming,
                 onAccept = { service?.acceptIncomingCall() },
                 service = service,
-                capturing = state.capturing,
             )
             !peerConnectedOk -> CallingScreen(
                 contactName = activeContact.name,
-                service = service,
-                capturing = state.capturing,
                 label = if (state.acceptedIncoming) "Connecting" else "Calling",
             )
             else -> {
-                // Full remote video, plus local self-view. Rectangular, not
-                // rounded: SurfaceViewRenderer's video content is a
-                // hardware overlay that ignores Compose's clip() entirely,
-                // so a rounded clip only rounds the (invisible) empty
-                // corners while the square video underneath still shows
-                // through them.
+                // Full remote video. Rectangular, not rounded:
+                // SurfaceViewRenderer's video content is a hardware
+                // overlay that ignores Compose's clip() entirely, so a
+                // rounded clip only rounds the (invisible) empty corners
+                // while the square video underneath still shows through
+                // them.
                 RemoteVideoView(service = service, ready = state.running)
 
                 // Nothing else is drawn over the video until this is
@@ -346,17 +376,6 @@ internal fun HomeScreen(
                         ),
                 )
 
-                if (config.previewCorner != PreviewCorner.INVISIBLE) {
-                    Box(
-                        modifier = Modifier
-                            .align(config.previewCorner.toAlignment())
-                            .padding(Dimens.spacingContactRowGap)
-                            .size(Dimens.sizeLocalPreviewWidth, Dimens.sizeLocalPreviewHeight),
-                    ) {
-                        LocalPreviewView(service = service, ready = state.capturing)
-                    }
-                }
-
                 if (showCallControls) {
                     CallControlsOverlay(
                         previewCorner = config.previewCorner,
@@ -366,7 +385,10 @@ internal fun HomeScreen(
                         onToggleAudio = { service?.setAudioEnabled(!state.audioEnabled) },
                         onToggleVideo = { service?.setVideoEnabled(!state.videoEnabled) },
                         onDisconnect = { service?.hangUp() },
-                        modifier = Modifier.align(Alignment.BottomCenter),
+                        // Above the hoisted self-view's own zIndex(1f) —
+                        // this needs to stay reachable/visible even when
+                        // the self-view sits in the same bottom corner.
+                        modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f),
                     )
                 }
             }
@@ -533,18 +555,19 @@ private fun PositionSelfViewIcon(corner: PreviewCorner, modifier: Modifier = Mod
 /**
  * Shown from the instant "Call" is tapped until either the call connects
  * (HomeScreen then swaps to the full remote-video view above) or it's
- * canceled. Self-view only — there's deliberately no remote video slot
- * here, since the peer might not be reachable yet, and
- * CallCoreBridge.requestCall's doc explains why that's allowed to just
- * take as long as it takes rather than timing out on a guessed clock.
- * "Press Back to cancel" as plain text rather than a focused on-screen
- * button — matches every other screen in this app, which all rely on the
- * physical Back key rather than a dedicated Cancel target.
+ * canceled. Just this overlay text — the full-screen self-view behind it
+ * is HomeScreen's own single, hoisted `LocalPreviewView` (see its own
+ * doc for why it isn't created here), since the peer might not be
+ * reachable yet, and CallCoreBridge.requestCall's doc explains why
+ * that's allowed to just take as long as it takes rather than timing out
+ * on a guessed clock. "Press Back to cancel" as plain text rather than a
+ * focused on-screen button — matches every other screen in this app,
+ * which all rely on the physical Back key rather than a dedicated Cancel
+ * target.
  */
 @Composable
-private fun CallingScreen(contactName: String, service: CameraAgentService?, capturing: Boolean, label: String = "Calling") {
+private fun CallingScreen(contactName: String, label: String = "Calling") {
     Box(modifier = Modifier.fillMaxSize()) {
-        LocalPreviewView(service = service, ready = capturing)
         Column(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Dimens.spacingCallOverlayOffset).callOverlayScrim(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -575,11 +598,11 @@ private fun CallingScreen(contactName: String, service: CameraAgentService?, cap
 /**
  * Shown while an incoming call is ringing (manual-accept contact) or
  * counting down (auto-answer contact) — from the instant the offer
- * arrives until it's applied. Self-view only, same reasoning as
- * CallingScreen. "Press Back to decline" mirrors CallingScreen's "Press
- * Back to cancel" — Back calls the same `service?.hangUp()` either way
- * (see its own doc for why that's correct for a not-yet-answered incoming
- * call too).
+ * arrives until it's applied. Self-view behind this is HomeScreen's own
+ * hoisted `LocalPreviewView`, same reasoning as CallingScreen's own doc.
+ * "Press Back to decline" mirrors CallingScreen's "Press Back to cancel"
+ * — Back calls the same `service?.hangUp()` either way (see its own doc
+ * for why that's correct for a not-yet-answered incoming call too).
  */
 @Composable
 private fun IncomingCallScreen(
@@ -587,11 +610,9 @@ private fun IncomingCallScreen(
     info: CameraAgentService.IncomingCall,
     onAccept: () -> Unit,
     service: CameraAgentService?,
-    capturing: Boolean,
 ) {
     val name = contactName.ifBlank { "Unnamed contact" }
     Box(modifier = Modifier.fillMaxSize()) {
-        LocalPreviewView(service = service, ready = capturing)
         Column(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Dimens.spacingCallOverlayOffset).callOverlayScrim(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1041,11 +1062,12 @@ private fun SurfaceVideoView(
     mirror: Boolean,
     attach: CameraAgentService.(VideoSink) -> Unit,
     detach: CameraAgentService.() -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val renderer = remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     val initialized = remember { mutableStateOf(false) }
     AndroidView(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         factory = { ctx -> SurfaceViewRenderer(ctx).also { renderer.value = it } },
         // Runs exactly once, when this leaves composition for good —
         // unlike the DisposableEffect below, which re-fires on every
@@ -1081,19 +1103,21 @@ private fun SurfaceVideoView(
 }
 
 @Composable
-private fun RemoteVideoView(service: CameraAgentService?, ready: Boolean) = SurfaceVideoView(
+private fun RemoteVideoView(service: CameraAgentService?, ready: Boolean, modifier: Modifier = Modifier) = SurfaceVideoView(
     service = service,
     ready = ready,
     mirror = false,
     attach = CameraAgentService::attachRemoteView,
     detach = CameraAgentService::detachRemoteView,
+    modifier = modifier,
 )
 
 @Composable
-private fun LocalPreviewView(service: CameraAgentService?, ready: Boolean) = SurfaceVideoView(
+private fun LocalPreviewView(service: CameraAgentService?, ready: Boolean, modifier: Modifier = Modifier) = SurfaceVideoView(
     service = service,
     ready = ready,
     mirror = true,
     attach = CameraAgentService::attachLocalPreview,
     detach = CameraAgentService::detachLocalPreview,
+    modifier = modifier,
 )
