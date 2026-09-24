@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentWithReceiverOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -278,38 +280,42 @@ internal fun HomeScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // The self-view, as ONE composable call site for the whole
-        // ringing→connected lifecycle of a call — not one embedded in
-        // IncomingCallScreen, another in CallingScreen, and a third here,
-        // each a separate SurfaceViewRenderer torn down and recreated at
-        // every screen transition. Found live on real Portal hardware:
-        // that churn raced the old renderer's async EGL teardown against
-        // the new one's init on the one shared EglBase.Context, leaving
-        // the video surface permanently unattached ("Dropping frame - No
-        // surface" for the rest of the call, every time). Only the
-        // modifier (full-screen while ringing, a small corner box once
-        // connected) changes now — same underlying node throughout, via
-        // zIndex(1f) so it still paints above RemoteVideoView once
-        // connected despite being declared before it here. Cycling
-        // previewCorner to/from INVISIBLE mid-call still tears this down/
-        // recreates it (unmounted entirely in that case) — a real, but
-        // separate and far lower-frequency, user-triggered churn point,
-        // not the automatic one this fixes.
-        if (activeContact != null && state.pendingCallOutcome == null &&
-            (!peerConnectedOk || config.previewCorner != PreviewCorner.INVISIBLE)
-        ) {
+    // The self-view, as ONE composable definition for the whole ringing→
+    // connected lifecycle of a call — not one embedded in
+    // IncomingCallScreen, another in CallingScreen, and a third in the
+    // connected branch below, each a separate SurfaceViewRenderer torn
+    // down and recreated at every screen transition. Found live on real
+    // Portal hardware: that churn raced the old renderer's async EGL
+    // teardown against the new one's init on the one shared
+    // EglBase.Context, leaving the video surface permanently unattached
+    // ("Dropping frame - No surface" for the rest of the call, every
+    // time). movableContentOf, not just hoisting the call site: this
+    // same underlying node needs to actually sit at a *different
+    // position* in the tree depending on the branch below (behind
+    // CallingScreen/IncomingCallScreen's own text overlay while ringing,
+    // but *above* RemoteVideoView once connected) — found live, again,
+    // that a plain Modifier.zIndex() does not control stacking between
+    // two setZOrderMediaOverlay(true) hardware-overlay SurfaceViews the
+    // way it does for ordinary Compose content; only real declaration
+    // order (matching the original, always-worked ordering: self-view
+    // added after RemoteVideoView) does. movableContentOf relocates the
+    // same renderer to whichever position is actually invoked below,
+    // with no dispose/recreate either way.
+    val selfView = remember {
+        movableContentWithReceiverOf<BoxScope> {
             val previewModifier = if (peerConnectedOk) {
                 Modifier
                     .align(config.previewCorner.toAlignment())
                     .padding(Dimens.spacingContactRowGap)
                     .size(Dimens.sizeLocalPreviewWidth, Dimens.sizeLocalPreviewHeight)
-                    .zIndex(1f)
             } else {
                 Modifier.fillMaxSize()
             }
             LocalPreviewView(service = service, ready = state.capturing, modifier = previewModifier)
         }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
         when {
             state.pendingCallOutcome != null -> {
                 val outcome = state.pendingCallOutcome
@@ -321,12 +327,12 @@ internal fun HomeScreen(
                 )
             }
             activeContact == null -> {
-                // No SurfaceView at all while waiting (the hoisted
-                // self-view above only mounts once activeContact is
-                // non-null) — a small corner self-view alongside plain
-                // Compose UI (with no full-screen SurfaceView to go with
-                // it) blanks that UI on this hardware's compositor; not
-                // worth chasing for a nice-to-have.
+                // No SurfaceView at all while waiting (selfView above
+                // isn't invoked anywhere in this branch) — a small corner
+                // self-view alongside plain Compose UI (with no
+                // full-screen SurfaceView to go with it) blanks that UI on
+                // this hardware's compositor; not worth chasing for a
+                // nice-to-have.
                 WaitingScreen(
                     contacts = state.contacts,
                     pairings = config.pairings,
@@ -342,10 +348,12 @@ internal fun HomeScreen(
                 info = incoming,
                 onAccept = { service?.acceptIncomingCall() },
                 service = service,
+                selfView = selfView,
             )
             !peerConnectedOk -> CallingScreen(
                 contactName = activeContact.name,
                 label = if (state.acceptedIncoming) "Connecting" else "Calling",
+                selfView = selfView,
             )
             else -> {
                 // Full remote video. Rectangular, not rounded:
@@ -355,6 +363,14 @@ internal fun HomeScreen(
                 // while the square video underneath still shows through
                 // them.
                 RemoteVideoView(service = service, ready = state.running)
+                // Declared (and thus native-view-added) after
+                // RemoteVideoView above — see selfView's own doc for why
+                // that ordering, not zIndex, is what actually puts it on
+                // top on this hardware. Not invoked at all while cycled
+                // to INVISIBLE — a real, user-triggered dispose/recreate
+                // point if cycled back on, same as the waiting-screen case
+                // above, and unchanged from before this refactor.
+                if (config.previewCorner != PreviewCorner.INVISIBLE) selfView()
 
                 // Nothing else is drawn over the video until this is
                 // explicitly asked for — select this full-screen surface
@@ -386,9 +402,12 @@ internal fun HomeScreen(
                         onToggleAudio = { service?.setAudioEnabled(!state.audioEnabled) },
                         onToggleVideo = { service?.setVideoEnabled(!state.videoEnabled) },
                         onDisconnect = { service?.hangUp() },
-                        // Above the hoisted self-view's own zIndex(1f) —
-                        // this needs to stay reachable/visible even when
-                        // the self-view sits in the same bottom corner.
+                        // Explicit zIndex so this stays reachable/visible
+                        // even when the self-view sits in the same bottom
+                        // corner — unlike the RemoteVideoView/self-view
+                        // relationship (see selfView's own doc), both this
+                        // and the self-view are ordinary Compose content
+                        // by this point, so zIndex works normally here.
                         modifier = Modifier.align(Alignment.BottomCenter).zIndex(2f),
                     )
                 }
@@ -556,19 +575,20 @@ private fun PositionSelfViewIcon(corner: PreviewCorner, modifier: Modifier = Mod
 /**
  * Shown from the instant "Call" is tapped until either the call connects
  * (HomeScreen then swaps to the full remote-video view above) or it's
- * canceled. Just this overlay text — the full-screen self-view behind it
- * is HomeScreen's own single, hoisted `LocalPreviewView` (see its own
- * doc for why it isn't created here), since the peer might not be
- * reachable yet, and CallCoreBridge.requestCall's doc explains why
- * that's allowed to just take as long as it takes rather than timing out
- * on a guessed clock. "Press Back to cancel" as plain text rather than a
- * focused on-screen button — matches every other screen in this app,
- * which all rely on the physical Back key rather than a dedicated Cancel
- * target.
+ * canceled. [selfView] is HomeScreen's own single, hoisted self-view
+ * content (see its own doc for why it's passed in rather than created
+ * here) — placed first, so it sits behind this screen's own text/spinner
+ * overlay, since the peer might not be reachable yet, and
+ * CallCoreBridge.requestCall's doc explains why that's allowed to just
+ * take as long as it takes rather than timing out on a guessed clock.
+ * "Press Back to cancel" as plain text rather than a focused on-screen
+ * button — matches every other screen in this app, which all rely on
+ * the physical Back key rather than a dedicated Cancel target.
  */
 @Composable
-private fun CallingScreen(contactName: String, label: String = "Calling") {
+private fun CallingScreen(contactName: String, label: String = "Calling", selfView: @Composable BoxScope.() -> Unit) {
     Box(modifier = Modifier.fillMaxSize()) {
+        selfView()
         Column(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Dimens.spacingCallOverlayOffset).callOverlayScrim(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -611,9 +631,11 @@ private fun IncomingCallScreen(
     info: CameraAgentService.IncomingCall,
     onAccept: () -> Unit,
     service: CameraAgentService?,
+    selfView: @Composable BoxScope.() -> Unit,
 ) {
     val name = contactName.ifBlank { "Unnamed contact" }
     Box(modifier = Modifier.fillMaxSize()) {
+        selfView()
         Column(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Dimens.spacingCallOverlayOffset).callOverlayScrim(),
             horizontalAlignment = Alignment.CenterHorizontally,
