@@ -42,6 +42,22 @@ import org.json.JSONObject
  * an empty value, so this feature stays inert for anyone who hasn't opted
  * in.
  */
+/**
+ * Outcome of a single check, for a caller that wants to show something
+ * (Settings' "Check for updates" button) rather than just let
+ * [UpdateChecker.checkAndMaybeNotify]'s silent notify-or-don't behavior
+ * happen in the background.
+ */
+sealed interface UpdateCheckResult {
+    /** [BuildConfig.UPDATE_REPO] is blank — this build has update checking
+     * turned off entirely. */
+    data object Disabled : UpdateCheckResult
+    data object UpToDate : UpdateCheckResult
+    data class Downloading(val tag: String) : UpdateCheckResult
+    data class Ready(val tag: String) : UpdateCheckResult
+    data class Failed(val reason: String) : UpdateCheckResult
+}
+
 object UpdateChecker {
     private const val TAG = "UpdateChecker"
     private const val CHANNEL_ID = "portal_call_updates"
@@ -79,9 +95,28 @@ object UpdateChecker {
      * surfacing to whoever's watching TV, and the next scheduled check
      * just tries again.
      */
-    fun checkAndMaybeNotify(context: Context) {
+    fun checkAndMaybeNotify(context: Context) = checkNow(context, force = false) {}
+
+    /**
+     * The real check, shared by the silent scheduled path
+     * ([checkAndMaybeNotify], `force = false`, result ignored) and
+     * [AdminChoiceScreen]'s manual "Check for updates" button (`force =
+     * true`) that wants to show [UpdateCheckResult] rather than let it
+     * happen invisibly. [onResult] can fire more than once for one call
+     * (e.g. [UpdateCheckResult.Downloading] then [UpdateCheckResult.Ready])
+     * and always fires on whatever background thread OkHttp's callback
+     * runs on, same as [checkAndMaybeNotify] always has — callers touching
+     * UI state need to hop back to the main thread themselves.
+     *
+     * `force`: the scheduled path's own dedup (never re-notify for a
+     * version already notified once) would otherwise make a manual re-check
+     * silently do nothing the moment a background check already found the
+     * same release — exactly the case someone tapping "Check for updates"
+     * most wants a real answer for, not silence.
+     */
+    fun checkNow(context: Context, force: Boolean, onResult: (UpdateCheckResult) -> Unit) {
         val repo = BuildConfig.UPDATE_REPO
-        if (repo.isBlank()) return
+        if (repo.isBlank()) { onResult(UpdateCheckResult.Disabled); return }
         val appContext = context.applicationContext
         val request = Request.Builder()
             .url("https://api.github.com/repos/$repo/releases/latest")
@@ -90,21 +125,27 @@ object UpdateChecker {
         httpClient.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 Log.w(TAG, "update check failed", e)
+                onResult(UpdateCheckResult.Failed("network"))
             }
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     if (!it.isSuccessful) {
                         Log.w(TAG, "update check: unexpected response ${it.code}")
+                        onResult(UpdateCheckResult.Failed("server (${it.code})"))
                         return
                     }
-                    handleReleaseResponse(appContext, it.body.string())
+                    handleReleaseResponse(appContext, it.body.string(), force, onResult)
                 }
             }
         })
     }
 
-    private fun handleReleaseResponse(context: Context, body: String) {
-        val release = runCatching { JSONObject(body) }.getOrNull() ?: return
+    private fun handleReleaseResponse(context: Context, body: String, force: Boolean, onResult: (UpdateCheckResult) -> Unit) {
+        val release = runCatching { JSONObject(body) }.getOrNull()
+        if (release == null) {
+            onResult(UpdateCheckResult.Failed("couldn't parse response"))
+            return
+        }
         val tag = release.optString("tag_name")
         // startsWith("v") checked explicitly, not just removePrefix: a tag
         // with no "v" at all would otherwise still parse (removePrefix is a
@@ -113,14 +154,21 @@ object UpdateChecker {
         val latestCode = if (tag.startsWith("v")) tag.removePrefix("v").toIntOrNull() else null
         if (latestCode == null) {
             Log.w(TAG, "release tag '$tag' doesn't match the v<versionCode> convention; ignoring")
+            onResult(UpdateCheckResult.Failed("unrecognized release"))
             return
         }
-        if (latestCode <= BuildConfig.VERSION_CODE) return // already up to date
+        if (latestCode <= BuildConfig.VERSION_CODE) {
+            onResult(UpdateCheckResult.UpToDate)
+            return
+        }
 
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getInt(KEY_NOTIFIED_CODE, 0) == latestCode) return // already notified for this exact version
+        if (!force && prefs.getInt(KEY_NOTIFIED_CODE, 0) == latestCode) return // already notified for this exact version
 
-        val assets = release.optJSONArray("assets") ?: return
+        val assets = release.optJSONArray("assets") ?: run {
+            onResult(UpdateCheckResult.Failed("malformed release"))
+            return
+        }
         var downloadUrl: String? = null
         for (i in 0 until assets.length()) {
             val asset = assets.optJSONObject(i) ?: continue
@@ -131,13 +179,18 @@ object UpdateChecker {
         }
         if (downloadUrl == null) {
             Log.w(TAG, "release $tag has no $RELEASE_ASSET_NAME asset; ignoring")
+            onResult(UpdateCheckResult.Failed("release has no APK attached"))
             return
         }
 
+        onResult(UpdateCheckResult.Downloading(tag))
         downloadApk(context, downloadUrl) { success ->
             if (success) {
                 prefs.edit().putInt(KEY_NOTIFIED_CODE, latestCode).apply()
                 postUpdateNotification(context, tag)
+                onResult(UpdateCheckResult.Ready(tag))
+            } else {
+                onResult(UpdateCheckResult.Failed("download failed"))
             }
         }
     }

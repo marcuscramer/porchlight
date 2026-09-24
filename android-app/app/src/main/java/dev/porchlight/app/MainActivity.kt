@@ -7,7 +7,9 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -691,6 +693,45 @@ private fun AdminChoiceScreen(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+        }
+        val context = LocalContext.current
+        // OkHttp's own callback thread, not callExecutor — UpdateChecker's
+        // own doc is explicit that it never touches callExecutor, so
+        // hopping to the main thread has to happen here, at the UI-state
+        // boundary, the same way CameraAgentService's mainHandler does it.
+        val mainHandler = remember { Handler(Looper.getMainLooper()) }
+        var checking by remember { mutableStateOf(false) }
+        var checkResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap)) {
+            TvButton(
+                enabled = !checking,
+                onClick = {
+                    checking = true
+                    checkResult = null
+                    // force = true: a manual tap should always give a real
+                    // answer, even for a release the silent scheduled check
+                    // already found and notified about once — see
+                    // UpdateChecker.checkNow's own doc.
+                    UpdateChecker.checkNow(context, force = true) { result ->
+                        mainHandler.post {
+                            checkResult = result
+                            if (result !is UpdateCheckResult.Downloading) checking = false
+                        }
+                    }
+                },
+            ) { Text(if (checking) "Checking…" else "Check for updates") }
+            Text("v${BuildConfig.VERSION_NAME}", color = GeneratedColor.colorTextDim)
+        }
+        val message = when (val result = checkResult) {
+            null -> null
+            UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
+            UpdateCheckResult.UpToDate -> "You're on the latest version."
+            is UpdateCheckResult.Downloading -> "Downloading ${result.tag}…"
+            is UpdateCheckResult.Ready -> "${result.tag} downloaded — check your notifications to install."
+            is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
+        }
+        if (message != null) {
+            Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
