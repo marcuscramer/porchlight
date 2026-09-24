@@ -1,7 +1,8 @@
 # Porchlight
 
-Two-way video calling that works between Meta Portal TVs, browsers, or any
-mix of the two — no account, no subscription, no server run by anyone.
+**Still testing** — expect rough edges. Two-way video calling that works
+between Meta Portal TVs, browsers, or any mix of the two — no account, no
+subscription, no server run by anyone.
 Each device generates its own private identity the moment it's set up,
 and two devices pair by simply agreeing on a shared phrase.
 
