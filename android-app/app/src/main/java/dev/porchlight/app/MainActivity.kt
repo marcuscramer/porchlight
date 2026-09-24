@@ -706,39 +706,31 @@ private fun AdminChoiceScreen(
         // hopping to the main thread has to happen here, at the UI-state
         // boundary, the same way CameraAgentService's mainHandler does it.
         val mainHandler = remember { Handler(Looper.getMainLooper()) }
-        var checking by remember { mutableStateOf(false) }
         var checkResult by remember { mutableStateOf<UpdateCheckResult?>(null) }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap)) {
-            TvButton(
-                enabled = !checking,
-                onClick = {
-                    checking = true
-                    checkResult = null
-                    // force = true: a manual tap should always give a real
-                    // answer, even for a release the silent scheduled check
-                    // already found and notified about once — see
-                    // UpdateChecker.checkNow's own doc.
-                    UpdateChecker.checkNow(context, force = true) { result ->
-                        mainHandler.post {
-                            checkResult = result
-                            if (result !is UpdateCheckResult.Downloading) checking = false
-                        }
-                    }
-                },
-            ) { Text(if (checking) "Checking…" else "Check for updates") }
-            Text("v${BuildConfig.VERSION_NAME}", color = GeneratedColor.colorTextDim)
+        // Checks the moment Settings opens, no button to tap first — force
+        // = true so this always gives a real answer, even for a release
+        // the silent scheduled check already found and notified about once
+        // (see UpdateChecker.checkNow's own doc). Keyed on Unit: Settings
+        // is a fresh composition every time it's opened (see AppRoot's own
+        // reload-on-open comment above), so this naturally re-checks each
+        // visit without a separate trigger.
+        LaunchedEffect(Unit) {
+            UpdateChecker.checkNow(context, force = true) { result ->
+                mainHandler.post { checkResult = result }
+            }
         }
+        Text("v${BuildConfig.VERSION_NAME}", color = GeneratedColor.colorTextDim)
         val message = when (val result = checkResult) {
-            null -> null
+            null -> "Checking for updates…"
             UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
             UpdateCheckResult.UpToDate -> "You're on the latest version."
             is UpdateCheckResult.Downloading -> "Downloading ${result.tag}…"
             is UpdateCheckResult.Ready -> "${result.tag} downloaded."
             is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
         }
-        if (message != null) {
-            Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodySmall)
-        }
+        Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodySmall)
+        // The only update-related control now — nothing to tap unless
+        // there's actually something to install.
         if (checkResult is UpdateCheckResult.Ready) {
             TvButton(onClick = { UpdateChecker.installOrRequestPermission(context) }) {
                 Text("Install now")
