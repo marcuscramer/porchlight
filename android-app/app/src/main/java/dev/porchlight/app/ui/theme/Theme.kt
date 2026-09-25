@@ -108,35 +108,38 @@ fun Modifier.porchlightScreenBackground(): Modifier = this.drawWithCache {
  * dissolves empty space, not content; scroll past it and real content
  * takes its place there instead.
  *
- * Top and bottom are deliberately shaped differently now, not
- * symmetrically. Top is split in half, not one plain linear fade end to
- * end — a straight fade across the entire topHeight span is still clearly
- * legible almost all the way to the settings gear overlaid in that corner
- * (a linear ramp is nowhere near transparent until its very last few dp),
- * so real row text and the gear's own visuals would read as overlapping
- * right where they're closest. The *outer* half (nearest the gear) is a
- * flat, already-fully-transparent zone instead; the *inner* half (nearest
- * the visible rows) is where the actual black-to-transparent transition
- * happens, compressed into half the space — topHeight should be sized so
- * that half comfortably clears the gear (see WaitingScreen's own call
- * site for the number). Bottom has no such overlay to clear, so it's a
- * plain single linear fade across the full bottomHeight — a held flat
- * zone there would just be dead, featureless space for no reason.
+ * Bottom is always one plain single linear fade across its own full
+ * height. Top can be either that same plain shape, or — when [topPlain] is
+ * false — a split shape instead: a flat, already-fully-transparent outer
+ * half plus a compressed inner ramp, which exists to keep row text clear
+ * of the settings gear overlaid in that corner on a screen where a
+ * straight fade wouldn't get transparent enough soon enough. Callers
+ * should only pass `topPlain = true` once they've measured real,
+ * live clearance between the scrollable content and whatever floats in
+ * that corner, not assumed it for a specific screen size — Porchlight
+ * isn't guaranteed to run only on one Portal model (see WaitingScreen's
+ * own call site, which measures this live via onGloballyPositioned rather
+ * than hardcoding either shape) — mirrors web's identical resize-driven
+ * live check for the same reason (`.contact-list` mask-image, styles.css).
  *
  * `graphicsLayer(alpha = 0.99f)` forces this subtree onto its own
  * compositing layer, which [BlendMode.DstIn] needs in order to only affect
  * this content rather than everything drawn behind it.
  */
-fun Modifier.fadingEdges(topHeight: Dp, bottomHeight: Dp): Modifier = this
+fun Modifier.fadingEdges(topHeight: Dp, bottomHeight: Dp, topPlain: Boolean): Modifier = this
     .graphicsLayer(alpha = 0.99f)
     .drawWithContent {
         drawContent()
         val topPx = topHeight.toPx()
         drawRect(
-            brush = Brush.verticalGradient(
-                0f to Color.Transparent, 0.5f to Color.Transparent, 1f to Color.Black,
-                startY = 0f, endY = topPx,
-            ),
+            brush = if (topPlain) {
+                Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = topPx)
+            } else {
+                Brush.verticalGradient(
+                    0f to Color.Transparent, 0.5f to Color.Transparent, 1f to Color.Black,
+                    startY = 0f, endY = topPx,
+                )
+            },
             blendMode = BlendMode.DstIn,
         )
         val bottomPx = bottomHeight.toPx()

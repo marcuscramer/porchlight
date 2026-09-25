@@ -54,10 +54,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -755,6 +758,24 @@ private fun WaitingScreen(
         val settingsFocusRequester = remember { FocusRequester() }
         val settingsInteractionSource = remember { MutableInteractionSource() }
         val settingsFocused by settingsInteractionSource.collectIsFocusedAsState()
+        // See fadingEdges' own doc (Theme.kt) for what this decides. Measured
+        // live via onGloballyPositioned, not assumed true for a fixed Portal
+        // TV screen size — Porchlight isn't guaranteed to run only on the
+        // one model/screen this was first confirmed against (touch Portal
+        // models are already a known, explicitly-untested gap — see
+        // porchlight_open_issues.md), so this checks the real rendered gap
+        // between the list's own right edge and the icon's left edge every
+        // time either one's layout actually changes, same live check web's
+        // identical resize-driven one runs (app.js). One full icon-width of
+        // clearance is the bar, matching that check's own reasoning.
+        var settingsIconLeftPx by remember { mutableStateOf<Float?>(null) }
+        var listRightPx by remember { mutableStateOf<Float?>(null) }
+        val density = LocalDensity.current
+        val topFadePlain = run {
+            val icon = settingsIconLeftPx
+            val list = listRightPx
+            icon != null && list != null && (icon - list) >= with(density) { Dimens.sizeSettingsFab.toPx() }
+        }
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -767,6 +788,7 @@ private fun WaitingScreen(
                 // correction).
                 .padding(Dimens.spacingStatusRegionLeftOffset - (Dimens.sizeSettingsFab - Dimens.dimension24) / 2)
                 .size(Dimens.sizeSettingsFab)
+                .onGloballyPositioned { settingsIconLeftPx = it.boundsInRoot().left }
                 .focusRequester(settingsFocusRequester)
                 .clickable(interactionSource = settingsInteractionSource, indication = null, onClick = onOpenSettings),
             contentAlignment = Alignment.Center,
@@ -797,6 +819,10 @@ private fun WaitingScreen(
                     // widest row's natural content width, so Call/
                     // Auto-answer/Delete land at the same x on every row.
                     .width(IntrinsicSize.Max)
+                    // Feeds topFadePlain above — measured after
+                    // width(IntrinsicSize.Max) so this is the list's real
+                    // rendered right edge, not its unconstrained max.
+                    .onGloballyPositioned { listRightPx = it.boundsInRoot().right }
                     // heightIn caps this Column so verticalScroll+
                     // fadingEdges take over instead of overflowing past the
                     // screen.
@@ -817,7 +843,7 @@ private fun WaitingScreen(
                     // this is just a modest, purely cosmetic edge fade now
                     // (see fadingEdges' own doc for why top/bottom are
                     // shaped differently).
-                    .fadingEdges(topHeight = Dimens.listFadeHeightTop, bottomHeight = 48.dp)
+                    .fadingEdges(topHeight = Dimens.listFadeHeightTop, bottomHeight = 48.dp, topPlain = topFadePlain)
                     .verticalScroll(listScroll),
             ) {
                 // The first of this Column's two fade spacers — see

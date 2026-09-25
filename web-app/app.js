@@ -1457,7 +1457,43 @@ function renderWaitingScreen() {
   // See savedScrollTop's own doc above — an out-of-range scrollTop clamps
   // to the real max on its own.
   listEl.scrollTop = savedScrollTop;
+  updateContactListFadeShape();
 }
+
+/**
+ * See .contact-list's own doc (styles.css) for what this decides and why
+ * — measures the real, live gap between the list's right edge and the
+ * settings icon's left edge, rather than assuming either fade shape for a
+ * fixed screen size, since this viewport is resizable (unlike Android's
+ * fixed-size Portal TV screen, which nonetheless runs the identical live
+ * onGloballyPositioned-driven check in HomeScreens.kt, since Porchlight
+ * isn't guaranteed to run only on one screen size there either). One full
+ * icon-width of clearance is the bar, read live from the same design
+ * token the icon's own size comes from rather than a separate hardcoded
+ * number.
+ */
+function updateContactListFadeShape() {
+  if (screen !== 'waiting') return;
+  const listEl = el('contactList');
+  const listRect = listEl.getBoundingClientRect();
+  const fabRect = el('settingsBtn').getBoundingClientRect();
+  // A zero-width rect means one of the two isn't actually laid out (this
+  // screen isn't the visible one, most likely) — nothing to conclude.
+  if (listRect.width === 0 || fabRect.width === 0) return;
+  const minGapPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--size-settings-fab')) || 0;
+  listEl.classList.toggle('top-fade-plain', fabRect.left - listRect.right >= minGapPx);
+}
+
+// Coalesced onto one rAF per resize burst rather than firing per event —
+// the browser can dispatch many 'resize' events across a single drag.
+let fadeShapeResizeHandle = null;
+window.addEventListener('resize', () => {
+  if (fadeShapeResizeHandle) return;
+  fadeShapeResizeHandle = requestAnimationFrame(() => {
+    fadeShapeResizeHandle = null;
+    updateContactListFadeShape();
+  });
+});
 
 // --- Device settings (mirrors AdminChoiceScreen) ------------------------
 

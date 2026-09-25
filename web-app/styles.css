@@ -297,16 +297,23 @@ html, body {
      content; real content only enters this zone once scrolled, exactly
      when a fade should show.
 
-     Top and bottom are shaped differently, not symmetrically. Top is
-     split in half, not one plain linear fade end to end — a straight fade
+     Bottom is always one plain linear fade across its own full span —
+     no overlay ever sits in that corner. Top defaults to a shape split in
+     half instead, not one plain linear fade end to end: a straight fade
      across the entire span stays legible almost to the settings icon's
      own edge, so row text and that overlay text would read as
      overlapping. The *outer* half (nearest the icon) is flat and already
      fully transparent instead; the *inner* half (nearest the visible
-     rows) is where the actual transition happens. Bottom has no overlay
-     to clear, so it's one plain linear fade across the full span — a held
-     flat zone there would just be dead, featureless space for no
-     reason. */
+     rows) is where the actual transition happens. That's only needed when
+     the list actually runs close to the icon, though — app.js measures
+     the real live gap between them (updateContactListFadeShape) and adds
+     .top-fade-plain, below, whenever there's enough room, which swaps top
+     to the same plain shape bottom always uses. Mirrors Android's
+     identical onGloballyPositioned-driven check (HomeScreens.kt/
+     Theme.kt's fadingEdges topPlain param) for the same reason: a fixed
+     split isn't correct at every viewport width this runs at, the same
+     way it wouldn't be correct at every screen size Android could run on
+     either. */
   mask-image: linear-gradient(
     to bottom,
     transparent, transparent calc(var(--list-fade-height-top) / 2), black var(--list-fade-height-top),
@@ -315,6 +322,21 @@ html, body {
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent, transparent calc(var(--list-fade-height-top) / 2), black var(--list-fade-height-top),
+    black calc(100% - var(--list-fade-height-bottom)), transparent 100%
+  );
+}
+/* See .contact-list's own mask-image doc just above — applied by app.js's
+   updateContactListFadeShape once it measures enough real horizontal
+   clearance from the settings icon. Same shape as bottom's, mirrored. */
+.contact-list.top-fade-plain {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent, black var(--list-fade-height-top),
+    black calc(100% - var(--list-fade-height-bottom)), transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent, black var(--list-fade-height-top),
     black calc(100% - var(--list-fade-height-bottom)), transparent 100%
   );
 }
