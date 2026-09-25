@@ -53,7 +53,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -330,12 +329,14 @@ internal fun TvButton(
  * enabled/disabled only, confirmed against the library's actual API), so
  * without this a Switch is the one control in the app that gives no visual
  * feedback when it has D-pad focus, unlike [TvButton]'s own border/fill
- * brightening. Every color slot brightens toward white by the same amount
- * on focus, checked or not — this answers both halves of "how should this
- * look": unchecked reads exactly like a focused neutral [TvButton] (dim
- * gray lifted toward white), and checked needs no separate
- * "brighter green" design of its own since the identical blend already
- * lifts it out from its own unfocused shade.
+ * brightening. Track and border reuse [TvButton]'s own tint formula
+ * exactly — the same [GeneratedOpacity] alpha tokens over the same hues
+ * (white for unchecked/[TvButtonTint.Neutral], [GeneratedColor.colorStatusOk]
+ * for checked/[TvButtonTint.Success], the same green the in-call Accept/Call
+ * buttons use) — so a Switch reads as the same family of control as every
+ * button in the app, not a separately-designed one. The thumb stays a
+ * plain, focus-independent on/off indicator, the same way a TvButton's own
+ * content color never changes with focus either (only its fill/border do).
  */
 @Composable
 internal fun FocusableSwitch(
@@ -345,17 +346,20 @@ internal fun FocusableSwitch(
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
 ) {
     val focused by interactionSource.collectIsFocusedAsState()
-    fun brighten(color: Color) = if (focused) lerp(color, Color.White, 0.35f) else color
+    val neutralContainerAlpha = if (focused) GeneratedOpacity.buttonTintNeutralContainerFocused else GeneratedOpacity.buttonTintNeutralContainer
+    val neutralBorderAlpha = if (focused) GeneratedOpacity.buttonTintNeutralBorderFocused else GeneratedOpacity.buttonTintNeutralBorder
+    val accentContainerAlpha = if (focused) GeneratedOpacity.buttonTintAccentContainerFocused else GeneratedOpacity.buttonTintAccentContainer
+    val accentBorderAlpha = if (focused) GeneratedOpacity.buttonTintAccentBorderFocused else GeneratedOpacity.buttonTintAccentBorder
     Switch(
         checked = checked,
         onCheckedChange = onCheckedChange,
         colors = SwitchDefaults.colors(
-            checkedThumbColor = brighten(GeneratedColor.colorTextPrimary),
-            checkedTrackColor = brighten(GeneratedColor.colorStatusOk),
-            checkedBorderColor = brighten(GeneratedColor.colorStatusOk),
-            uncheckedThumbColor = brighten(GeneratedColor.colorTextDim),
-            uncheckedTrackColor = brighten(GeneratedColor.colorBackgroundSurfaceAlt),
-            uncheckedBorderColor = brighten(GeneratedColor.colorBorderDefault),
+            checkedThumbColor = GeneratedColor.colorTextPrimary,
+            checkedTrackColor = GeneratedColor.colorStatusOk.copy(alpha = accentContainerAlpha),
+            checkedBorderColor = GeneratedColor.colorStatusOk.copy(alpha = accentBorderAlpha),
+            uncheckedThumbColor = GeneratedColor.colorTextDim,
+            uncheckedTrackColor = Color.White.copy(alpha = neutralContainerAlpha),
+            uncheckedBorderColor = Color.White.copy(alpha = neutralBorderAlpha),
         ),
         interactionSource = interactionSource,
         modifier = modifier,
