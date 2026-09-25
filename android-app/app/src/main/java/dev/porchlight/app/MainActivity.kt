@@ -772,11 +772,11 @@ private fun AdminChoiceScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Launch on boot",
+                            "Kiosk mode",
                             color = if (launchOnBootFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         )
                         Text(
-                            "Bring Porchlight up automatically after (re)boot, and back to the front when the screensaver ends",
+                            "Bring Porchlight up automatically after (re)boot and when screensaver/sleep ends",
                             color = GeneratedColor.colorTextDim,
                             style = MaterialTheme.typography.bodySmall,
                         )
