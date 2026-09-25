@@ -43,10 +43,10 @@
     <!-- Mirrors NameEntryScreen (first run, onCancel = null). -->
     <section id="screenName" class="screen centered">
       <div class="panel">
-        <h1 id="nameTitle">Name this device</h1>
-        <p class="muted">Shown to other devices during pairing and in their contacts list.</p>
-        <input id="nameInput" type="text" placeholder="e.g. Mom's laptop" maxlength="100" aria-labelledby="nameTitle" />
-        <button id="nameContinue" class="tv-button">Continue</button>
+        <h1 id="nameTitle" data-i18n="nameEntry.titleNew">Name this device</h1>
+        <p class="muted" data-i18n="nameEntry.subtitle">Shown to other devices during pairing and in their contacts list.</p>
+        <input id="nameInput" type="text" data-i18n-placeholder="nameEntry.placeholder" placeholder="e.g. Mom's laptop" maxlength="100" aria-labelledby="nameTitle" />
+        <button id="nameContinue" class="tv-button" data-i18n="nameEntry.continueButton">Continue</button>
       </div>
     </section>
 
@@ -60,7 +60,7 @@
            so equal padding never produces equal-looking spacing. Same
            Material "settings" gear path Icons.Filled.Settings resolves to,
            for pixel-shape parity with Android. -->
-      <button id="settingsBtn" class="settings-fab" title="Device settings" aria-label="Device settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z"/></svg></button>
+      <button id="settingsBtn" class="settings-fab" data-i18n-title="contacts.deviceSettings" data-i18n-aria-label="contacts.deviceSettings" title="Device settings" aria-label="Device settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z"/></svg></button>
       <div id="contactList" class="contact-list"></div>
     </section>
 
@@ -74,22 +74,22 @@
          (.screen-title, a sibling of .panel) — this is a page-like "go
          manage something" destination, not a single centered prompt. -->
     <section id="screenSettings" class="screen centered" hidden>
-      <div class="screen-title dim">Settings</div>
+      <div class="screen-title dim" data-i18n="settings.title">Settings</div>
       <div class="panel">
-        <button id="renameBtn" class="tv-button">Rename this device</button>
-        <button id="settingsCancel" class="tv-button secondary">Back</button>
+        <button id="renameBtn" class="tv-button" data-i18n="settings.renameRow">Rename this device</button>
+        <button id="settingsCancel" class="tv-button secondary" data-i18n="common.back">Back</button>
       </div>
     </section>
 
     <!-- Mirrors NameEntryScreen(isRename = true). Upper-left title, same
          reasoning as screenSettings above. -->
     <section id="screenRename" class="screen centered" hidden>
-      <div class="screen-title dim" id="renameTitle">Rename this device</div>
+      <div class="screen-title dim" id="renameTitle" data-i18n="nameEntry.titleRename">Rename this device</div>
       <div class="panel">
-        <p class="muted">Shown to other devices during pairing and in their contacts list.</p>
+        <p class="muted" data-i18n="nameEntry.subtitle">Shown to other devices during pairing and in their contacts list.</p>
         <input id="renameInput" type="text" maxlength="100" aria-labelledby="renameTitle" />
-        <button id="renameSave" class="tv-button">Save</button>
-        <button id="renameCancel" class="tv-button secondary">Back</button>
+        <button id="renameSave" class="tv-button" data-i18n="nameEntry.saveButton">Save</button>
+        <button id="renameCancel" class="tv-button secondary" data-i18n="common.back">Back</button>
       </div>
     </section>
 
@@ -101,9 +101,9 @@
     <section id="screenConfirmDelete" class="screen centered" hidden>
       <div class="panel">
         <h1 id="confirmDeleteTitle" class="warn-line" role="alert">Delete this contact?</h1>
-        <p class="muted">This can't be undone.</p>
-        <button id="confirmDeleteAction" class="tv-button danger">Delete</button>
-        <button id="confirmDeleteCancel" class="tv-button secondary">Cancel</button>
+        <p class="muted" data-i18n="contacts.deleteConfirmMessage">This can't be undone.</p>
+        <button id="confirmDeleteAction" class="tv-button danger" data-i18n="contacts.deleteButton">Delete</button>
+        <button id="confirmDeleteCancel" class="tv-button secondary" data-i18n="common.cancel">Cancel</button>
       </div>
     </section>
 
@@ -112,24 +112,24 @@
          #contactList. No generator/enterer, show/scan distinction of any
          kind. -->
     <section id="screenEnterPhrase" class="screen centered" hidden>
-      <div class="screen-title dim">Add contact</div>
+      <div class="screen-title dim" data-i18n="pairing.addContactTitle">Add contact</div>
       <div class="panel">
-        <p class="muted">
+        <p class="muted" data-i18n="pairing.instructions1">
           Agree on a short phrase together — on a phone call, or however
           else you're in touch right now — then have both of you type the
           exact same phrase into your own device.
         </p>
-        <p class="muted">
+        <p class="muted" data-i18n="pairing.instructions2">
           Choose a phrase only the two of you would think of — avoid a
           common word, a name, or a short number.
         </p>
-        <p class="muted">
+        <p class="muted" data-i18n="pairing.instructions3">
           This only needs to be done once — once paired, you'll be able to
           call each other any time.
         </p>
-        <input id="phraseInput" type="text" placeholder="Phrase" maxlength="200" aria-label="Pairing phrase" />
-        <button id="phraseSubmit" class="tv-button">Start pairing</button>
-        <button id="phraseCancel" class="tv-button secondary">Back</button>
+        <input id="phraseInput" type="text" data-i18n-placeholder="pairing.phraseFieldLabel" data-i18n-aria-label="pairing.phraseAriaLabel" placeholder="Phrase" maxlength="200" aria-label="Pairing phrase" />
+        <button id="phraseSubmit" class="tv-button" data-i18n="pairing.startPairingButton">Start pairing</button>
+        <button id="phraseCancel" class="tv-button secondary" data-i18n="common.back">Back</button>
       </div>
     </section>
 
@@ -141,19 +141,19 @@
       <div class="panel">
         <div id="progressWaiting">
           <div class="spinner" aria-hidden="true"></div>
-          <h1>Waiting for the other device…</h1>
+          <h1 data-i18n="pairing.waitingForDevice">Waiting for the other device…</h1>
         </div>
         <div id="progressCollision" hidden>
-          <h1 class="warn-line">Multiple pairing attempts detected</h1>
-          <p class="muted">More than one other device responded to that phrase at once. This may just be a coincidence (or someone else guessing the same words) — try again with a fresh phrase only the two of you would pick.</p>
-          <button id="progressRetryCollision" class="tv-button">Try again</button>
+          <h1 class="warn-line" data-i18n="pairing.collisionTitle">Multiple pairing attempts detected</h1>
+          <p class="muted" data-i18n="pairing.collisionMessage">More than one other device responded to that phrase at once. This may just be a coincidence (or someone else guessing the same words) — try again with a fresh phrase only the two of you would pick.</p>
+          <button id="progressRetryCollision" class="tv-button" data-i18n="pairing.tryAgainButton">Try again</button>
         </div>
         <div id="progressTimeout" hidden>
-          <h1>No response</h1>
-          <p class="muted">Nobody answered that phrase in time. Check that the other device is on this same screen and typed the exact same phrase, then try again.</p>
-          <button id="progressRetryTimeout" class="tv-button">Try again</button>
+          <h1 data-i18n="pairing.timeoutTitle">No response</h1>
+          <p class="muted" data-i18n="pairing.timeoutMessage">Nobody answered that phrase in time. Check that the other device is on this same screen and typed the exact same phrase, then try again.</p>
+          <button id="progressRetryTimeout" class="tv-button" data-i18n="pairing.tryAgainButton">Try again</button>
         </div>
-        <button id="progressCancel" class="tv-button secondary">Cancel</button>
+        <button id="progressCancel" class="tv-button secondary" data-i18n="common.cancel">Cancel</button>
       </div>
     </section>
 
@@ -165,9 +165,9 @@
     <section id="screenPair" class="screen centered" hidden>
       <div class="panel">
         <div class="pair-title" id="pairTitle">Pair with this device?</div>
-        <p class="pair-muted">Both sides typed the same phrase.</p>
-        <button id="pairConfirm" class="tv-button">Confirm</button>
-        <button id="pairCancel" class="tv-button secondary">Cancel</button>
+        <p class="pair-muted" data-i18n="pairing.confirmSubtitle">Both sides typed the same phrase.</p>
+        <button id="pairConfirm" class="tv-button" data-i18n="pairing.confirmButton">Confirm</button>
+        <button id="pairCancel" class="tv-button secondary" data-i18n="common.cancel">Cancel</button>
       </div>
     </section>
 
@@ -180,9 +180,9 @@
       <video id="callingLocalVideo" autoplay playsinline muted></video>
       <div class="calling-overlay">
         <div class="spinner" aria-hidden="true"></div>
-        <div class="calling-label">Calling</div>
+        <div class="calling-label" data-i18n="call.callingLabel">Calling</div>
         <div id="callingName" class="calling-name"></div>
-        <button id="callingCancel" class="tv-button secondary">Cancel</button>
+        <button id="callingCancel" class="tv-button secondary" data-i18n="common.cancel">Cancel</button>
       </div>
     </section>
 
@@ -196,11 +196,11 @@
     <section id="screenIncomingCall" class="screen" hidden>
       <video id="incomingLocalVideo" autoplay playsinline muted></video>
       <div class="calling-overlay">
-        <div class="calling-label">Incoming call from</div>
+        <div class="calling-label" data-i18n="call.incomingCallFrom">Incoming call from</div>
         <div id="incomingCallerName" class="calling-name"></div>
         <div class="calling-buttons-row">
-          <button id="incomingAccept" class="tv-button success" aria-label="Accept"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg></button>
-          <button id="incomingDecline" class="tv-button danger" aria-label="Decline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg></button>
+          <button id="incomingAccept" class="tv-button success" data-i18n-aria-label="call.accept" aria-label="Accept"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg></button>
+          <button id="incomingDecline" class="tv-button danger" data-i18n-aria-label="call.decline" aria-label="Decline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg></button>
         </div>
       </div>
     </section>
@@ -224,16 +224,16 @@
            danger-tinted icon button as Decline above. -->
       <div id="callControls" class="calling-overlay" hidden>
         <div class="call-controls-row">
-          <button id="cyclePreviewPosition" class="tv-button" aria-label="Position self-view"><svg id="previewPositionIcon" viewBox="0 0 24 24" aria-hidden="true"></svg></button>
+          <button id="cyclePreviewPosition" class="tv-button" data-i18n-aria-label="call.positionSelfView" aria-label="Position self-view"><svg id="previewPositionIcon" viewBox="0 0 24 24" aria-hidden="true"></svg></button>
           <div class="call-toggle">
-            <span class="call-toggle-label">Audio</span>
-            <button id="toggleAudio" class="toggle-switch checked" role="switch" aria-checked="true" aria-label="Audio"><span class="toggle-thumb"></span></button>
+            <span class="call-toggle-label" data-i18n="call.audio">Audio</span>
+            <button id="toggleAudio" class="toggle-switch checked" role="switch" aria-checked="true" data-i18n-aria-label="call.audio" aria-label="Audio"><span class="toggle-thumb"></span></button>
           </div>
           <div class="call-toggle">
-            <span class="call-toggle-label">Video</span>
-            <button id="toggleVideo" class="toggle-switch checked" role="switch" aria-checked="true" aria-label="Video"><span class="toggle-thumb"></span></button>
+            <span class="call-toggle-label" data-i18n="call.video">Video</span>
+            <button id="toggleVideo" class="toggle-switch checked" role="switch" aria-checked="true" data-i18n-aria-label="call.video" aria-label="Video"><span class="toggle-thumb"></span></button>
           </div>
-          <button id="callDisconnect" class="tv-button danger" aria-label="Disconnect"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg></button>
+          <button id="callDisconnect" class="tv-button danger" data-i18n-aria-label="call.disconnect" aria-label="Disconnect"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg></button>
         </div>
       </div>
     </section>
@@ -248,7 +248,7 @@
       <div class="panel">
         <h1 id="callOutcomeTitle" role="alert"></h1>
         <p id="callOutcomeMessage" class="muted"></p>
-        <button id="callOutcomeCancel" class="tv-button secondary">OK</button>
+        <button id="callOutcomeCancel" class="tv-button secondary" data-i18n="call.okButton">OK</button>
       </div>
     </section>
   </main>

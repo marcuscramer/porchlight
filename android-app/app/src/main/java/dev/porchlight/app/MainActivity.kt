@@ -60,6 +60,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -654,16 +655,21 @@ private fun NameEntryScreen(
     // "no handler at all" and "handler that does nothing" are genuinely
     // different things worth being able to express separately.
     if (onCancel != null) BackHandler(onBack = onCancel)
+    // Read at composition time, not inside submit() below — stringResource
+    // is @Composable and can't be called from a plain lambda that escapes
+    // composition (an event handler invoked later, e.g. from a keyboard
+    // callback or a button's onClick).
+    val defaultName = stringResource(R.string.nameEntry_defaultNameAndroid)
     // Shared by the button's onClick and the keyboard's Done action below —
     // see CallCoreBridge.sanitizeName's own doc for why this name (which
     // becomes a *peer's* self-reported name from their side the moment it
     // heartbeats out) needs stripping here too, not just on receipt.
-    val submit = { onDone(CallCoreBridge.sanitizeName(name.trim()).ifBlank { "Device" }) }
+    val submit = { onDone(CallCoreBridge.sanitizeName(name.trim()).ifBlank { defaultName }) }
     Column(modifier = Modifier.fillMaxSize().padding(Dimens.spacingScreenPadding)) {
         // Dimmed like Settings' own title — every screen's title uses this
         // exact color/style now, not just Settings.
         Text(
-            if (isRename) "Rename this device" else "Name this device",
+            stringResource(if (isRename) R.string.nameEntry_titleRename else R.string.nameEntry_titleNew),
             color = GeneratedColor.colorTextDim,
             style = MaterialTheme.typography.headlineSmall,
         )
@@ -675,7 +681,7 @@ private fun NameEntryScreen(
                 verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
             ) {
                 Text(
-                    "Shown to other devices during pairing and in their contacts list.",
+                    stringResource(R.string.nameEntry_subtitle),
                     color = GeneratedColor.colorTextDim,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -687,7 +693,7 @@ private fun NameEntryScreen(
                     // hand-copied literal, same as NostrSignalingClient.kt's own
                     // identical cap.
                     onValueChange = { name = it.take(CallCoreBridge.protocolConstants.maxNameLength) },
-                    label = { M3Text("Name") },
+                    label = { M3Text(stringResource(R.string.nameEntry_fieldLabel)) },
                     modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { event ->
                         // See HardwareEnterKeyUpGuard's own doc for the full
                         // mechanism and why arm() is needed here too, not just
@@ -711,7 +717,7 @@ private fun NameEntryScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { submit() }),
                 )
-                TvButton(onClick = submit) { Text(if (isRename) "Save" else "Continue") }
+                TvButton(onClick = submit) { Text(stringResource(if (isRename) R.string.nameEntry_saveButton else R.string.nameEntry_continueButton)) }
             }
         }
     }
@@ -759,14 +765,13 @@ private fun AdminChoiceScreen(
             mainHandler.post { checkResult = result }
         }
     }
-    val versionSuffix = " (v${BuildConfig.VERSION_NAME})"
     val message = when (val result = checkResult) {
-        null -> "Checking for updates…"
-        UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
-        UpdateCheckResult.UpToDate -> "You're on the latest version$versionSuffix"
-        is UpdateCheckResult.Downloading -> "Downloading ${result.versionName}…"
-        is UpdateCheckResult.Ready -> "Update available (v${BuildConfig.VERSION_NAME} → ${result.versionName})"
-        is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
+        null -> stringResource(R.string.settings_update_checking)
+        UpdateCheckResult.Disabled -> stringResource(R.string.settings_update_disabled)
+        UpdateCheckResult.UpToDate -> stringResource(R.string.settings_update_upToDate, BuildConfig.VERSION_NAME)
+        is UpdateCheckResult.Downloading -> stringResource(R.string.settings_update_downloading, result.versionName)
+        is UpdateCheckResult.Ready -> stringResource(R.string.settings_update_ready, BuildConfig.VERSION_NAME, result.versionName)
+        is UpdateCheckResult.Failed -> stringResource(R.string.settings_update_failed, result.reason)
     }
 
     Column(modifier = Modifier.fillMaxSize().porchlightScreenBackground().padding(Dimens.spacingScreenPadding)) {
@@ -774,7 +779,7 @@ private fun AdminChoiceScreen(
         // own title treatment elsewhere), not the app's brightest text —
         // this is "which screen am I on," not content the user actually
         // came here to read.
-        Text("Settings", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.settings_title), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
 
         // A 2-column, 3-row table, centered in whatever space is left below
         // the title — label left, control right. width(IntrinsicSize.Max)
@@ -800,7 +805,7 @@ private fun AdminChoiceScreen(
                     horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
                 ) {
                     Text(
-                        "Rename this device",
+                        stringResource(R.string.settings_renameRow),
                         color = if (renameFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         modifier = Modifier.weight(1f),
                     )
@@ -808,7 +813,7 @@ private fun AdminChoiceScreen(
                         onClick = onRenameDevice,
                         interactionSource = renameInteractionSource,
                         modifier = Modifier.focusRequester(focusRequester),
-                    ) { Icon(Icons.Filled.ArrowForward, contentDescription = "Rename this device", modifier = Modifier.size(Dimens.dimension20)) }
+                    ) { Icon(Icons.Filled.ArrowForward, contentDescription = stringResource(R.string.settings_renameRow), modifier = Modifier.size(Dimens.dimension20)) }
                 }
                 val launchOnBootInteractionSource = remember { MutableInteractionSource() }
                 val launchOnBootFocused by launchOnBootInteractionSource.collectIsFocusedAsState()
@@ -819,11 +824,11 @@ private fun AdminChoiceScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Kiosk mode",
+                            stringResource(R.string.settings_kioskMode_title),
                             color = if (launchOnBootFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         )
                         Text(
-                            "Bring Porchlight up automatically after (re)boot and when the screensaver ends",
+                            stringResource(R.string.settings_kioskMode_subtitle),
                             color = GeneratedColor.colorTextDim,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -852,12 +857,12 @@ private fun AdminChoiceScreen(
                     // sized once, up front, for the widest of them, and
                     // never changes size again as checkResult resolves.
                     Box(modifier = Modifier.weight(1f)) {
-                        Text("Checking for updates…", modifier = Modifier.alpha(0f))
-                        Text("Update checking isn't set up for this build.", modifier = Modifier.alpha(0f))
-                        Text("You're on the latest version$versionSuffix", modifier = Modifier.alpha(0f))
-                        Text("Downloading v${BuildConfig.VERSION_NAME}…", modifier = Modifier.alpha(0f))
-                        Text("Update available (v${BuildConfig.VERSION_NAME} → v${BuildConfig.VERSION_NAME})", modifier = Modifier.alpha(0f))
-                        Text("Couldn't check for updates (server (500)).", modifier = Modifier.alpha(0f))
+                        Text(stringResource(R.string.settings_update_checking), modifier = Modifier.alpha(0f))
+                        Text(stringResource(R.string.settings_update_disabled), modifier = Modifier.alpha(0f))
+                        Text(stringResource(R.string.settings_update_upToDate, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
+                        Text(stringResource(R.string.settings_update_downloading, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
+                        Text(stringResource(R.string.settings_update_ready, BuildConfig.VERSION_NAME, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
+                        Text(stringResource(R.string.settings_update_failed, "server (500)"), modifier = Modifier.alpha(0f))
                         Text(
                             message,
                             color = if (installFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
@@ -870,7 +875,7 @@ private fun AdminChoiceScreen(
                         enabled = checkResult is UpdateCheckResult.Ready,
                         onClick = { UpdateChecker.installOrRequestPermission(context) },
                         interactionSource = installInteractionSource,
-                    ) { Text("Install") }
+                    ) { Text(stringResource(R.string.settings_update_installButton)) }
                 }
             }
         }

@@ -286,8 +286,8 @@ object UpdateChecker {
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
             mgr.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Updates", NotificationManager.IMPORTANCE_DEFAULT)
-                    .apply { description = "A newer Porchlight build is ready to install." },
+                NotificationChannel(CHANNEL_ID, context.getString(R.string.notifications_updateChannelName), NotificationManager.IMPORTANCE_DEFAULT)
+                    .apply { description = context.getString(R.string.notifications_updateChannelDesc) },
             )
         }
         // A BroadcastReceiver, not a direct install Intent: whether tapping
@@ -302,8 +302,8 @@ object UpdateChecker {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = Notification.Builder(context, CHANNEL_ID)
-            .setContentTitle("Porchlight update ready")
-            .setContentText("$versionName downloaded — tap to install")
+            .setContentTitle(context.getString(R.string.notifications_updateReadyTitle))
+            .setContentText(context.getString(R.string.notifications_updateReadyText, versionName))
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)

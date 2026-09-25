@@ -8,6 +8,7 @@
   "scripts": {
     "build:android": "style-dictionary build --config config/android.config.mjs",
     "build:web": "style-dictionary build --config config/web.config.mjs",
-    "build": "npm run build:android && npm run build:web"
+    "build:strings": "node build-strings.mjs",
+    "build": "npm run build:android && npm run build:web && npm run build:strings"
   }
 }

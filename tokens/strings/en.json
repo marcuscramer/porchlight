@@ -1,0 +1,111 @@
+{
+  "_comment": "Every user-facing string in both clients, in one place — see tokens/build-strings.mjs for how this becomes android-app's res/values/strings.xml and web-app/strings.js. {name}-style placeholders are positional in the order they first appear in the English text; the Android generator turns them into %1$s/%2$s/... automatically, so don't reorder a placeholder within one language's text without checking the generator still lines them up the same way for every other language file added later. A key that only makes sense on one platform (e.g. common.back, web-only) still gets generated on both — the unused side is harmless.",
+  "app_name": "Porchlight",
+  "common": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "unnamedContact": "Unnamed contact",
+    "thisContact": "this contact",
+    "thisDevice": "this device"
+  },
+  "nameEntry": {
+    "titleNew": "Name this device",
+    "titleRename": "Rename this device",
+    "subtitle": "Shown to other devices during pairing and in their contacts list.",
+    "placeholder": "e.g. Mom's laptop",
+    "fieldLabel": "Name",
+    "continueButton": "Continue",
+    "saveButton": "Save",
+    "defaultNameAndroid": "Device",
+    "defaultNameWeb": "Porchlight (web)"
+  },
+  "settings": {
+    "title": "Settings",
+    "renameRow": "Rename this device",
+    "backButton": "Back",
+    "kioskMode": {
+      "title": "Kiosk mode",
+      "subtitle": "Bring Porchlight up automatically after (re)boot and when the screensaver ends"
+    },
+    "update": {
+      "checking": "Checking for updates…",
+      "disabled": "Update checking isn't set up for this build.",
+      "upToDate": "You're on the latest version (v{version})",
+      "downloading": "Downloading {version}…",
+      "ready": "Update available (v{oldVersion} → {newVersion})",
+      "failed": "Couldn't check for updates ({reason}).",
+      "installButton": "Install"
+    }
+  },
+  "pairing": {
+    "addContactTitle": "Add contact",
+    "instructions1": "Agree on a short phrase together — on a phone call, or however else you're in touch right now — then have both of you type the exact same phrase into your own device.",
+    "instructions2": "Choose a phrase only the two of you would think of — avoid a common word, a name, or a short number.",
+    "instructions3": "This only needs to be done once — once paired, you'll be able to call each other any time.",
+    "phraseFieldLabel": "Phrase",
+    "phraseAriaLabel": "Pairing phrase",
+    "startPairingButton": "Start pairing",
+    "waitingForDevice": "Waiting for the other device…",
+    "collisionTitle": "Multiple pairing attempts detected",
+    "collisionMessage": "More than one other device responded to that phrase at once. This may just be a coincidence (or someone else guessing the same words) — try again with a fresh phrase only the two of you would pick.",
+    "timeoutTitle": "No response",
+    "timeoutMessage": "Nobody answered that phrase in time. Check that the other device is on this same screen and typed the exact same phrase, then try again.",
+    "tryAgainButton": "Try again",
+    "confirmTitle": "Pair with {name}?",
+    "confirmSubtitle": "Both sides typed the same phrase.",
+    "confirmButton": "Confirm"
+  },
+  "call": {
+    "callingLabel": "Calling",
+    "connectingLabel": "Connecting",
+    "pressBackToCancel": "Press Back to cancel",
+    "incomingCallFrom": "Incoming call from",
+    "pressBackToDecline": "Press Back to decline",
+    "autoAnswerCountdown": "{name} will automatically connect in {secondsPhrase}",
+    "accept": "Accept",
+    "decline": "Decline",
+    "disconnect": "Disconnect",
+    "audio": "Audio",
+    "video": "Video",
+    "positionSelfView": "Position self-view",
+    "pressBackToContinue": "Press Back to continue",
+    "okButton": "OK",
+    "outcome": {
+      "peerEndedTitle": "Call ended",
+      "peerEndedMessage": "{name} ended the call.",
+      "neverConnectedTitle": "Couldn't connect",
+      "neverConnectedMessage": "The call with {name} never connected. Check that both devices have a working internet connection, then try again.",
+      "droppedTitle": "Call dropped",
+      "droppedMessage": "The call with {name} disconnected unexpectedly — usually just a brief network issue."
+    }
+  },
+  "contacts": {
+    "deleteConfirmTitle": "Delete {name}?",
+    "deleteConfirmMessage": "This can't be undone.",
+    "deleteButton": "Delete",
+    "deleteContact": "Delete {name}",
+    "callButton": "Call",
+    "callContact": "Call {name}",
+    "addContact": "Add contact",
+    "deviceSettings": "Device settings",
+    "autoAnswer": "Auto-answer",
+    "autoAnswerFor": "Auto-answer for {name}",
+    "statusBusy": "Busy",
+    "statusOnline": "Online",
+    "statusOffline": "Offline"
+  },
+  "notifications": {
+    "callStatusChannelName": "Call status",
+    "callStatusChannelDesc": "Shows when the camera and microphone are active during a call.",
+    "connectedTitle": "Porchlight — connected",
+    "connectingStatus": "Connecting…",
+    "disconnectedStatus": "Disconnected",
+    "inCallStatus": "In call",
+    "waitingForCallStatus": "Waiting for a call…",
+    "waitingForContactStatus": "Waiting for a contact…",
+    "updateChannelName": "Updates",
+    "updateChannelDesc": "A newer Porchlight build is ready to install.",
+    "updateReadyTitle": "Porchlight update ready",
+    "updateReadyText": "{version} downloaded — tap to install"
+  }
+}

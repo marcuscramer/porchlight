@@ -146,6 +146,13 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         // Set by a ShowCallOutcome effect, cleared by dismissCallOutcome() —
         // drives HomeScreen's full-screen "why did this call end" prompt.
         val pendingCallOutcome: PendingCallOutcome? = null,
+        // Not localized via R.string here — a data class's own default
+        // parameter value has no Context to call getString() with, and
+        // this default is structurally never shown anyway: updateNotification
+        // only ever fires while running is true, but this exact value only
+        // ever appears while running is false (see updateState's own
+        // `when` below and stopAgent, both of which reach real
+        // getString()-backed text through an actual Context instead).
         val statusText: String = "Disconnected",
         // Mirror of WebRtcEngine's own local-track enabled state, published
         // here so CallScreen's Audio/Video toggles can reflect it — reset to
@@ -618,7 +625,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
             stopSelf()
             return
         }
-        startForeground(NOTIF_ID, buildNotification("Connecting…"))
+        startForeground(NOTIF_ID, buildNotification(getString(R.string.notifications_connectingStatus)))
         acquireWakeLock()
         registerScreensaverReceiver()
 
@@ -636,7 +643,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
             config.pairings.find { it.id == id }?.let { pairing -> executor.execute { beginPakeAttempt(pairing, passphrase) } }
         }
 
-        _state.value = _state.value.copy(running = true, statusText = "Connecting…")
+        _state.value = _state.value.copy(running = true, statusText = getString(R.string.notifications_connectingStatus))
 
         scheduleUpdateCheck()
     }
@@ -686,7 +693,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         releaseWakeLock()
         releaseCallWakeLock()
         unregisterScreensaverReceiver()
-        _state.value = AgentState(statusText = "Disconnected")
+        _state.value = AgentState(statusText = getString(R.string.notifications_disconnectedStatus))
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -755,10 +762,10 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         _state.update { current ->
             val s = transform(current)
             val text = when {
-                !s.running -> "Disconnected"
-                s.contacts.any { it.connected } -> "In call"
-                s.contacts.any { it.status != CallCoreBridge.PresenceStatus.OFFLINE } -> "Waiting for a call…"
-                else -> "Waiting for a contact…"
+                !s.running -> getString(R.string.notifications_disconnectedStatus)
+                s.contacts.any { it.connected } -> getString(R.string.notifications_inCallStatus)
+                s.contacts.any { it.status != CallCoreBridge.PresenceStatus.OFFLINE } -> getString(R.string.notifications_waitingForCallStatus)
+                else -> getString(R.string.notifications_waitingForContactStatus)
             }
             next = s.copy(statusText = text)
             next
@@ -1012,15 +1019,15 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
             val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
                 mgr.createNotificationChannel(
-                    NotificationChannel(CHANNEL_ID, getString(R.string.channel_name), NotificationManager.IMPORTANCE_LOW)
-                        .apply { description = getString(R.string.channel_desc) },
+                    NotificationChannel(CHANNEL_ID, getString(R.string.notifications_callStatusChannelName), NotificationManager.IMPORTANCE_LOW)
+                        .apply { description = getString(R.string.notifications_callStatusChannelDesc) },
                 )
             }
         }
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             Notification.Builder(this, CHANNEL_ID) else @Suppress("DEPRECATION") Notification.Builder(this)
         return builder
-            .setContentTitle(getString(R.string.notif_title))
+            .setContentTitle(getString(R.string.notifications_connectedTitle))
             .setContentText(text)
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setOngoing(true)

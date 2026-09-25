@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -292,7 +293,8 @@ internal fun HomeScreen(
         when {
             state.pendingCallOutcome != null -> {
                 val outcome = state.pendingCallOutcome
-                val name = state.contacts.find { it.id == outcome.pairingId }?.name?.ifBlank { "Unnamed contact" } ?: "Unnamed contact"
+                val unnamedContact = stringResource(R.string.common_unnamedContact)
+                val name = state.contacts.find { it.id == outcome.pairingId }?.name?.ifBlank { unnamedContact } ?: unnamedContact
                 CallOutcomeScreen(
                     contactName = name,
                     reason = outcome.reason,
@@ -326,7 +328,7 @@ internal fun HomeScreen(
                 contactName = activeContact.name,
                 service = service,
                 capturing = state.capturing,
-                label = if (state.acceptedIncoming) "Connecting" else "Calling",
+                label = stringResource(if (state.acceptedIncoming) R.string.call_connectingLabel else R.string.call_callingLabel),
             )
             else -> {
                 // Full remote video, plus local self-view. Rectangular, not
@@ -448,11 +450,13 @@ private fun CallControlsOverlay(
         ) {
             PositionSelfViewIcon(corner = previewCorner, modifier = Modifier.size(Dimens.dimension20))
         }
-        CallToggle(label = "Audio", checked = audioEnabled, onCheckedChange = onToggleAudio, contentDescription = "Audio")
-        CallToggle(label = "Video", checked = videoEnabled, onCheckedChange = onToggleVideo, contentDescription = "Video")
+        val audioLabel = stringResource(R.string.call_audio)
+        val videoLabel = stringResource(R.string.call_video)
+        CallToggle(label = audioLabel, checked = audioEnabled, onCheckedChange = onToggleAudio, contentDescription = audioLabel)
+        CallToggle(label = videoLabel, checked = videoEnabled, onCheckedChange = onToggleVideo, contentDescription = videoLabel)
         // Same shape/tint/icon as IncomingCallScreen's own Decline button.
         TvButton(onClick = onDisconnect, tint = TvButtonTint.Danger) {
-            Icon(CallEndIcon, contentDescription = "Disconnect", modifier = Modifier.size(Dimens.dimension20))
+            Icon(CallEndIcon, contentDescription = stringResource(R.string.call_disconnect), modifier = Modifier.size(Dimens.dimension20))
         }
     }
 }
@@ -565,7 +569,7 @@ private fun PositionSelfViewIcon(corner: PreviewCorner, modifier: Modifier = Mod
  * physical Back key rather than a dedicated Cancel target.
  */
 @Composable
-private fun CallingScreen(contactName: String, service: CameraAgentService?, capturing: Boolean, label: String = "Calling") {
+private fun CallingScreen(contactName: String, service: CameraAgentService?, capturing: Boolean, label: String = stringResource(R.string.call_callingLabel)) {
     Box(modifier = Modifier.fillMaxSize()) {
         LocalPreviewView(service = service, ready = capturing)
         Column(
@@ -585,12 +589,12 @@ private fun CallingScreen(contactName: String, service: CameraAgentService?, cap
             // split (index.html).
             Text(label, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
             Text(
-                contactName.ifBlank { "Unnamed contact" },
+                contactName.ifBlank { stringResource(R.string.common_unnamedContact) },
                 color = GeneratedColor.colorTextPrimary,
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center,
             )
-            Text("Press Back to cancel", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.call_pressBackToCancel), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -612,7 +616,7 @@ private fun IncomingCallScreen(
     service: CameraAgentService?,
     capturing: Boolean,
 ) {
-    val name = contactName.ifBlank { "Unnamed contact" }
+    val name = contactName.ifBlank { stringResource(R.string.common_unnamedContact) }
     Box(modifier = Modifier.fillMaxSize()) {
         LocalPreviewView(service = service, ready = capturing)
         Column(
@@ -622,13 +626,21 @@ private fun IncomingCallScreen(
         ) {
             if (info.autoAnswer) {
                 val seconds = info.secondsRemaining
+                // English-only plural handling ("second"/"seconds"), kept
+                // inline rather than in the shared strings source — the one
+                // genuinely plural-sensitive string in the app, and real
+                // plural-rule support (languages don't all split two ways,
+                // or split the same way English does) is future work for
+                // whenever a second language actually needs it, not
+                // something this infra-only pass needs to solve.
+                val secondsPhrase = "$seconds second${if (seconds == 1) "" else "s"}"
                 Text(
-                    "$name will automatically connect in $seconds second${if (seconds == 1) "" else "s"}",
+                    stringResource(R.string.call_autoAnswerCountdown, name, secondsPhrase),
                     color = GeneratedColor.colorTextPrimary,
                     style = MaterialTheme.typography.headlineSmall,
                 )
             } else {
-                Text("Incoming call from", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+                Text(stringResource(R.string.call_incomingCallFrom), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
                 Text(name, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
                 val focusRequester = remember { FocusRequester() }
                 LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -640,14 +652,14 @@ private fun IncomingCallScreen(
                 // equivalent of it.
                 Row(horizontalArrangement = Arrangement.spacedBy(Dimens.spacingCallOverlayGap)) {
                     TvButton(onClick = onAccept, tint = TvButtonTint.Success, modifier = Modifier.focusRequester(focusRequester)) {
-                        Icon(Icons.Filled.Call, contentDescription = "Accept", modifier = Modifier.size(Dimens.dimension20))
+                        Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.call_accept), modifier = Modifier.size(Dimens.dimension20))
                     }
                     TvButton(onClick = { service?.hangUp() }, tint = TvButtonTint.Danger) {
-                        Icon(CallEndIcon, contentDescription = "Decline", modifier = Modifier.size(Dimens.dimension20))
+                        Icon(CallEndIcon, contentDescription = stringResource(R.string.call_decline), modifier = Modifier.size(Dimens.dimension20))
                     }
                 }
             }
-            Text("Press Back to decline", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.call_pressBackToDecline), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -666,13 +678,14 @@ private fun CallOutcomeScreen(
     reason: CallCoreBridge.CallOutcomeReason,
     onDismiss: () -> Unit,
 ) {
-    val name = contactName.ifBlank { "Unnamed contact" }
+    val name = contactName.ifBlank { stringResource(R.string.common_unnamedContact) }
     val (title, message) = when (reason) {
-        CallCoreBridge.CallOutcomeReason.PEER_ENDED -> "Call ended" to "$name ended the call."
-        CallCoreBridge.CallOutcomeReason.NEVER_CONNECTED -> "Couldn't connect" to
-            "The call with $name never connected. Check that both devices have a working internet connection, then try again."
-        CallCoreBridge.CallOutcomeReason.DROPPED -> "Call dropped" to
-            "The call with $name disconnected unexpectedly — usually just a brief network issue."
+        CallCoreBridge.CallOutcomeReason.PEER_ENDED ->
+            stringResource(R.string.call_outcome_peerEndedTitle) to stringResource(R.string.call_outcome_peerEndedMessage, name)
+        CallCoreBridge.CallOutcomeReason.NEVER_CONNECTED ->
+            stringResource(R.string.call_outcome_neverConnectedTitle) to stringResource(R.string.call_outcome_neverConnectedMessage, name)
+        CallCoreBridge.CallOutcomeReason.DROPPED ->
+            stringResource(R.string.call_outcome_droppedTitle) to stringResource(R.string.call_outcome_droppedMessage, name)
     }
     BackHandler(onBack = onDismiss)
     Box(modifier = Modifier.fillMaxSize().porchlightScreenBackground(), contentAlignment = Alignment.Center) {
@@ -685,7 +698,7 @@ private fun CallOutcomeScreen(
             // app's brightest text (matches Settings' own title).
             Text(title, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
             Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-            Text("Press Back to continue", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.call_pressBackToContinue), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -730,9 +743,9 @@ private fun WaitingScreen(
         // button from the screen underneath and fire it with no visual
         // indication anything was about to happen.
         OutcomeScreen(
-            title = "Delete ${toDelete.name.ifBlank { "this contact" }}?",
-            message = "This can't be undone.",
-            actionLabel = "Delete",
+            title = stringResource(R.string.contacts_deleteConfirmTitle, toDelete.name.ifBlank { stringResource(R.string.common_thisContact) }),
+            message = stringResource(R.string.contacts_deleteConfirmMessage),
+            actionLabel = stringResource(R.string.contacts_deleteButton),
             tint = TvButtonTint.Danger,
             onAction = { onDeleteContact(toDelete.id); pendingDelete = null },
             onCancel = { pendingDelete = null },
@@ -795,7 +808,7 @@ private fun WaitingScreen(
         ) {
             Icon(
                 Icons.Filled.Settings,
-                contentDescription = "Device settings",
+                contentDescription = stringResource(R.string.contacts_deviceSettings),
                 // Pure white on focus, deliberately a step brighter than
                 // colorTextPrimary (which stays as-is for its other uses).
                 tint = if (settingsFocused) Color.White else GeneratedColor.colorTextDim,
@@ -882,7 +895,7 @@ private fun WaitingScreen(
                 // Centered rather than docked to the list's left edge —
                 // this is a standalone action, not one more row of content.
                 TvButton(onClick = onAddContact, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                    Icon(PersonAddIcon, contentDescription = "Add contact", modifier = Modifier.size(Dimens.dimension20))
+                    Icon(PersonAddIcon, contentDescription = stringResource(R.string.contacts_addContact), modifier = Modifier.size(Dimens.dimension20))
                 }
                 // Found live: with nothing after it, this button's own
                 // border sat flush against verticalScroll's own clip
@@ -934,12 +947,12 @@ private fun ContactRow(
     // defers, and on a busy one resolves via the real busy-signal exchange
     // (see handle_peer_busy's own doc).
     val badge = when (status) {
-        CallCoreBridge.PresenceStatus.BUSY -> GeneratedColor.colorStatusBusy to "Busy"
-        CallCoreBridge.PresenceStatus.ONLINE -> GeneratedColor.colorStatusOk to "Online"
-        CallCoreBridge.PresenceStatus.OFFLINE -> GeneratedColor.colorActionDangerBackground to "Offline"
+        CallCoreBridge.PresenceStatus.BUSY -> GeneratedColor.colorStatusBusy to stringResource(R.string.contacts_statusBusy)
+        CallCoreBridge.PresenceStatus.ONLINE -> GeneratedColor.colorStatusOk to stringResource(R.string.contacts_statusOnline)
+        CallCoreBridge.PresenceStatus.OFFLINE -> GeneratedColor.colorActionDangerBackground to stringResource(R.string.contacts_statusOffline)
     }
     val nameStyle = Type.contactName
-    val displayName = name.ifBlank { "Unnamed contact" }
+    val displayName = name.ifBlank { stringResource(R.string.common_unnamedContact) }
     // Three real table columns, not three loosely-flexed groups: this Row
     // fillMaxWidth()s to the shared width WaitingScreen's list Column
     // resolves via width(IntrinsicSize.Max), and column 1 uses
@@ -974,11 +987,17 @@ private fun ContactRow(
                 .focusRequester(focusRequester)
                 .padding(start = Dimens.spacingContactRowGap, end = Dimens.spacingContactRowGap * 2)
                 .alpha(if (canCall) 1f else 0f),
-        ) { Icon(Icons.Filled.Call, contentDescription = "Call", modifier = Modifier.size(Dimens.dimension20)) }
+        ) { Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.contacts_callButton), modifier = Modifier.size(Dimens.dimension20)) }
         // Column 3: Auto-answer + Delete, right-aligned as a group.
         Row(verticalAlignment = Alignment.CenterVertically) {
             val switchInteractionSource = remember { MutableInteractionSource() }
             val switchFocused by switchInteractionSource.collectIsFocusedAsState()
+            // Read here, not inside the .semantics{} builder below — that
+            // lambda isn't a composable context (it's a plain
+            // SemanticsPropertyReceiver.() -> Unit config block), so
+            // stringResource() can't be called from inside it directly.
+            val nameOrThisContact = name.ifBlank { stringResource(R.string.common_thisContact) }
+            val autoAnswerForDescription = stringResource(R.string.contacts_autoAnswerFor, nameOrThisContact)
             // Label stacked above the switch, brighter on focus (driven by
             // the Switch's own interactionSource) so the two read as one
             // small control.
@@ -987,7 +1006,7 @@ private fun ContactRow(
                 modifier = Modifier.padding(end = Dimens.dimension8),
             ) {
                 Text(
-                    "Auto-answer",
+                    stringResource(R.string.contacts_autoAnswer),
                     color = if (switchFocused) Color.White else GeneratedColor.colorTextDim,
                     // Real fontSize override, not Modifier.scale() — scale
                     // only shrinks what's painted, not the layout box
@@ -1010,10 +1029,10 @@ private fun ContactRow(
                         // directly on the Switch would otherwise announce a
                         // bare "on"/"off" with no indication of what it
                         // toggles or for whom.
-                        .semantics { contentDescription = "Auto-answer for ${name.ifBlank { "this contact" }}" },
+                        .semantics { contentDescription = autoAnswerForDescription },
                 )
             }
-            DeleteIconButton(onClick = onDelete, contentDescription = "Delete ${name.ifBlank { "this contact" }}")
+            DeleteIconButton(onClick = onDelete, contentDescription = stringResource(R.string.contacts_deleteContact, nameOrThisContact))
         }
     }
 }

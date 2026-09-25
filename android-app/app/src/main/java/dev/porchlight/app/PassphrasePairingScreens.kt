@@ -30,6 +30,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.tv.material3.MaterialTheme
@@ -69,26 +70,22 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
     ) {
         // Dimmed like every other screen's own title (matches Settings').
         Text(
-            "Add contact",
+            stringResource(R.string.pairing_addContactTitle),
             color = GeneratedColor.colorTextDim,
             style = MaterialTheme.typography.headlineSmall,
         )
         Text(
-            "Agree on a short phrase together — on a phone call, or however " +
-                "else you're in touch right now — then have both of you type " +
-                "the exact same phrase into your own device.",
+            stringResource(R.string.pairing_instructions1),
             color = GeneratedColor.colorTextDim,
             style = MaterialTheme.typography.bodyMedium,
         )
         Text(
-            "Choose a phrase only the two of you would think of — avoid a " +
-                "common word, a name, or a short number.",
+            stringResource(R.string.pairing_instructions2),
             color = GeneratedColor.colorTextDim,
             style = MaterialTheme.typography.bodyMedium,
         )
         Text(
-            "This only needs to be done once — once paired, you'll be able " +
-                "to call each other any time.",
+            stringResource(R.string.pairing_instructions3),
             color = GeneratedColor.colorTextDim,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -99,7 +96,7 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
             // and while that path is panic-safe regardless, there's no
             // reason to let an accidental massive paste through.
             onValueChange = { phrase = it.take(200) },
-            label = { M3Text("Phrase") },
+            label = { M3Text(stringResource(R.string.pairing_phraseFieldLabel)) },
             modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).onPreviewKeyEvent { event ->
                 // See HardwareEnterKeyUpGuard's own doc (MainActivity.kt):
                 // submit()-ing here handles the KeyDown, but the real fix
@@ -123,7 +120,7 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
             keyboardActions = KeyboardActions(onDone = { submit() }),
         )
         TvButton(onClick = submit, enabled = phrase.isNotBlank()) {
-            Text("Start pairing")
+            Text(stringResource(R.string.pairing_startPairingButton))
         }
     }
 }
@@ -154,22 +151,17 @@ fun PairingProgressScreen(
             onCancel = onCancel,
         )
         contact?.pairingCollision == true -> OutcomeScreen(
-            title = "Multiple pairing attempts detected",
-            message = "More than one other device responded to that phrase at " +
-                "once. This may just be a coincidence (or someone else guessing " +
-                "the same words) — try again with a fresh phrase only the two " +
-                "of you would pick.",
-            actionLabel = "Try again",
+            title = stringResource(R.string.pairing_collisionTitle),
+            message = stringResource(R.string.pairing_collisionMessage),
+            actionLabel = stringResource(R.string.pairing_tryAgainButton),
             titleIsAlert = true,
             onAction = onRetry,
             onCancel = onCancel,
         )
         contact?.pairingTimedOut == true -> OutcomeScreen(
-            title = "No response",
-            message = "Nobody answered that phrase in time. Check that the " +
-                "other device is on this same screen and typed the exact same " +
-                "phrase, then try again.",
-            actionLabel = "Try again",
+            title = stringResource(R.string.pairing_timeoutTitle),
+            message = stringResource(R.string.pairing_timeoutMessage),
+            actionLabel = stringResource(R.string.pairing_tryAgainButton),
             onAction = onRetry,
             onCancel = onCancel,
         )
@@ -184,7 +176,7 @@ fun PairingProgressScreen(
                     // Same reasoning as CallingScreen's own spinner —
                     // distinguishes "still working" from "stuck."
                     CircularProgressIndicator(color = GeneratedColor.colorActionPrimaryBackground)
-                    Text("Waiting for the other device…", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
+                    Text(stringResource(R.string.pairing_waitingForDevice), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
                 }
             }
         }
@@ -210,14 +202,18 @@ internal fun NameConfirmScreen(candidate: CandidatePeer, onConfirm: () -> Unit, 
             verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
             modifier = Modifier.padding(horizontal = Dimens.spacingScreenPadding),
         ) {
-            Text("Pair with ${candidate.name.ifBlank { "this device" }}?", color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
             Text(
-                "Both sides typed the same phrase.",
+                stringResource(R.string.pairing_confirmTitle, candidate.name.ifBlank { stringResource(R.string.common_thisDevice) }),
+                color = GeneratedColor.colorTextDim,
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            Text(
+                stringResource(R.string.pairing_confirmSubtitle),
                 color = GeneratedColor.colorTextDim,
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
             )
-            TvButton(onClick = onConfirm, modifier = Modifier.focusRequester(focusRequester)) { Text("Confirm") }
+            TvButton(onClick = onConfirm, modifier = Modifier.focusRequester(focusRequester)) { Text(stringResource(R.string.pairing_confirmButton)) }
         }
     }
 }

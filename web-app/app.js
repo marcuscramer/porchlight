@@ -26,11 +26,41 @@ import { bytesToHex, hexToBytes } from 'https://esm.sh/nostr-tools@2.25.2/utils'
 // own like-named UI-facing wrapper below — the namespace import keeps those
 // unambiguous without renaming either side.
 import init, * as callCore from './wasm/call_core.js';
+// AUTO-GENERATED from tokens/strings/*.json (tokens/build-strings.mjs) —
+// see that file's own doc for the shared source this and android-app's
+// res/values*/strings.xml both come from. STRINGS itself only has 'en'
+// today (infra-only pass — see LOCALE_STORAGE_KEY's own doc); resolveLocale
+// already falls back correctly once a second locale file exists, no code
+// here needs to change when one does.
+import { t as translate, resolveLocale } from './strings.js';
 
 // call-core's WASM module — a top-level await (legal since this file is
 // loaded as type="module"), so nothing below can run a pairing attempt
 // before it's ready.
 await init();
+
+const LOCALE_STORAGE_KEY = 'porchlight-locale';
+// No language switcher yet (English-only infra pass) — this just means a
+// browser already set to a language this app doesn't have a translation
+// for falls back to English via resolveLocale, rather than needing this
+// file to know that explicitly. A future switcher only has to write this
+// key; everything downstream already reads it.
+let locale = localStorage.getItem(LOCALE_STORAGE_KEY) || resolveLocale(navigator.language);
+function t(key, params) { return translate(locale, key, params); }
+
+/** Fills every element carrying a data-i18n* attribute from `t()` — for the
+ * static markup in index.html (button labels, screen titles, and so on)
+ * that doesn't otherwise pass through any JS string-building code. Run
+ * once at startup, before the first render() — nothing here changes at
+ * runtime (no language switcher yet), so there's no need to re-run it
+ * later the way renderWaitingScreen etc. do for genuinely dynamic content. */
+function applyStaticI18n() {
+  for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.getAttribute('data-i18n'));
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+  for (const el of document.querySelectorAll('[data-i18n-aria-label]')) el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria-label')));
+  for (const el of document.querySelectorAll('[data-i18n-title]')) el.title = t(el.getAttribute('data-i18n-title'));
+}
+applyStaticI18n();
 
 // Read once from call-core (a compile-time-constant Rust struct) instead of
 // six independently hand-copied literals that could silently drift from
@@ -1314,7 +1344,7 @@ function render() {
 // cleaning it at the source means every other device that ever sees it
 // sees the same sanitized value this device shows.
 el('nameContinue').addEventListener('click', async () => {
-  const name = callCore.sanitizeName(el('nameInput').value.trim().slice(0, PROTOCOL_CONSTANTS.max_name_length)) || 'Porchlight (web)';
+  const name = callCore.sanitizeName(el('nameInput').value.trim().slice(0, PROTOCOL_CONSTANTS.max_name_length)) || t('nameEntry.defaultNameWeb');
   deviceName = name;
   localStorage.setItem(DEVICE_NAME_STORAGE_KEY, deviceName);
   await startApp();
@@ -1381,20 +1411,20 @@ function renderWaitingScreen() {
     switch (state.status) {
       case 'busy':
         dot.className = 'contact-status-dot busy';
-        dot.setAttribute('aria-label', 'Busy');
+        dot.setAttribute('aria-label', t('contacts.statusBusy'));
         break;
       case 'online':
         dot.className = 'contact-status-dot ok';
-        dot.setAttribute('aria-label', 'Online');
+        dot.setAttribute('aria-label', t('contacts.statusOnline'));
         break;
       default:
         dot.className = 'contact-status-dot danger';
-        dot.setAttribute('aria-label', 'Offline');
+        dot.setAttribute('aria-label', t('contacts.statusOffline'));
     }
     nameGroup.appendChild(dot);
     const name = document.createElement('span');
     name.className = 'contact-name';
-    name.textContent = pairing.peerName || 'Unnamed contact';
+    name.textContent = pairing.peerName || t('common.unnamedContact');
     nameGroup.appendChild(name);
     listEl.appendChild(nameGroup);
     // Always created, even when this contact isn't callable right now —
@@ -1413,7 +1443,7 @@ function renderWaitingScreen() {
     // A phone-handset icon, not the word "Call" — same Material glyph path
     // as Android's Icons.Filled.Call.
     btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
-    btn.setAttribute('aria-label', `Call ${pairing.peerName || 'this contact'}`);
+    btn.setAttribute('aria-label', t('contacts.callContact', { name: pairing.peerName || t('common.thisContact') }));
     btn.disabled = !canCall;
     btn.addEventListener('click', () => requestCall(pairing.id));
     listEl.appendChild(btn);
@@ -1424,7 +1454,7 @@ function renderWaitingScreen() {
     const del = document.createElement('button');
     del.className = 'delete-icon-btn';
     del.innerHTML = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M266.2 256l47.2 581.4c0 32.4 26.2 58.6 58.6 58.6h282c32.4 0 58.6-26.2 58.6-58.6L759.2 256H266.2z m123.2 530L376 320h37l13.8 466h-37.4z m140.6 0h-36V320h36v466z m104.6 0h-37.2l13.6-466H648l-13.4 466zM728 184h-72l-52.6-46c-7.4-6.4-16.8-10-26.4-10h-129.6c-9.8 0-19.4 3.6-26.8 10L368 184h-72c-35.2 0-60 16.8-60 52h552c0-35.2-24.8-52-60-52z"/></svg>';
-    del.setAttribute('aria-label', `Delete ${pairing.peerName || 'this contact'}`);
+    del.setAttribute('aria-label', t('contacts.deleteContact', { name: pairing.peerName || t('common.thisContact') }));
     del.addEventListener('click', () => {
       pendingDeletePairingId = pairing.id;
       screen = 'confirm-delete';
@@ -1445,7 +1475,7 @@ function renderWaitingScreen() {
   // A person-with-"+" icon — same Material "person_add" glyph path as
   // Android's PersonAddIcon.
   addBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
-  addBtn.setAttribute('aria-label', 'Add contact');
+  addBtn.setAttribute('aria-label', t('contacts.addContact'));
   addBtn.addEventListener('click', () => openEnterPhrase());
   listEl.appendChild(addBtn);
   // The second of .contact-list's two fade spacers — see the top one's own
@@ -1505,7 +1535,7 @@ el('settingsCancel').addEventListener('click', () => { screen = 'waiting'; rende
 
 function renderConfirmDeleteScreen() {
   const pairing = findPairing(pendingDeletePairingId);
-  el('confirmDeleteTitle').textContent = `Delete ${(pairing && pairing.peerName) || 'this contact'}?`;
+  el('confirmDeleteTitle').textContent = t('contacts.deleteConfirmTitle', { name: (pairing && pairing.peerName) || t('common.thisContact') });
 }
 el('confirmDeleteAction').addEventListener('click', () => {
   if (pendingDeletePairingId) removePairing(pendingDeletePairingId);
@@ -1585,7 +1615,7 @@ el('progressCancel').addEventListener('click', () => { removePairing(currentPair
 
 function renderPairScreen() {
   const candidate = confirmedCandidate.get(currentPairingId);
-  el('pairTitle').textContent = `Pair with ${(candidate && candidate.name) || 'this device'}?`;
+  el('pairTitle').textContent = t('pairing.confirmTitle', { name: (candidate && candidate.name) || t('common.thisDevice') });
 }
 el('pairConfirm').addEventListener('click', () => {
   const candidate = confirmedCandidate.get(currentPairingId);
@@ -1602,7 +1632,7 @@ function startCallingUi(pairingId) {
 }
 function renderCallingScreen() {
   const pairing = findPairing(currentPairingId);
-  el('callingName').textContent = (pairing && pairing.peerName) || 'Unnamed contact';
+  el('callingName').textContent = (pairing && pairing.peerName) || t('common.unnamedContact');
   callingLocalVideoEl.srcObject = localStream;
 }
 el('callingCancel').addEventListener('click', () => { hangUp(); });
@@ -1611,7 +1641,7 @@ el('callingCancel').addEventListener('click', () => { hangUp(); });
 
 function renderIncomingCallScreen() {
   const pairing = findPairing(currentPairingId);
-  const name = (pairing && pairing.peerName) || 'Unnamed contact';
+  const name = (pairing && pairing.peerName) || t('common.unnamedContact');
   el('incomingCallerName').textContent = name;
   el('incomingLocalVideo').srcObject = localStream;
   // See incomingCallAwaitingMedia's own doc — guards against a browser
@@ -1636,16 +1666,14 @@ el('incomingDecline').addEventListener('click', () => { hangUp(); });
 // call-core (see CallOutcomeReason's own doc there), not re-derived here.
 
 const CALL_OUTCOME_COPY = {
-  peer_ended: (name) => ['Call ended', `${name} ended the call.`],
-  never_connected: (name) => ['Couldn’t connect',
-    `The call with ${name} never connected. Check that both devices have a working internet connection, then try again.`],
-  dropped: (name) => ['Call dropped',
-    `The call with ${name} disconnected unexpectedly — usually just a brief network issue.`],
+  peer_ended: (name) => [t('call.outcome.peerEndedTitle'), t('call.outcome.peerEndedMessage', { name })],
+  never_connected: (name) => [t('call.outcome.neverConnectedTitle'), t('call.outcome.neverConnectedMessage', { name })],
+  dropped: (name) => [t('call.outcome.droppedTitle'), t('call.outcome.droppedMessage', { name })],
 };
 
 function renderCallOutcomeScreen() {
   const pairing = findPairing(pendingCallOutcome && pendingCallOutcome.pairingId);
-  const name = (pairing && pairing.peerName) || 'Unnamed contact';
+  const name = (pairing && pairing.peerName) || t('common.unnamedContact');
   const [title, message] = CALL_OUTCOME_COPY[pendingCallOutcome.reason](name);
   el('callOutcomeTitle').textContent = title;
   el('callOutcomeMessage').textContent = message;
