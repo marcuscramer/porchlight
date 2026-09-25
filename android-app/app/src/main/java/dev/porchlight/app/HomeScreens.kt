@@ -31,8 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.tv.material3.Icon
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Switch
-import androidx.tv.material3.SwitchDefaults
 import androidx.tv.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -471,17 +469,9 @@ private fun CallToggle(label: String, checked: Boolean, onCheckedChange: (Boolea
             style = Type.statusRow.copy(fontSize = Type.statusRow.fontSize * 0.85f),
             modifier = Modifier.padding(bottom = Dimens.dimension4),
         )
-        Switch(
+        FocusableSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = GeneratedColor.colorTextPrimary,
-                checkedTrackColor = GeneratedColor.colorStatusOk,
-                checkedBorderColor = GeneratedColor.colorStatusOk,
-                uncheckedThumbColor = GeneratedColor.colorTextDim,
-                uncheckedTrackColor = GeneratedColor.colorBackgroundSurfaceAlt,
-                uncheckedBorderColor = GeneratedColor.colorBorderDefault,
-            ),
             interactionSource = interactionSource,
             modifier = Modifier
                 .scaledSize(0.4f)
@@ -981,20 +971,9 @@ private fun ContactRow(
                     style = Type.statusRow.copy(fontSize = Type.statusRow.fontSize * 0.85f),
                     modifier = Modifier.padding(bottom = Dimens.dimension4),
                 )
-                Switch(
+                FocusableSwitch(
                     checked = autoAnswer,
                     onCheckedChange = onToggleAutoAnswer,
-                    // Every color slot spelled out — tv.material3's own
-                    // theme-derived neutral grays read as mismatched
-                    // against this screen's blue-tinted background.
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = GeneratedColor.colorTextPrimary,
-                        checkedTrackColor = GeneratedColor.colorStatusOk,
-                        checkedBorderColor = GeneratedColor.colorStatusOk,
-                        uncheckedThumbColor = GeneratedColor.colorTextDim,
-                        uncheckedTrackColor = GeneratedColor.colorBackgroundSurfaceAlt,
-                        uncheckedBorderColor = GeneratedColor.colorBorderDefault,
-                    ),
                     interactionSource = switchInteractionSource,
                     modifier = Modifier
                         // scaledSize (not plain .scale()) so the Column

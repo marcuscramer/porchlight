@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -321,6 +322,44 @@ internal fun TvButton(
             )
         }
     }
+}
+
+/**
+ * A tv.material3 [Switch] with a focus effect layered on top — its own
+ * [SwitchColors] has no focused-state slots at all (checked/unchecked ×
+ * enabled/disabled only, confirmed against the library's actual API), so
+ * without this a Switch is the one control in the app that gives no visual
+ * feedback when it has D-pad focus, unlike [TvButton]'s own border/fill
+ * brightening. Every color slot brightens toward white by the same amount
+ * on focus, checked or not — this answers both halves of "how should this
+ * look": unchecked reads exactly like a focused neutral [TvButton] (dim
+ * gray lifted toward white), and checked needs no separate
+ * "brighter green" design of its own since the identical blend already
+ * lifts it out from its own unfocused shade.
+ */
+@Composable
+internal fun FocusableSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+) {
+    val focused by interactionSource.collectIsFocusedAsState()
+    fun brighten(color: Color) = if (focused) lerp(color, Color.White, 0.35f) else color
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = brighten(GeneratedColor.colorTextPrimary),
+            checkedTrackColor = brighten(GeneratedColor.colorStatusOk),
+            checkedBorderColor = brighten(GeneratedColor.colorStatusOk),
+            uncheckedThumbColor = brighten(GeneratedColor.colorTextDim),
+            uncheckedTrackColor = brighten(GeneratedColor.colorBackgroundSurfaceAlt),
+            uncheckedBorderColor = brighten(GeneratedColor.colorBorderDefault),
+        ),
+        interactionSource = interactionSource,
+        modifier = modifier,
+    )
 }
 
 internal fun PreviewCorner.toAlignment(): Alignment = when (this) {
@@ -781,21 +820,9 @@ private fun AdminChoiceScreen(
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    Switch(
+                    FocusableSwitch(
                         checked = launchOnBoot,
                         onCheckedChange = onToggleLaunchOnBoot,
-                        // Same explicit color set as WaitingScreen's Auto-answer
-                        // switch — tv.material3's own theme-derived neutral grays
-                        // read as mismatched against this screen's blue-tinted
-                        // background.
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = GeneratedColor.colorTextPrimary,
-                            checkedTrackColor = GeneratedColor.colorStatusOk,
-                            checkedBorderColor = GeneratedColor.colorStatusOk,
-                            uncheckedThumbColor = GeneratedColor.colorTextDim,
-                            uncheckedTrackColor = GeneratedColor.colorBackgroundSurfaceAlt,
-                            uncheckedBorderColor = GeneratedColor.colorBorderDefault,
-                        ),
                         interactionSource = launchOnBootInteractionSource,
                     )
                 }
