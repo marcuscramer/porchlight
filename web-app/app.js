@@ -1467,7 +1467,7 @@ function renderWaitingScreen() {
  * fixed screen size, since this viewport is resizable (unlike Android's
  * fixed-size Portal TV screen, which nonetheless runs the identical live
  * onGloballyPositioned-driven check in HomeScreens.kt, since Porchlight
- * isn't guaranteed to run only on one screen size there either). One full
+ * isn't guaranteed to run only on one screen size there either). Half an
  * icon-width of clearance is the bar, read live from the same design
  * token the icon's own size comes from rather than a separate hardcoded
  * number.
@@ -1480,7 +1480,7 @@ function updateContactListFadeShape() {
   // A zero-width rect means one of the two isn't actually laid out (this
   // screen isn't the visible one, most likely) — nothing to conclude.
   if (listRect.width === 0 || fabRect.width === 0) return;
-  const minGapPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--size-settings-fab')) || 0;
+  const minGapPx = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--size-settings-fab')) || 0) / 2;
   listEl.classList.toggle('top-fade-plain', fabRect.left - listRect.right >= minGapPx);
 }
 

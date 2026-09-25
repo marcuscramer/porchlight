@@ -766,7 +766,7 @@ private fun WaitingScreen(
         // porchlight_open_issues.md), so this checks the real rendered gap
         // between the list's own right edge and the icon's left edge every
         // time either one's layout actually changes, same live check web's
-        // identical resize-driven one runs (app.js). One full icon-width of
+        // identical resize-driven one runs (app.js). Half an icon-width of
         // clearance is the bar, matching that check's own reasoning.
         var settingsIconLeftPx by remember { mutableStateOf<Float?>(null) }
         var listRightPx by remember { mutableStateOf<Float?>(null) }
@@ -774,7 +774,7 @@ private fun WaitingScreen(
         val topFadePlain = run {
             val icon = settingsIconLeftPx
             val list = listRightPx
-            icon != null && list != null && (icon - list) >= with(density) { Dimens.sizeSettingsFab.toPx() }
+            icon != null && list != null && (icon - list) >= with(density) { Dimens.sizeSettingsFab.toPx() } / 2
         }
         Box(
             modifier = Modifier
