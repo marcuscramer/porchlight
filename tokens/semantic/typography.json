@@ -36,7 +36,7 @@
     "buttonDefault": {
       "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
       "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.medium}" },
-      "fontSize": { "$type": "fontSize", "$value": "{fontSize.22}" }
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.17}" }
     }
   }
 }
