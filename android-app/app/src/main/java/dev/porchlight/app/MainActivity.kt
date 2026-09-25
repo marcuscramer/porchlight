@@ -49,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -805,11 +806,28 @@ private fun AdminChoiceScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
                 ) {
-                    Text(
-                        message,
-                        color = if (installFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
-                        modifier = Modifier.weight(1f),
-                    )
+                    // A Box, not just the Text directly: message starts as
+                    // "Checking for updates…" and almost immediately swaps
+                    // to a differently-sized final string once the check
+                    // resolves, which — through the outer Column's shared
+                    // width(IntrinsicSize.Max) — visibly shifted every row
+                    // in the table by that width difference. The invisible
+                    // probes below cover every message length this row can
+                    // actually show, so the row (and the whole table) is
+                    // sized once, up front, for the widest of them, and
+                    // never changes size again as checkResult resolves.
+                    Box(modifier = Modifier.weight(1f)) {
+                        Text("Checking for updates…", modifier = Modifier.alpha(0f))
+                        Text("Update checking isn't set up for this build.", modifier = Modifier.alpha(0f))
+                        Text("You're on the latest version$versionSuffix", modifier = Modifier.alpha(0f))
+                        Text("Downloading v${BuildConfig.VERSION_NAME}…", modifier = Modifier.alpha(0f))
+                        Text("v${BuildConfig.VERSION_NAME} downloaded.", modifier = Modifier.alpha(0f))
+                        Text("Couldn't check for updates (server (500)).", modifier = Modifier.alpha(0f))
+                        Text(
+                            message,
+                            color = if (installFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        )
+                    }
                     // Only enabled once there's actually something to
                     // install — always present, so the table's right
                     // column stays put rather than the row reflowing.
