@@ -72,7 +72,7 @@
     <string name="contacts_callContact">%1$s anrufen</string>
     <string name="contacts_addContact">Kontakt hinzufügen</string>
     <string name="contacts_deviceSettings">Geräteeinstellungen</string>
-    <string name="contacts_autoAnswer">Automatische Annahme</string>
+    <string name="contacts_autoAnswer">Auto-Annahme</string>
     <string name="contacts_autoAnswerFor">Automatische Annahme für %1$s</string>
     <string name="contacts_statusBusy">Beschäftigt</string>
     <string name="contacts_statusOnline">Online</string>

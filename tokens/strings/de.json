@@ -90,7 +90,7 @@
     "callContact": "{name} anrufen",
     "addContact": "Kontakt hinzufügen",
     "deviceSettings": "Geräteeinstellungen",
-    "autoAnswer": "Automatische Annahme",
+    "autoAnswer": "Auto-Annahme",
     "autoAnswerFor": "Automatische Annahme für {name}",
     "statusBusy": "Beschäftigt",
     "statusOnline": "Online",

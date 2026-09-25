@@ -167,7 +167,7 @@ export const STRINGS = {
     "contacts.callContact": "{name} anrufen",
     "contacts.addContact": "Kontakt hinzufügen",
     "contacts.deviceSettings": "Geräteeinstellungen",
-    "contacts.autoAnswer": "Automatische Annahme",
+    "contacts.autoAnswer": "Auto-Annahme",
     "contacts.autoAnswerFor": "Automatische Annahme für {name}",
     "contacts.statusBusy": "Beschäftigt",
     "contacts.statusOnline": "Online",
