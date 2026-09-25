@@ -1,0 +1,113 @@
+{
+  "_comment": "German translation — see en.json's own _comment for the placeholder/plural conventions this has to follow. Informal \"du\" throughout, matching the real Portal TV's own German system UI (a home/personal device, not a business one). common.thisContact/thisDevice are pre-declined for the one grammatical slot each currently fills (accusative 'diesen Kontakt' after löschen/anrufen/für; dative 'diesem Gerät' after mit) — correct today, but a new usage site with a different case would need checking, not just reusing the same key blindly.",
+  "app_name": "Porchlight",
+  "common": {
+    "back": "Zurück",
+    "cancel": "Abbrechen",
+    "unnamedContact": "Unbenannter Kontakt",
+    "thisContact": "diesen Kontakt",
+    "thisDevice": "diesem Gerät"
+  },
+  "nameEntry": {
+    "titleNew": "Dieses Gerät benennen",
+    "titleRename": "Dieses Gerät umbenennen",
+    "subtitle": "Wird anderen Geräten beim Koppeln und in deren Kontaktliste angezeigt.",
+    "placeholder": "z. B. Mamas Laptop",
+    "fieldLabel": "Name",
+    "continueButton": "Weiter",
+    "saveButton": "Speichern",
+    "defaultNameAndroid": "Gerät",
+    "defaultNameWeb": "Porchlight (Web)"
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "renameRow": "Dieses Gerät umbenennen",
+    "backButton": "Zurück",
+    "kioskMode": {
+      "title": "Kiosk-Modus",
+      "subtitle": "Startet Porchlight automatisch nach dem (Neu-)Start und wenn der Bildschirmschoner endet"
+    },
+    "update": {
+      "checking": "Suche nach Updates…",
+      "disabled": "Die Update-Prüfung ist für diese Version nicht eingerichtet.",
+      "upToDate": "Du hast die neueste Version (v{version})",
+      "downloading": "{version} wird heruntergeladen…",
+      "ready": "Update verfügbar (v{oldVersion} → {newVersion})",
+      "failed": "Update-Prüfung fehlgeschlagen ({reason}).",
+      "installButton": "Installieren"
+    }
+  },
+  "pairing": {
+    "addContactTitle": "Kontakt hinzufügen",
+    "instructions1": "Einigt euch gemeinsam auf eine kurze Phrase — am Telefon oder wie auch immer ihr gerade in Kontakt seid — und gebt dann beide genau dieselbe Phrase auf eurem eigenen Gerät ein.",
+    "instructions2": "Wählt eine Phrase, auf die nur ihr beide kommen würdet — vermeidet ein gängiges Wort, einen Namen oder eine kurze Zahl.",
+    "instructions3": "Das ist nur einmal nötig — sobald ihr gekoppelt seid, könnt ihr euch jederzeit anrufen.",
+    "phraseFieldLabel": "Phrase",
+    "phraseAriaLabel": "Kopplungsphrase",
+    "startPairingButton": "Kopplung starten",
+    "waitingForDevice": "Warte auf das andere Gerät…",
+    "collisionTitle": "Mehrere Kopplungsversuche erkannt",
+    "collisionMessage": "Mehr als ein anderes Gerät hat gleichzeitig auf diese Phrase reagiert. Das kann Zufall sein (oder jemand hat dieselben Wörter erraten) — versucht es erneut mit einer neuen Phrase, auf die nur ihr beide kommen würdet.",
+    "timeoutTitle": "Keine Antwort",
+    "timeoutMessage": "Niemand hat rechtzeitig auf diese Phrase reagiert. Stelle sicher, dass das andere Gerät auf demselben Bildschirm ist und genau dieselbe Phrase eingegeben hat, dann versuche es erneut.",
+    "tryAgainButton": "Erneut versuchen",
+    "confirmTitle": "Mit {name} koppeln?",
+    "confirmSubtitle": "Beide Seiten haben dieselbe Phrase eingegeben.",
+    "confirmButton": "Bestätigen"
+  },
+  "call": {
+    "callingLabel": "Anruf läuft",
+    "connectingLabel": "Verbindet",
+    "pressBackToCancel": "Zurück drücken zum Abbrechen",
+    "incomingCallFrom": "Eingehender Anruf von",
+    "pressBackToDecline": "Zurück drücken zum Ablehnen",
+    "autoAnswerCountdown": "{name} verbindet sich automatisch in {secondsPhrase}",
+    "secondsSingular": "{seconds} Sekunde",
+    "secondsPlural": "{seconds} Sekunden",
+    "accept": "Annehmen",
+    "decline": "Ablehnen",
+    "disconnect": "Auflegen",
+    "audio": "Audio",
+    "video": "Video",
+    "positionSelfView": "Selbstansicht positionieren",
+    "pressBackToContinue": "Zurück drücken zum Fortfahren",
+    "okButton": "OK",
+    "outcome": {
+      "peerEndedTitle": "Anruf beendet",
+      "peerEndedMessage": "{name} hat den Anruf beendet.",
+      "neverConnectedTitle": "Verbindung fehlgeschlagen",
+      "neverConnectedMessage": "Die Verbindung mit {name} kam nicht zustande. Stelle sicher, dass beide Geräte eine funktionierende Internetverbindung haben, dann versuche es erneut.",
+      "droppedTitle": "Anruf unterbrochen",
+      "droppedMessage": "Die Verbindung mit {name} wurde unerwartet unterbrochen — meist nur ein kurzes Netzwerkproblem."
+    }
+  },
+  "contacts": {
+    "deleteConfirmTitle": "{name} löschen?",
+    "deleteConfirmMessage": "Das kann nicht rückgängig gemacht werden.",
+    "deleteButton": "Löschen",
+    "deleteContact": "{name} löschen",
+    "callButton": "Anrufen",
+    "callContact": "{name} anrufen",
+    "addContact": "Kontakt hinzufügen",
+    "deviceSettings": "Geräteeinstellungen",
+    "autoAnswer": "Automatische Annahme",
+    "autoAnswerFor": "Automatische Annahme für {name}",
+    "statusBusy": "Beschäftigt",
+    "statusOnline": "Online",
+    "statusOffline": "Offline"
+  },
+  "notifications": {
+    "callStatusChannelName": "Anrufstatus",
+    "callStatusChannelDesc": "Zeigt an, wenn Kamera und Mikrofon während eines Anrufs aktiv sind.",
+    "connectedTitle": "Porchlight — verbunden",
+    "connectingStatus": "Verbindet…",
+    "disconnectedStatus": "Getrennt",
+    "inCallStatus": "Im Anruf",
+    "waitingForCallStatus": "Warte auf einen Anruf…",
+    "waitingForContactStatus": "Warte auf einen Kontakt…",
+    "updateChannelName": "Updates",
+    "updateChannelDesc": "Eine neuere Porchlight-Version ist bereit zur Installation.",
+    "updateReadyTitle": "Porchlight-Update bereit",
+    "updateReadyText": "{version} heruntergeladen — zum Installieren tippen"
+  }
+}

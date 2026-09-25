@@ -1,5 +1,5 @@
 {
-  "_comment": "Every user-facing string in both clients, in one place — see tokens/build-strings.mjs for how this becomes android-app's res/values/strings.xml and web-app/strings.js. {name}-style placeholders are positional in the order they first appear in the English text; the Android generator turns them into %1$s/%2$s/... automatically, so don't reorder a placeholder within one language's text without checking the generator still lines them up the same way for every other language file added later. A key that only makes sense on one platform (e.g. common.back, web-only) still gets generated on both — the unused side is harmless.",
+  "_comment": "Every user-facing string in both clients, in one place — see tokens/build-strings.mjs for how this becomes android-app's res/values/strings.xml and web-app/strings.js. {name}-style placeholders are positional in the order they first appear in the English text; the Android generator turns them into %1$s/%2$s/... automatically, so don't reorder a placeholder within one language's text without checking the generator still lines them up the same way for every other language file added later. A key that only makes sense on one platform (e.g. common.back, web-only) still gets generated on both — the unused side is harmless. call.secondsSingular/secondsPlural is a plain two-way split (count==1 vs not), picked in code (HomeScreens.kt), not real CLDR plural-rule support — fine for English/German (both only ever need singular vs plural), but a future language with more plural categories (e.g. Slavic 1/2-4/5+ forms) would need this reworked, not just translated.",
   "app_name": "Porchlight",
   "common": {
     "back": "Back",
@@ -62,6 +62,8 @@
     "incomingCallFrom": "Incoming call from",
     "pressBackToDecline": "Press Back to decline",
     "autoAnswerCountdown": "{name} will automatically connect in {secondsPhrase}",
+    "secondsSingular": "{seconds} second",
+    "secondsPlural": "{seconds} seconds",
     "accept": "Accept",
     "decline": "Decline",
     "disconnect": "Disconnect",

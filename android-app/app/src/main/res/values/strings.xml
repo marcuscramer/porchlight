@@ -48,6 +48,8 @@
     <string name="call_incomingCallFrom">Incoming call from</string>
     <string name="call_pressBackToDecline">Press Back to decline</string>
     <string name="call_autoAnswerCountdown">%1$s will automatically connect in %2$s</string>
+    <string name="call_secondsSingular">%1$s second</string>
+    <string name="call_secondsPlural">%1$s seconds</string>
     <string name="call_accept">Accept</string>
     <string name="call_decline">Decline</string>
     <string name="call_disconnect">Disconnect</string>

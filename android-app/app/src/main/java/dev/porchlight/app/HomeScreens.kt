@@ -626,14 +626,16 @@ private fun IncomingCallScreen(
         ) {
             if (info.autoAnswer) {
                 val seconds = info.secondsRemaining
-                // English-only plural handling ("second"/"seconds"), kept
-                // inline rather than in the shared strings source — the one
-                // genuinely plural-sensitive string in the app, and real
-                // plural-rule support (languages don't all split two ways,
-                // or split the same way English does) is future work for
-                // whenever a second language actually needs it, not
-                // something this infra-only pass needs to solve.
-                val secondsPhrase = "$seconds second${if (seconds == 1) "" else "s"}"
+                // A plain singular/plural split (count==1 vs not), not real
+                // CLDR plural-rule support — see call_secondsSingular/
+                // call_secondsPlural's own doc (tokens/strings/en.json) for
+                // why that's fine for English/German but would need
+                // reworking, not just translating, for a language with more
+                // plural categories.
+                val secondsPhrase = stringResource(
+                    if (seconds == 1) R.string.call_secondsSingular else R.string.call_secondsPlural,
+                    seconds,
+                )
                 Text(
                     stringResource(R.string.call_autoAnswerCountdown, name, secondsPhrase),
                     color = GeneratedColor.colorTextPrimary,
