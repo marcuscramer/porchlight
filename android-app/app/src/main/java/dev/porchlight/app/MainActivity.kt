@@ -329,14 +329,18 @@ internal fun TvButton(
  * enabled/disabled only, confirmed against the library's actual API), so
  * without this a Switch is the one control in the app that gives no visual
  * feedback when it has D-pad focus, unlike [TvButton]'s own border/fill
- * brightening. Track and border reuse [TvButton]'s own tint formula
- * exactly — the same [GeneratedOpacity] alpha tokens over the same hues
- * (white for unchecked/[TvButtonTint.Neutral], [GeneratedColor.colorStatusOk]
- * for checked/[TvButtonTint.Success], the same green the in-call Accept/Call
- * buttons use) — so a Switch reads as the same family of control as every
- * button in the app, not a separately-designed one. The thumb stays a
- * plain, focus-independent on/off indicator, the same way a TvButton's own
- * content color never changes with focus either (only its fill/border do).
+ * brightening. Unchecked reuses [TvButton]'s Neutral tint formula exactly
+ * — the same [GeneratedOpacity] alpha tokens over white, unfocused vs
+ * focused, so it reads as the same family of control as every neutral
+ * button in the app. Checked (an already-"on" control) instead always
+ * sits at the *focused* accent alpha level as its baseline — plain
+ * unfocused-accent read as too faint for something already toggled on —
+ * and on focus, only the track's alpha rises further to match the
+ * border's exactly, so the whole switch reads as one solid block of the
+ * same green the in-call Accept/Call buttons use, rather than restating
+ * the border/fill split the unfocused state already has. The thumb stays
+ * a plain, focus-independent on/off indicator, same as a TvButton's own
+ * content color never changing with focus either.
  */
 @Composable
 internal fun FocusableSwitch(
@@ -348,15 +352,15 @@ internal fun FocusableSwitch(
     val focused by interactionSource.collectIsFocusedAsState()
     val neutralContainerAlpha = if (focused) GeneratedOpacity.buttonTintNeutralContainerFocused else GeneratedOpacity.buttonTintNeutralContainer
     val neutralBorderAlpha = if (focused) GeneratedOpacity.buttonTintNeutralBorderFocused else GeneratedOpacity.buttonTintNeutralBorder
-    val accentContainerAlpha = if (focused) GeneratedOpacity.buttonTintAccentContainerFocused else GeneratedOpacity.buttonTintAccentContainer
-    val accentBorderAlpha = if (focused) GeneratedOpacity.buttonTintAccentBorderFocused else GeneratedOpacity.buttonTintAccentBorder
+    val checkedBorderAlpha = GeneratedOpacity.buttonTintAccentBorderFocused
+    val checkedTrackAlpha = if (focused) GeneratedOpacity.buttonTintAccentBorderFocused else GeneratedOpacity.buttonTintAccentContainerFocused
     Switch(
         checked = checked,
         onCheckedChange = onCheckedChange,
         colors = SwitchDefaults.colors(
             checkedThumbColor = GeneratedColor.colorTextPrimary,
-            checkedTrackColor = GeneratedColor.colorStatusOk.copy(alpha = accentContainerAlpha),
-            checkedBorderColor = GeneratedColor.colorStatusOk.copy(alpha = accentBorderAlpha),
+            checkedTrackColor = GeneratedColor.colorStatusOk.copy(alpha = checkedTrackAlpha),
+            checkedBorderColor = GeneratedColor.colorStatusOk.copy(alpha = checkedBorderAlpha),
             uncheckedThumbColor = GeneratedColor.colorTextDim,
             uncheckedTrackColor = Color.White.copy(alpha = neutralContainerAlpha),
             uncheckedBorderColor = Color.White.copy(alpha = neutralBorderAlpha),
