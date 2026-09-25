@@ -1,9 +1,9 @@
 {
   "list": {
     "$type": "dimension",
-    "_comment": "WaitingScreen's contact list. No more centerOffsetY/maxHeight here (removed) — the list now fills the entire screen behind the settings icon/status strip (see #screenWaiting's own doc, styles.css, and WaitingScreen's Box, HomeScreens.kt). fadeHeightTop/fadeHeightBottom are each split in half by the mask itself (see .contact-list's own doc, styles.css): the outer half is a flat, already-fully-transparent zone sized to clear the icon/checklist's own real footprint, the inner half is where the actual visible fade transition happens. Confirmed live against each overlay's real rendered bounds, not guessed — see the same doc for the numbers.",
+    "_comment": "WaitingScreen's contact list. No more centerOffsetY/maxHeight here (removed) — the list now fills the entire screen behind the settings icon/status strip (see #screenWaiting's own doc, styles.css, and WaitingScreen's Box, HomeScreens.kt). fadeHeightTop/fadeHeightBottom are now the same value on purpose (explicit request) — both edges fade over the same distance. Bottom is always one plain linear fade end to end; top is that same plain shape too whenever there's enough live-measured horizontal clearance from the settings icon, falling back to a split shape (an outer already-transparent half plus a compressed inner ramp) when there isn't — see .contact-list's own mask-image doc (styles.css) and fadingEdges' own doc (Theme.kt) for the full reasoning and the live measurement that picks between them.",
     "sideMargin": { "$value": "{dimension.100}" },
     "fadeHeightTop": { "$value": "{dimension.120}" },
-    "fadeHeightBottom": { "$value": "{dimension.100}" }
+    "fadeHeightBottom": { "$value": "{dimension.120}" }
   }
 }

@@ -836,14 +836,12 @@ private fun WaitingScreen(
                     // the content's own top/bottom, not the viewport's, and
                     // scrolling past the first row or two shows only the
                     // gradient's clamped opaque tail.
-                    // bottomHeight is a plain literal, not
-                    // Dimens.listFadeHeightBottom (100dp) — that generated
-                    // value was sized to clear the status checklist that
-                    // used to occupy this corner; nothing does anymore, so
-                    // this is just a modest, purely cosmetic edge fade now
-                    // (see fadingEdges' own doc for why top/bottom are
-                    // shaped differently).
-                    .fadingEdges(topHeight = Dimens.listFadeHeightTop, bottomHeight = 48.dp, topPlain = topFadePlain)
+                    // listFadeHeightBottom now equals listFadeHeightTop at
+                    // the token source (tokens/component/list.json) —
+                    // explicit request, so top and bottom read as one
+                    // consistent fade rather than two different-length
+                    // ones.
+                    .fadingEdges(topHeight = Dimens.listFadeHeightTop, bottomHeight = Dimens.listFadeHeightBottom, topPlain = topFadePlain)
                     .verticalScroll(listScroll),
             ) {
                 // The first of this Column's two fade spacers — see
@@ -896,8 +894,9 @@ private fun WaitingScreen(
                 Spacer(modifier = Modifier.height(Dimens.dimension4))
                 // The second of this Column's two fade spacers — see the
                 // top one's own doc, and fadingEdges' (Theme.kt). Must
-                // match the 48.dp passed to fadingEdges' bottomHeight above.
-                Spacer(modifier = Modifier.height(48.dp))
+                // match the height passed to fadingEdges' bottomHeight
+                // above.
+                Spacer(modifier = Modifier.height(Dimens.listFadeHeightBottom))
             }
         }
     }

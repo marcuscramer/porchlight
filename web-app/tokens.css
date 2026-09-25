@@ -147,7 +147,7 @@
   --button-tint-accent-border-focused: var(--opacity-95);
   --list-side-margin: var(--dimension-100);
   --list-fade-height-top: var(--dimension-120);
-  --list-fade-height-bottom: var(--dimension-100);
+  --list-fade-height-bottom: var(--dimension-120);
   --button-radius: var(--radius-control);
   --input-radius: var(--radius-input);
   --input-border-width: var(--border-width-default);

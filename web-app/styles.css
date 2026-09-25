@@ -30,15 +30,13 @@ html, body {
    since Portal's viewport never varies). --list-side-margin gets the
    identical treatment — the design artifact's fixed 100px eats over half a
    ~390px phone's width otherwise (found live: names truncating to "Gra…").
-   --list-fade-height-bottom also overrides tokens.css's 100px, which was
-   sized to clear the status checklist that used to occupy this corner —
-   nothing does anymore, so this is just a modest, purely cosmetic edge
-   fade now (see .contact-list's own mask-image doc for why top/bottom are
-   shaped differently). */
+   No more --list-fade-height-bottom override here — tokens.css's own
+   value already matches --list-fade-height-top now (both edges fade over
+   the same distance, explicit request; see .contact-list's own
+   mask-image doc for the shape each one uses). */
 :root {
   --spacing-screen-padding: clamp(20px, 5vw + 8px, 48px);
   --list-side-margin: clamp(20px, 10vw, 100px);
-  --list-fade-height-bottom: 48px;
 }
 
 /* viewport-fit=cover lets the page extend under the notch/home-indicator
