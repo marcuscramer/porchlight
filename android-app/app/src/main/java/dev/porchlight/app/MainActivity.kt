@@ -765,7 +765,7 @@ private fun AdminChoiceScreen(
         UpdateCheckResult.Disabled -> "Update checking isn't set up for this build."
         UpdateCheckResult.UpToDate -> "You're on the latest version$versionSuffix"
         is UpdateCheckResult.Downloading -> "Downloading ${result.versionName}…"
-        is UpdateCheckResult.Ready -> "${result.versionName} downloaded."
+        is UpdateCheckResult.Ready -> "Update available (v${BuildConfig.VERSION_NAME} → ${result.versionName})"
         is UpdateCheckResult.Failed -> "Couldn't check for updates (${result.reason})."
     }
 
@@ -856,7 +856,7 @@ private fun AdminChoiceScreen(
                         Text("Update checking isn't set up for this build.", modifier = Modifier.alpha(0f))
                         Text("You're on the latest version$versionSuffix", modifier = Modifier.alpha(0f))
                         Text("Downloading v${BuildConfig.VERSION_NAME}…", modifier = Modifier.alpha(0f))
-                        Text("v${BuildConfig.VERSION_NAME} downloaded.", modifier = Modifier.alpha(0f))
+                        Text("Update available (v${BuildConfig.VERSION_NAME} → v${BuildConfig.VERSION_NAME})", modifier = Modifier.alpha(0f))
                         Text("Couldn't check for updates (server (500)).", modifier = Modifier.alpha(0f))
                         Text(
                             message,
