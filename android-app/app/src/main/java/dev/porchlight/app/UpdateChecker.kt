@@ -75,6 +75,7 @@ object UpdateChecker {
     private const val RELEASE_ASSET_NAME = "app-release.apk"
     private const val PREFS = "portal_call_updates"
     private const val KEY_NOTIFIED_CODE = "notifiedVersionCode"
+    private const val KEY_DOWNLOADED_CODE = "downloadedVersionCode"
 
     // A real release APK is tens of MB; this is a generous ceiling, not a
     // tight estimate. Guards against buffering an unbounded response fully
@@ -178,6 +179,21 @@ object UpdateChecker {
         }
 
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+        // Already downloaded this exact version and the file's still on
+        // disk — report it as ready without re-fetching the multi-MB APK.
+        // Found live: Settings calls this with force = true on every visit
+        // (see AdminChoiceScreen's own doc), and force only bypasses the
+        // notify-dedup below, so without this check re-opening Settings
+        // re-downloaded the same APK every single time. apkFile() lives in
+        // cacheDir, which Android can reclaim under storage pressure, so
+        // this also checks the file actually still exists rather than
+        // trusting the pref alone.
+        if (prefs.getInt(KEY_DOWNLOADED_CODE, 0) == latestCode && apkFile(context).exists()) {
+            onResult(UpdateCheckResult.Ready(versionName))
+            return
+        }
+
         if (!force && prefs.getInt(KEY_NOTIFIED_CODE, 0) == latestCode) return // already notified for this exact version
 
         val assets = release.optJSONArray("assets") ?: run {
@@ -201,7 +217,10 @@ object UpdateChecker {
         onResult(UpdateCheckResult.Downloading(versionName))
         downloadApk(context, downloadUrl) { success ->
             if (success) {
-                prefs.edit().putInt(KEY_NOTIFIED_CODE, latestCode).apply()
+                prefs.edit()
+                    .putInt(KEY_NOTIFIED_CODE, latestCode)
+                    .putInt(KEY_DOWNLOADED_CODE, latestCode)
+                    .apply()
                 postUpdateNotification(context, versionName)
                 onResult(UpdateCheckResult.Ready(versionName))
             } else {
