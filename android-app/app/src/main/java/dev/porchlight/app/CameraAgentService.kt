@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
@@ -158,6 +160,23 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
 
     private var engine: WebRtcEngine? = null
     private var signaling: NostrSignalingClient? = null
+
+    // Found live on real (stock, non-Immortal) Portal TV hardware:
+    // dismissing the screensaver sometimes lands on the Portal's own stock
+    // home screen instead of resuming Porchlight, apparently more likely
+    // the longer the device sat idle first. Porchlight isn't registered as
+    // the actual system HOME app (see AndroidManifest.xml's own doc on why
+    // just LAUNCHER/LEANBACK_LAUNCHER is deliberate), so the normal path
+    // back is Android resuming whatever activity task was in front when
+    // the dream engaged — which isn't guaranteed to survive a long idle
+    // period. Rather than chase exactly why that resume sometimes doesn't
+    // happen, this reacts to the dream actually ending and calls the same
+    // bringToForeground() already used for the ring/connect cases, so
+    // Porchlight reliably reclaims the screen regardless of the reason the
+    // automatic resume didn't. Gated on Config.launchOnBoot (see
+    // registerScreensaverReceiver's own doc) — this always-reclaim-the-
+    // screen behavior is opt-in, same as auto-launching on boot is.
+    private var screensaverReceiver: BroadcastReceiver? = null
 
     // Keyed by Pairing.id — data only now, not a live connection (see class
     // doc). Kept in sync with Config.pairings by every mutator below.
@@ -601,6 +620,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         }
         startForeground(NOTIF_ID, buildNotification("Connecting…"))
         acquireWakeLock()
+        registerScreensaverReceiver()
 
         val executor = Executors.newSingleThreadScheduledExecutor()
         callExecutor = executor
@@ -665,6 +685,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         tearDownOnExecutor(clearPairings = true)
         releaseWakeLock()
         releaseCallWakeLock()
+        unregisterScreensaverReceiver()
         _state.value = AgentState(statusText = "Disconnected")
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -675,6 +696,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         tearDownOnExecutor(clearPairings = false)
         releaseWakeLock()
         releaseCallWakeLock()
+        unregisterScreensaverReceiver()
         super.onDestroy()
     }
 
@@ -946,6 +968,37 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         val intent = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         startActivity(intent)
+    }
+
+    /**
+     * See [screensaverReceiver]'s own doc for why this exists. Gated on
+     * [Config.launchOnBoot], same as the user's decision when they choose
+     * to name it: someone who wants Porchlight to always come back up on
+     * its own (boot included) wants this too, and someone who left that
+     * off would find Porchlight unconditionally stealing the screen back
+     * from whatever they dismissed the screensaver to use instead just as
+     * unwelcome as an uninvited auto-launch on boot.
+     */
+    private fun registerScreensaverReceiver() {
+        if (screensaverReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (Config.load(context).launchOnBoot) bringToForeground()
+            }
+        }
+        val filter = IntentFilter(Intent.ACTION_DREAMING_STOPPED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(receiver, filter)
+        }
+        screensaverReceiver = receiver
+    }
+
+    private fun unregisterScreensaverReceiver() {
+        screensaverReceiver?.let { runCatching { unregisterReceiver(it) } }
+        screensaverReceiver = null
     }
 
     override fun onCapturingChanged(capturing: Boolean) {

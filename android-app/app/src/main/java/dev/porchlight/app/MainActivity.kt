@@ -776,7 +776,7 @@ private fun AdminChoiceScreen(
                             color = if (launchOnBootFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         )
                         Text(
-                            "Bring Porchlight up automatically after (re)boot",
+                            "Bring Porchlight up automatically after (re)boot, and back to the front when the screensaver ends",
                             color = GeneratedColor.colorTextDim,
                             style = MaterialTheme.typography.bodySmall,
                         )
