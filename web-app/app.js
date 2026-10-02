@@ -1471,11 +1471,6 @@ function renderCallControls() {
   videoBtn.setAttribute('aria-checked', String(videoEnabled));
   const activeCorner = PREVIEW_POSITIONS[previewPositionIndex];
   el('previewPositionIcon').innerHTML = buildPositionIconInner(activeCorner);
-  // Lower-right by default — lower-left only for the one self-view position
-  // that would otherwise sit right underneath it, 'bottom-end'.
-  const controlsOnLeft = activeCorner === 'bottom-end';
-  el('callControls').classList.toggle('position-left', controlsOnLeft);
-  el('callControls').classList.toggle('position-right', !controlsOnLeft);
 }
 
 function showCallControls() {

@@ -649,30 +649,31 @@ video::-webkit-media-controls-start-playback-button {
 #localVideo.preview-invisible { display: none; }
 
 /* Call controls (Position self-view/Audio/Video/Disconnect) — reuses
-   .calling-overlay for its scrim/shrink-to-fit background, but overrides
-   its centering: a vertical stack anchored to a bottom corner instead of
-   bottom-center — lower-right by default, lower-left only when the
-   self-view itself is *also* lower-right (the one case that would
-   otherwise sit on top of it). See app.js's renderCallControls for the
-   left/right class toggle. */
+   .calling-overlay for its scrim/shrink-to-fit background. Placed by the
+   window's shape alone, independent of where the self-view sits: a row at
+   the bottom center (as on Android) when the window is at least as wide as
+   it is tall, a column at the vertical center of the right edge when it is
+   taller than wide. */
 #callControls {
   bottom: var(--dimension-24);
 }
-#callControls.position-left {
-  left: var(--dimension-24);
-  right: auto;
-  transform: none;
-}
-#callControls.position-right {
-  left: auto;
-  right: var(--dimension-24);
-  transform: none;
-}
 .call-controls-row {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   gap: var(--dimension-16);
+}
+@media not all and (min-aspect-ratio: 1/1) {
+  #callControls {
+    top: 50%;
+    bottom: auto;
+    left: auto;
+    right: var(--dimension-24);
+    transform: translateY(-50%);
+  }
+  .call-controls-row {
+    flex-direction: column;
+  }
 }
 
 /* Audio/Video — label above a toggle switch, mirrors Android's identical
