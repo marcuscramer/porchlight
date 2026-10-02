@@ -694,8 +694,9 @@ video::-webkit-media-controls-start-playback-button {
 }
 /* The label and its switch are one control: hovering or focusing either
    brightens both together (the switch's own rules above cover hovering the
-   label), as Android's CallToggle does. The label is a real <label for>, so
-   clicking it toggles the switch too. */
+   label), as Android's CallToggle does. The whole group is one <label>
+   wrapping the switch, so clicking anywhere on it, the text, the gap or the
+   switch itself, toggles it. */
 .call-toggle:hover .call-toggle-label,
 .call-toggle:has(.toggle-switch:focus-visible) .call-toggle-label {
   color: var(--color-text-primary);
