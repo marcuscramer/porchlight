@@ -1,0 +1,60 @@
+[versions]
+agp = "8.13.2"
+kotlin = "2.4.0"
+coreKtx = "1.13.1"
+lifecycle = "2.8.7"
+activityCompose = "1.9.3"
+composeBom = "2024.10.01"
+# Maintained prebuilt of Google's libwebrtc (the official google-webrtc artifact
+# is abandoned). Provides the org.webrtc package.
+webrtc = "1.3.8"
+coroutines = "1.8.1"
+# Kotlin Multiplatform Nostr library (extracted from Amethyst) — signaling
+# transport + identity, replacing Ably. Its secp256k1 crypto is native/JNI
+# (fr.acinq.secp256k1:secp256k1-kmp-jni-android, pulled in transitively),
+# confirmed working on real Portal hardware via a standalone probe APK
+# before this migration started.
+#
+# Pinned to 1.08.0, not latest (1.14.0) — every version from 1.09.0 onward
+# pulls in androidx.core:core-ktx 1.19.0, which itself requires AGP 9.1+
+# (confirmed via that artifact's own aar-metadata.properties). AGP 9 removes
+# the separate Kotlin Gradle plugin entirely (built-in Kotlin support, a new
+# DSL) — a much bigger, riskier migration than this dependency bump
+# warrants. 1.08.0 needs only AGP 8.9.1+/compileSdk 36 (already satisfied)
+# and confirmed via GitHub to still have every API this app uses: KeyPair,
+# NostrSignerInternal, NostrClient, PrivateDmEvent, nip44Encrypt/Decrypt,
+# and an OkHttp-based WebSocket transport (jvmAndroid/.../sockets/okhttp).
+quartz = "1.08.0"
+# Matches quartz-android 1.08.0's own okhttp-android runtime dependency
+# exactly (confirmed via its POM) — declared explicitly here too since a
+# "runtime" scope dependency isn't exposed on a consumer's own compile
+# classpath, and NostrSignalingClient needs OkHttpClient directly to build
+# Quartz's BasicOkHttpWebSocket transport.
+okhttp = "5.3.2"
+# TV-specific Compose Material library (D-pad-focus-aware Button/Switch/
+# MaterialTheme, built on a ClickableSurface primitive with native per-state
+# border/glow/scale/shape) — confirmed compatible with Portal: its real AAR
+# manifest requires only minSdk 23 (well under this app's minSdk 28), and its
+# POM has zero Google Play Services dependencies (Portal has none at all).
+tvMaterial = "1.1.0"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycle" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-tv-material = { group = "androidx.tv", name = "tv-material", version.ref = "tvMaterial" }
+webrtc = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "webrtc" }
+coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+quartz-android = { group = "com.vitorpamplona.quartz", name = "quartz-android", version.ref = "quartz" }
+okhttp-android = { group = "com.squareup.okhttp3", name = "okhttp-android", version.ref = "okhttp" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

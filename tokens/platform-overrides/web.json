@@ -1,0 +1,24 @@
+{
+  "font": {
+    "family": {
+      "$type": "fontFamily",
+      "inter": {
+        "$value": ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"]
+      }
+    }
+  },
+  "interaction": {
+    "hover": {
+      "$type": "number",
+      "brightness": { "$value": 1.1 }
+    }
+  },
+  "typography": {
+    "_comment": "Deliberate divergence, not drift — see CALL_STATE.md-style precedent of documenting *why* a value differs. The base semantic/typography.json scale was bumped for Android/Portal's 10-foot TV viewing distance (a real legibility audit finding: 14-17px body/caption text is phone-fine-print-sized when read from a couch). Web is read at arm's length (desktop/phone browser), where that floor doesn't apply — this override pins web back to its own already-tuned sizes rather than inheriting the TV bump. contactName needs no override: it was already large enough for both contexts. badge has no override anymore: it's pinned to 10px in the base scale itself now (explicit user request, overriding an earlier TV-legibility argument for keeping it larger there) — same value on both platforms already, nothing left to diverge. statusRow gets the same pin as caption (14px) — web's status checklist was already sized right at arm's length before Android's TV-driven statusRow role existed; only Android needed the reduction.",
+    "display": { "fontSize": { "$type": "fontSize", "$value": "{fontSize.24}" } },
+    "body": { "fontSize": { "$type": "fontSize", "$value": "{fontSize.16}" } },
+    "caption": { "fontSize": { "$type": "fontSize", "$value": "{fontSize.14}" } },
+    "buttonDefault": { "fontSize": { "$type": "fontSize", "$value": "{fontSize.14}" } },
+    "statusRow": { "fontSize": { "$type": "fontSize", "$value": "{fontSize.14}" } }
+  }
+}

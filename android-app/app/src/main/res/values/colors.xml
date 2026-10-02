@@ -1,0 +1,5 @@
+<resources>
+    <!-- Only used by themes.xml for system bar / window background — the
+         Compose UI's colors live in ui/theme/Color.kt instead. -->
+    <color name="bg">#FF1A1A1A</color>
+</resources>

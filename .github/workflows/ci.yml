@@ -1,0 +1,73 @@
+name: CI
+
+# cargo-test is identical to `cargo test -p call-core -p pake-bridge` run
+# locally (no Android/NDK/wasm toolchain needed — it only builds the host
+# `rlib` target). android-build's CC/AR/linker env vars mirror a real
+# `./gradlew assembleDebug` run end-to-end — cross-compiled all three ABIs,
+# packaged a real app-debug.apk, confirmed libcall_core.so present for
+# arm64-v8a/armeabi-v7a/x86_64 inside it. These explicit
+# CC_*/AR_*/CARGO_TARGET_*_LINKER vars are required on a GitHub Actions
+# runner specifically — rust-android-gradle doesn't auto-derive them from
+# ANDROID_NDK_HOME/ANDROID_NDK_ROOT alone in this project's plugin version.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  cargo-test:
+    name: cargo test (call-core, pake-bridge)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo test --workspace
+        run: cargo test --workspace --verbose
+
+  android-build:
+    name: Android debug build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Matches android-app/app/build.gradle.kts's `cargo { targets =
+          # listOf("arm", "arm64", "x86_64") }` exactly — "arm"/"arm64" are
+          # the rust-android-gradle plugin's own aliases for the armv7/
+          # aarch64 target triples below.
+          targets: armv7-linux-androideabi,aarch64-linux-android,x86_64-linux-android
+      - name: Install pinned NDK
+        run: |
+          # Version pinned to match android-app/app/build.gradle.kts's
+          # `ndkVersion` exactly — see that file's own doc for why this is
+          # recorded explicitly rather than left to whatever's installed.
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.3.13750724"
+      - name: Set up local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > android-app/local.properties
+      - name: Grant execute permission for gradlew
+        run: chmod +x android-app/gradlew
+      - name: ./gradlew assembleDebug
+        working-directory: android-app
+        env:
+          # cc-rs (secp256k1-sys's C build) and cargo's own linker choice
+          # both need to be pointed at the NDK's own per-target,
+          # per-API-level clang wrapper explicitly — minSdk 28 here, matching
+          # build.gradle.kts's own `defaultConfig.minSdk`. Without these,
+          # linking fails with the system's non-Android `cc`/`ld` instead
+          # ("unknown options: --version-script ...").
+          NDK_BIN: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin
+          CC_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android28-clang
+          AR_aarch64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android28-clang
+          CC_armv7_linux_androideabi: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi28-clang
+          AR_armv7_linux_androideabi: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi28-clang
+          CC_x86_64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android28-clang
+          AR_x86_64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android28-clang
+        run: ./gradlew assembleDebug --stacktrace

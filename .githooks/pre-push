@@ -1,0 +1,31 @@
+#!/bin/sh
+# Runs `cargo test` before every push, mirroring what CALL_STATE.md itself
+# treats as the actual enforcement mechanism for every call-state invariant
+# ("this state machine has exactly one implementation... verified by cargo
+# test"). Not a substitute for `.github/workflows/ci.yml` (hosted CI runs
+# this same `cargo test` workspace plus a full real Android cross-compile
+# this hook deliberately skips — see below) — this is the fast, local,
+# *pre*-push layer in front of it: instant feedback before a regression
+# ever reaches GitHub at all, rather than finding out from a failed run
+# after the fact.
+#
+# One-time setup on a fresh clone (this isn't automatic — git doesn't track
+# .git/hooks/, so a committed hooks directory has to be pointed at
+# explicitly):
+#   git config core.hooksPath .githooks
+#
+# Only runs `cargo test --workspace` (call-core + pake-bridge) — the host
+# `rlib` target needs no Android NDK/wasm32 toolchain, so this works on any
+# machine with a plain Rust install. Deliberately does NOT also run the
+# Android/web builds here: those need a real NDK + rustup targets + JDK 17
+# set up exactly right (see README's own setup section), which isn't
+# guaranteed on every machine this hook runs on, and a slow/flaky pre-push
+# hook gets disabled by whoever it annoys. Extend this script yourself if
+# you want that extra coverage locally.
+
+set -e
+
+echo "pre-push: running cargo test (call-core, pake-bridge)..."
+cargo test --workspace
+
+echo "pre-push: cargo test passed."

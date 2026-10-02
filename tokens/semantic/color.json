@@ -1,0 +1,40 @@
+{
+  "color": {
+    "$type": "color",
+    "background": {
+      "app": { "$value": "{color.neutral.1000}" },
+      "surface": { "$value": "{color.neutral.950}" },
+      "surfaceAlt": { "$value": "{color.neutral.900}" },
+      "waiting": { "$value": "{color.navy.900}" },
+      "glow": { "$value": "{color.navy.700}" }
+    },
+    "text": {
+      "primary": { "$value": "{color.neutral.100}" },
+      "dim": { "$value": "{color.neutral.400}" }
+    },
+    "border": {
+      "default": { "$value": "{color.neutral.800}" }
+    },
+    "action": {
+      "primary": {
+        "background": { "$value": "{color.blue.600}" },
+        "foreground": { "$value": "{color.white}" }
+      },
+      "danger": {
+        "background": { "$value": "{color.red.500}" },
+        "foreground": { "$value": "{color.white}" }
+      }
+    },
+    "status": {
+      "ok": { "$value": "{color.green.500}" },
+      "danger": { "$value": "{color.red.500}" },
+      "busy": { "$value": "{color.orange.500}" }
+    },
+    "focus": {
+      "ring": { "$value": "{color.white}" }
+    },
+    "video": {
+      "background": { "$value": "{color.black}" }
+    }
+  }
+}
