@@ -552,9 +552,10 @@ video::-webkit-media-controls-start-playback-button {
 }
 
 /* Shared by all three video screens (Calling/IncomingCall/live Call) — a
-   translucent black backdrop behind whatever this overlay holds. A video
-   feed behind it can be anything, so contrast can't be guaranteed by this
-   screen's own palette. opacity-50 over black, not a fully opaque card —
+   translucent navy backdrop (the screens' own background color) behind
+   whatever this overlay holds. A video feed behind it can be anything, so
+   contrast can't be guaranteed by this screen's own palette. opacity-80, not
+   a fully opaque card —
    still reads as "video underneath," just legible. Shrink-to-fit
    (left:50%/transform) so the backdrop hugs the actual content; max-width
    keeps a long name from pushing it past the viewport's own edges. Mirrors
@@ -569,7 +570,7 @@ video::-webkit-media-controls-start-playback-button {
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-call-overlay-gap);
-  background: color-mix(in srgb, var(--color-black) calc(var(--opacity-50) * 100%), transparent);
+  background: color-mix(in srgb, var(--color-background-waiting) calc(var(--opacity-80) * 100%), transparent);
   border-radius: var(--radius-control);
   padding: var(--dimension-16) var(--dimension-24);
 }

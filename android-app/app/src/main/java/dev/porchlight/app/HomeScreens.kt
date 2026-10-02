@@ -410,14 +410,14 @@ internal fun HomeScreen(
 }
 
 /**
- * A translucent black backdrop behind an overlay's own text/buttons — a
- * video feed behind it can be anything, so contrast can't be guaranteed by
- * this screen's own palette. opacity50 over black, not a fully opaque
- * card — still reads as "video underneath," just legible. Mirrors web's
- * identical `.calling-overlay` background (styles.css).
+ * A translucent navy backdrop (the screens' own background color) behind an
+ * overlay's own text/buttons — a video feed behind it can be anything, so
+ * contrast can't be guaranteed by this screen's own palette. opacity80, not
+ * a fully opaque card — still reads as "video underneath," just legible.
+ * Mirrors web's identical `.calling-overlay` background (styles.css).
  */
 private fun Modifier.callOverlayScrim(): Modifier = this
-    .background(Color.Black.copy(alpha = GeneratedOpacity.opacity50), RoundedCornerShape(Dimens.radiusControl))
+    .background(GeneratedColor.colorBackgroundWaiting.copy(alpha = GeneratedOpacity.opacity80), RoundedCornerShape(Dimens.radiusControl))
     .padding(horizontal = Dimens.dimension24, vertical = Dimens.dimension16)
 
 /**
