@@ -685,12 +685,16 @@ video::-webkit-media-controls-start-playback-button {
   gap: var(--dimension-4);
 }
 .call-toggle-label {
+  cursor: pointer;
   font-family: var(--typography-status-row-font-family);
   font-weight: var(--typography-status-row-font-weight);
   font-size: calc(var(--typography-status-row-font-size) * 0.85);
   color: var(--color-text-dim);
 }
-/* The label brightens with its switch, as Android's CallToggle does. */
+/* The label and its switch are one control: hovering or focusing either
+   brightens both together (the switch's own rules above cover hovering the
+   label), as Android's CallToggle does. The label is a real <label for>, so
+   clicking it toggles the switch too. */
 .call-toggle:hover .call-toggle-label,
 .call-toggle:has(.toggle-switch:focus-visible) .call-toggle-label {
   color: var(--color-text-primary);
@@ -714,6 +718,7 @@ video::-webkit-media-controls-start-playback-button {
   transition: background 0.15s ease;
 }
 .toggle-switch:hover,
+.call-toggle:hover .toggle-switch,
 .toggle-switch:focus-visible {
   outline: none;
   background: color-mix(in srgb, white calc(var(--button-tint-neutral-container-focused) * 100%), transparent);
@@ -735,6 +740,7 @@ video::-webkit-media-controls-start-playback-button {
   background: color-mix(in srgb, var(--color-status-ok) calc(var(--button-tint-accent-container-focused) * 100%), transparent);
 }
 .toggle-switch.checked:hover,
+.call-toggle:hover .toggle-switch.checked,
 .toggle-switch.checked:focus-visible {
   background: color-mix(in srgb, var(--color-status-ok) calc(var(--button-tint-accent-border-focused) * 100%), transparent);
 }
