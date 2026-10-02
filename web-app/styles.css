@@ -683,6 +683,7 @@ video::-webkit-media-controls-start-playback-button {
   flex-direction: column;
   align-items: center;
   gap: var(--dimension-4);
+  cursor: pointer;
 }
 .call-toggle-label {
   cursor: pointer;
