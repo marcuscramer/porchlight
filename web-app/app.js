@@ -1500,13 +1500,17 @@ el('screenCall').addEventListener('click', (e) => {
     showCallControls();
   }
 });
-// Enter/Space opens, Backspace/Escape closes — the keyboard-only
-// equivalent of the click handler above.
+// Enter/Space/Tab opens, Backspace/Escape closes — the keyboard-only
+// equivalent of the click handler above. Opening with the keyboard also puts
+// focus on the first control (the last one for Shift+Tab), so the next Tab
+// moves through them; with nothing visible there was nothing to Tab to.
 document.addEventListener('keydown', (e) => {
   if (screen !== 'call') return;
-  if (!callControlsVisible && (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar')) {
+  const opens = e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar' || e.key === 'Tab';
+  if (!callControlsVisible && opens) {
     e.preventDefault();
     showCallControls();
+    el(e.key === 'Tab' && e.shiftKey ? 'callDisconnect' : 'cyclePreviewPosition').focus();
   } else if (callControlsVisible && (e.key === 'Backspace' || e.key === 'Escape')) {
     e.preventDefault();
     hideCallControls();

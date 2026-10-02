@@ -690,6 +690,11 @@ video::-webkit-media-controls-start-playback-button {
   font-size: calc(var(--typography-status-row-font-size) * 0.85);
   color: var(--color-text-dim);
 }
+/* The label brightens with its switch, as Android's CallToggle does. */
+.call-toggle:hover .call-toggle-label,
+.call-toggle:has(.toggle-switch:focus-visible) .call-toggle-label {
+  color: var(--color-text-primary);
+}
 
 /* A plain checkbox-shaped switch, no native styling to fight — track tints
    green/status-ok when checked (matches Android's SwitchDefaults.colors
