@@ -255,7 +255,11 @@ html, body {
   fill: currentColor;
 }
 
-.settings-fab:hover { color: var(--color-text-primary); }
+.settings-fab:hover,
+.settings-fab:focus-visible {
+  outline: none;
+  color: var(--color-text-primary);
+}
 
 /* --- Waiting screen (mirrors WaitingScreen + ContactRow) --------------- */
 
@@ -704,16 +708,20 @@ video::-webkit-media-controls-start-playback-button {
   flex-shrink: 0;
   transition: background 0.15s ease;
 }
+.toggle-switch:hover,
 .toggle-switch:focus-visible {
   outline: none;
   background: color-mix(in srgb, white calc(var(--button-tint-neutral-container-focused) * 100%), transparent);
 }
+/* Same proportions as Android's FocusableSwitch (knob = half the track
+   height, inset = a quarter of it, same size on and off), at this page's
+   own smaller size. */
 .toggle-switch .toggle-thumb {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: var(--dimension-12);
-  height: var(--dimension-12);
+  top: var(--dimension-4);
+  left: var(--dimension-4);
+  width: var(--dimension-8);
+  height: var(--dimension-8);
   border-radius: 50%;
   background: var(--color-text-dim);
   transition: transform 0.15s ease, background 0.15s ease;
@@ -721,12 +729,13 @@ video::-webkit-media-controls-start-playback-button {
 .toggle-switch.checked {
   background: color-mix(in srgb, var(--color-status-ok) calc(var(--button-tint-accent-container-focused) * 100%), transparent);
 }
+.toggle-switch.checked:hover,
 .toggle-switch.checked:focus-visible {
   background: color-mix(in srgb, var(--color-status-ok) calc(var(--button-tint-accent-border-focused) * 100%), transparent);
 }
 .toggle-switch.checked .toggle-thumb {
   background: var(--color-text-primary);
-  /* track(28) - inset(2*2) - thumb(12) */
+  /* track(28) - inset(2*4) - thumb(8) = 12 */
   transform: translateX(var(--dimension-12));
 }
 
