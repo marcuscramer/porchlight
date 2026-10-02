@@ -694,7 +694,11 @@ window.addEventListener('storage', (event) => {
 // same thing proactively, the moment the tab is actually looked at again,
 // instead of waiting for a retry to stumble into it.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') kickHeartbeat();
+  if (document.visibilityState !== 'visible') return;
+  kickHeartbeat();
+  // iOS pauses a playing video when the page is backgrounded; resume it
+  // rather than leaving a paused frame for Safari to decorate.
+  if (remoteVideoEl.srcObject && remoteVideoEl.paused) keepPlaying(remoteVideoEl);
 });
 
 // ---------------------------------------------------------------------------
@@ -928,6 +932,22 @@ let acquireLocalStreamPromise = null;
  * (called on every presence/heartbeat update) re-applies it constantly. */
 function setVideoSource(video, stream) {
   if (video.srcObject !== stream) video.srcObject = stream;
+}
+
+/** Starts [video], and if the browser refuses (Safari, for an unmuted stream
+ * not started by a direct gesture) tries again on the next tap or click
+ * instead of leaving it paused: a paused frame is what makes iOS Safari put
+ * its own play control on top of the video. */
+function keepPlaying(video) {
+  video.play().catch(() => {
+    const resume = () => {
+      document.removeEventListener('touchend', resume, true);
+      document.removeEventListener('click', resume, true);
+      keepPlaying(video);
+    };
+    document.addEventListener('touchend', resume, true);
+    document.addEventListener('click', resume, true);
+  });
 }
 
 /** Opens the camera/mic for an actual call attempt — called right when one
@@ -1175,7 +1195,7 @@ async function ensurePeerConnection(pairingId, callId) {
     // Autoplay can be refused (Safari especially, for an unmuted stream not
     // started by a direct gesture) — which would otherwise leave a paused
     // frame with the browser's own play affordance on top of it.
-    remoteVideoEl.play().catch(() => {});
+    keepPlaying(remoteVideoEl);
   };
   pc.onconnectionstatechange = () => {
     callActive = pc.connectionState === 'connected';

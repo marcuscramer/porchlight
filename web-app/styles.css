@@ -531,15 +531,33 @@ html, body {
   margin: var(--dimension-4) 0;
 }
 
-/* Never show the browser's own media UI (Safari's start-playback button,
-   Chrome's overlay controls) on any call video — the only controls are the
-   app's own #callControls. */
+/* Never show the browser's own media UI (Safari's start-playback button and
+   overlay, Chrome's overlay controls) on any call video — the only controls
+   are the app's own #callControls. Every WebKit/Blink control part is listed
+   because iOS Safari builds different ones depending on the video's state.
+   The videos also ignore taps (the screen's own click handler still gets
+   them), so nothing in a video's own UI can ever be reached. */
 video::-webkit-media-controls,
 video::-webkit-media-controls-enclosure,
 video::-webkit-media-controls-panel,
-video::-webkit-media-controls-start-playback-button {
+video::-webkit-media-controls-panel-container,
+video::-webkit-media-controls-overlay-enclosure,
+video::-webkit-media-controls-overlay-play-button,
+video::-webkit-media-controls-play-button,
+video::-webkit-media-controls-start-playback-button,
+video::-webkit-media-controls-fullscreen-button,
+video::-webkit-media-controls-timeline,
+video::-webkit-media-controls-current-time-display,
+video::-webkit-media-controls-time-remaining-display,
+video::-webkit-media-controls-mute-button,
+video::-webkit-media-controls-volume-slider {
   display: none !important;
   -webkit-appearance: none;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+video {
+  pointer-events: none;
 }
 
 /* --- Calling screen (mirrors CallingScreen) ----------------------------- */

@@ -173,7 +173,7 @@
          "Calling" as its own static label, the actual name on its own
          line below it, both centered. -->
     <section id="screenCalling" class="screen" hidden>
-      <video id="callingLocalVideo" autoplay playsinline muted disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback"></video>
+      <video id="callingLocalVideo" autoplay playsinline muted disablepictureinpicture disableremoteplayback x-webkit-airplay="deny" controlslist="nodownload nofullscreen noremoteplayback"></video>
       <div class="calling-overlay">
         <div class="spinner" aria-hidden="true"></div>
         <div class="calling-label" data-i18n="call.callingLabel">Calling</div>
@@ -190,7 +190,7 @@
          screen's own Call button, Decline is the same shape with .danger
          and CallEnd's own path — pixel-shape parity with Android. -->
     <section id="screenIncomingCall" class="screen" hidden>
-      <video id="incomingLocalVideo" autoplay playsinline muted disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback"></video>
+      <video id="incomingLocalVideo" autoplay playsinline muted disablepictureinpicture disableremoteplayback x-webkit-airplay="deny" controlslist="nodownload nofullscreen noremoteplayback"></video>
       <div class="calling-overlay">
         <div class="calling-label" data-i18n="call.incomingCallFrom">Incoming call from</div>
         <div id="incomingCallerName" class="calling-name"></div>
@@ -209,8 +209,8 @@
          or press Enter/Space, to bring the row of controls up;
          Backspace/Escape, or a click outside them, dismisses it again. -->
     <section id="screenCall" class="screen" hidden>
-      <video id="remoteVideo" autoplay playsinline disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback"></video>
-      <video id="localVideo" autoplay playsinline muted disablepictureinpicture disableremoteplayback controlslist="nodownload nofullscreen noremoteplayback"></video>
+      <video id="remoteVideo" autoplay playsinline disablepictureinpicture disableremoteplayback x-webkit-airplay="deny" controlslist="nodownload nofullscreen noremoteplayback"></video>
+      <video id="localVideo" autoplay playsinline muted disablepictureinpicture disableremoteplayback x-webkit-airplay="deny" controlslist="nodownload nofullscreen noremoteplayback"></video>
       <!-- .calling-overlay for its own translucent backdrop + bottom-center
            position — see that class's own doc, styles.css. Four controls
            in one row: cycle the self-view's position (icon reflects which
