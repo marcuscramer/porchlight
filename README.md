@@ -144,8 +144,10 @@ That's a normal, narrow permission. The cover is just a plain color, drawn
 while Home is being pressed and removed the moment the call screen is
 confirmed up, with a safety timer so it can never stay covering the screen.
 
-Settings in Porchlight shows whether the wake-up service is on. To turn the
-whole thing off again, read the service list with
+Once the service is on, Settings in Porchlight has a **Call wake-up** switch
+to turn the feature off and on without touching `adb` again (until the service
+is enabled, the switch is off and can't be reached). To remove it
+completely, read the service list with
 `adb shell settings get secure enabled_accessibility_services`, remove the
 `dev.porchlight.app/…` entry and put the rest back with
 `adb shell settings put secure enabled_accessibility_services "<the rest>"`;

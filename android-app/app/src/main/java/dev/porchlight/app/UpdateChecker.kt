@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.IntentFilter
 import android.content.pm.PackageInstaller
 import android.net.Uri
@@ -309,6 +310,26 @@ object UpdateChecker {
             .setAutoCancel(true)
             .build()
         mgr.notify(NOTIF_ID, notification)
+    }
+
+    private const val PORTAL_INSTALL_VERIFIER = "com.facebook.appverifier"
+
+    /**
+     * False while Meta's install verifier is present and still on: it rejects
+     * any sideloaded install, this app's own updates included (see the
+     * README's "Convenience" section for the one-time `adb` step that turns
+     * it off), so offering an Install button would be a dead end. True
+     * anywhere else, including devices that don't have the verifier at all.
+     */
+    fun canSelfInstall(context: Context): Boolean {
+        val setting = try {
+            context.packageManager.getApplicationEnabledSetting(PORTAL_INSTALL_VERIFIER)
+        } catch (_: Exception) {
+            return true
+        }
+        return setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED ||
+            setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER ||
+            setting == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED
     }
 
     /**

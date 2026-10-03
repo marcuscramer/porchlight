@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -734,6 +735,12 @@ private fun AppRoot(
                     Config.save(context, c)
                     config = c
                 },
+                callWakeUp = config.callWakeUp,
+                onToggleCallWakeUp = { enabled ->
+                    val c = Config.load(context).copy(callWakeUp = enabled)
+                    Config.save(context, c)
+                    config = c
+                },
                 ringVolume = config.ringVolume,
                 onRingVolumeChange = { level ->
                     val c = Config.load(context).copy(ringVolume = level)
@@ -998,6 +1005,8 @@ private fun NameEntryScreen(
 private fun AdminChoiceScreen(
     launchOnBoot: Boolean,
     onToggleLaunchOnBoot: (Boolean) -> Unit,
+    callWakeUp: Boolean,
+    onToggleCallWakeUp: (Boolean) -> Unit,
     ringVolume: Config.RingVolume,
     onRingVolumeChange: (Config.RingVolume) -> Unit,
     onPreviewRingVolume: (Config.RingVolume) -> Unit,
@@ -1136,21 +1145,43 @@ private fun AdminChoiceScreen(
                         },
                     )
                 }
-                // Status only: turning this on is a one-time adb step (see the
-                // README), since the Portal's Settings has no screen for it.
-                val callWakeUpOn by CallWakeUpAccessibilityService.enabled.collectAsState()
-                Row(modifier = Modifier.fillMaxWidth()) {
+                // Switching it on at all is a one-time adb step (see the
+                // README; the Portal's Settings has no screen for it), so
+                // until the service is enabled this is off and can't be
+                // reached — same idea as the update line's Install button.
+                val callWakeUpPossible by CallWakeUpAccessibilityService.enabled.collectAsState()
+                val callWakeUpInteractionSource = remember { MutableInteractionSource() }
+                val callWakeUpFocused by callWakeUpInteractionSource.collectIsFocusedAsState()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
+                ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.settings_callWakeUp_title), color = GeneratedColor.colorTextDim)
                         Text(
-                            stringResource(if (callWakeUpOn) R.string.settings_callWakeUp_on else R.string.settings_callWakeUp_off),
+                            stringResource(R.string.settings_callWakeUp_title),
+                            color = if (callWakeUpFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        )
+                        Text(
+                            stringResource(if (callWakeUpPossible) R.string.settings_callWakeUp_subtitle else R.string.settings_callWakeUp_needsSetup),
                             color = GeneratedColor.colorTextDim,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
+                    FocusableSwitch(
+                        checked = callWakeUpPossible && callWakeUp,
+                        onCheckedChange = onToggleCallWakeUp,
+                        interactionSource = callWakeUpInteractionSource,
+                        modifier = Modifier
+                            .alpha(if (callWakeUpPossible) 1f else GeneratedOpacity.opacity50)
+                            .focusProperties { canFocus = callWakeUpPossible },
+                    )
                 }
                 val installInteractionSource = remember { MutableInteractionSource() }
                 val installFocused by installInteractionSource.collectIsFocusedAsState()
+                val selfInstallPossible = remember { UpdateChecker.canSelfInstall(context) }
+                val updateReady = checkResult is UpdateCheckResult.Ready
+                val canInstall = updateReady && selfInstallPossible
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1164,25 +1195,41 @@ private fun AdminChoiceScreen(
                     // content, but kept anyway (the invisible probes below
                     // cost nothing and still guard the Install button's own
                     // left edge from any future layout that isn't fixed-width).
-                    Box(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.settings_update_checking), modifier = Modifier.alpha(0f))
-                        Text(stringResource(R.string.settings_update_disabled), modifier = Modifier.alpha(0f))
-                        Text(stringResource(R.string.settings_update_upToDate, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
-                        Text(stringResource(R.string.settings_update_downloading, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
-                        Text(stringResource(R.string.settings_update_ready, BuildConfig.VERSION_NAME, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
-                        Text(stringResource(R.string.settings_update_failed, "server (500)"), modifier = Modifier.alpha(0f))
-                        Text(
-                            message,
-                            color = if (installFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
-                        )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Box {
+                            Text(stringResource(R.string.settings_update_checking), modifier = Modifier.alpha(0f))
+                            Text(stringResource(R.string.settings_update_disabled), modifier = Modifier.alpha(0f))
+                            Text(stringResource(R.string.settings_update_upToDate, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
+                            Text(stringResource(R.string.settings_update_downloading, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
+                            Text(stringResource(R.string.settings_update_ready, BuildConfig.VERSION_NAME, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
+                            Text(stringResource(R.string.settings_update_failed, "server (500)"), modifier = Modifier.alpha(0f))
+                            Text(
+                                message,
+                                color = if (installFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                            )
+                        }
+                        // An update is there but installing it from here can't
+                        // work yet (see UpdateChecker.canSelfInstall).
+                        if (updateReady && !selfInstallPossible) {
+                            Text(
+                                stringResource(R.string.settings_update_installNeedsSetup),
+                                color = GeneratedColor.colorTextDim,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                     // Only enabled once there's actually something to
-                    // install — always present, so the table's right
-                    // column stays put rather than the row reflowing.
+                    // install and installing can work — always present, so
+                    // the table's right column stays put rather than the
+                    // row reflowing.
+                    // Not just greyed out: a disabled button can still take
+                    // D-pad focus (see TvButton), and there's nothing here
+                    // to land on until an install can actually succeed.
                     TvButton(
-                        enabled = checkResult is UpdateCheckResult.Ready,
+                        enabled = canInstall,
                         onClick = { UpdateChecker.installOrRequestPermission(context) },
                         interactionSource = installInteractionSource,
+                        modifier = Modifier.focusProperties { canFocus = canInstall },
                     ) { Text(stringResource(R.string.settings_update_installButton)) }
                 }
     }

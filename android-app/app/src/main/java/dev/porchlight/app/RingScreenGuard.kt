@@ -125,11 +125,11 @@ internal class RingScreenGuard(
             // hide one that existed when it ran, and this block runs later.
             if (id != ringId.get()) return@post
             repost = repostCallNotification
-            if (CallWakeUpAccessibilityService.isEnabled) {
+            if (CallWakeUpAccessibilityService.isEnabled && Config.load(context).callWakeUp) {
                 showMask()
                 step(id, presses = 0, startedAt = SystemClock.elapsedRealtime())
             } else {
-                Log.i(TAG, "accessibility service off: plain bring-to-front")
+                Log.i(TAG, "call wake-up off (service not enabled, or switched off in Settings): plain bring-to-front")
                 bringToFront()
             }
         }

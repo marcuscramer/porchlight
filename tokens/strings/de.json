@@ -27,9 +27,9 @@
       "subtitle": "Startet Porchlight automatisch nach dem (Neu-)Start und wenn der Bildschirmschoner endet"
     },
     "callWakeUp": {
-      "title": "Anruf-Aufwecken",
-      "on": "An: Ein Anruf schaltet den Fernseher auf das Portal um und erscheint über dem Bildschirmschoner",
-      "off": "Aus: Aus dem Ruhezustand erscheint ein Anruf eventuell nicht. Zum Einschalten siehe README"
+      "title": "Aufwecken bei Anruf",
+      "subtitle": "Ein Anruf schaltet den Fernseher auf das Portal um und erscheint über dem Bildschirmschoner",
+      "needsSetup": "Aufwecken bei Anruf braucht einen einmaligen Einrichtungsschritt, siehe README"
     },
     "update": {
       "checking": "Suche nach Updates…",
@@ -38,7 +38,8 @@
       "downloading": "{version} wird heruntergeladen…",
       "ready": "Update verfügbar (v{oldVersion} → {newVersion})",
       "failed": "Update-Prüfung fehlgeschlagen ({reason}).",
-      "installButton": "Installieren"
+      "installButton": "Installieren",
+      "installNeedsSetup": "Selbst-Updates brauchen einen einmaligen Einrichtungsschritt, siehe README"
     },
     "ringVolume": {
       "title": "Klingeltonlautstärke"

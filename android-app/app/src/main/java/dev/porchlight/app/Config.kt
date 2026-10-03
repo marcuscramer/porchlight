@@ -86,6 +86,11 @@ data class Config(
     // routes to the unit's own speaker independently of whatever the
     // connected TV is doing (see CameraAgentService.startRingtone's doc).
     val ringVolume: RingVolume = RingVolume.P50,
+    // On by default: once the accessibility service is switched on (the
+    // one-time adb step in the README), call wake-up was always active, so
+    // this keeps that. It's only a choice while the service is on; without
+    // it nothing here has any effect (see RingScreenGuard.ringStarted).
+    val callWakeUp: Boolean = true,
 ) {
     /** How loud the incoming-call ring is, as a percentage of the system ring
      * stream's maximum, applied at the system level for the duration of a
@@ -142,7 +147,7 @@ data class Config(
                     .getOrElse { if (p.getBoolean("playIncomingCallSound", true)) RingVolume.P50 else RingVolume.P0 }
             }
 
-            Config(deviceName, pairings, previewCorner, launchOnBoot, ringVolume)
+            Config(deviceName, pairings, previewCorner, launchOnBoot, ringVolume, p.getBoolean("callWakeUp", true))
         }
 
         fun save(context: Context, config: Config): Unit = synchronized(lock) {
@@ -152,6 +157,7 @@ data class Config(
                 .putString("previewCorner", config.previewCorner.name)
                 .putBoolean("launchOnBoot", config.launchOnBoot)
                 .putString("ringVolume", config.ringVolume.name)
+                .putBoolean("callWakeUp", config.callWakeUp)
                 .apply()
         }
 

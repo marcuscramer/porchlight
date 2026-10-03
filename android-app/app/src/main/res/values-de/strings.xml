@@ -18,9 +18,9 @@
     <string name="settings_renameRow">Dieses Gerät umbenennen</string>
     <string name="settings_kioskMode_title">Kiosk-Modus</string>
     <string name="settings_kioskMode_subtitle">Startet Porchlight automatisch nach dem (Neu-)Start und wenn der Bildschirmschoner endet</string>
-    <string name="settings_callWakeUp_title">Anruf-Aufwecken</string>
-    <string name="settings_callWakeUp_on">An: Ein Anruf schaltet den Fernseher auf das Portal um und erscheint über dem Bildschirmschoner</string>
-    <string name="settings_callWakeUp_off">Aus: Aus dem Ruhezustand erscheint ein Anruf eventuell nicht. Zum Einschalten siehe README</string>
+    <string name="settings_callWakeUp_title">Aufwecken bei Anruf</string>
+    <string name="settings_callWakeUp_subtitle">Ein Anruf schaltet den Fernseher auf das Portal um und erscheint über dem Bildschirmschoner</string>
+    <string name="settings_callWakeUp_needsSetup">Aufwecken bei Anruf braucht einen einmaligen Einrichtungsschritt, siehe README</string>
     <string name="settings_update_checking">Suche nach Updates…</string>
     <string name="settings_update_disabled">Die Update-Prüfung ist für diese Version nicht eingerichtet.</string>
     <string name="settings_update_upToDate">Du hast die neueste Version (v%1$s)</string>
@@ -28,6 +28,7 @@
     <string name="settings_update_ready">Update verfügbar (v%1$s → %2$s)</string>
     <string name="settings_update_failed">Update-Prüfung fehlgeschlagen (%1$s).</string>
     <string name="settings_update_installButton">Installieren</string>
+    <string name="settings_update_installNeedsSetup">Selbst-Updates brauchen einen einmaligen Einrichtungsschritt, siehe README</string>
     <string name="settings_ringVolume_title">Klingeltonlautstärke</string>
     <string name="pairing_addContactTitle">Kontakt hinzufügen</string>
     <string name="pairing_phraseInstructions">Einigt euch am Telefon — oder wie auch immer ihr gerade in Kontakt seid — auf eine kurze Phrase, auf die nur ihr beide kommen würdet. Gebt dann beide genau dieselbe Phrase auf eurem eigenen Gerät ein.</string>
