@@ -120,6 +120,10 @@ internal class RingScreenGuard(
     fun ringStarted(repostCallNotification: () -> Unit) {
         val id = ringId.incrementAndGet()
         handler.post {
+            // Already cancelled (the caller hung up within a few ms): don't
+            // show a mask nothing is left to remove — cancel() could only
+            // hide one that existed when it ran, and this block runs later.
+            if (id != ringId.get()) return@post
             repost = repostCallNotification
             if (CallWakeUpAccessibilityService.isEnabled) {
                 showMask()
@@ -141,7 +145,9 @@ internal class RingScreenGuard(
     /** The call stopped ringing (answered, declined, missed or cancelled). */
     fun cancel() {
         ringId.incrementAndGet()
-        hideMask()
+        // The mask is a window, so it can only be removed from the main
+        // thread; cancel() is called from the call executor.
+        handler.post { hideMask() }
     }
 
     private fun step(id: Int, presses: Int, startedAt: Long) {

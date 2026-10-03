@@ -678,7 +678,16 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     private fun applyCallEffects(effects: List<CallCoreBridge.CallEffect>) {
         for (effect in effects) {
             when (effect) {
-                CallCoreBridge.CallEffect.AcquireMedia -> engine?.acquireMedia()
+                CallCoreBridge.CallEffect.AcquireMedia -> {
+                    engine?.acquireMedia()
+                    // A new call is starting (placed or ringing): a leftover
+                    // "Call ended"/"Couldn't connect" screen from the previous
+                    // one must not stay in front of it. HomeScreen shows a
+                    // pending outcome ahead of everything else, so an incoming
+                    // call arriving while one was still up (it stays until
+                    // dismissed or 20s pass) rang with nothing to see.
+                    updateState { it.copy(pendingCallOutcome = null) }
+                }
                 is CallCoreBridge.CallEffect.CreateOffer -> {
                     activePairingId = effect.pairingId
                     engine?.createOffer(effect.pairingId, effect.callId)
