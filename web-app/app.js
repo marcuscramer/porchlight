@@ -502,25 +502,18 @@ function monitorOnlineTimeouts() {
 }
 
 // ---------------------------------------------------------------------------
-// Publish retry queue. nostr-tools' SimplePool.publish() (see
-// AbstractSimplePool.publish's own source) returns one promise per relay
-// that's a single ensureRelay()+publish() attempt and nothing more — no
-// retry, no resend when a relay that was briefly down comes back. That's a
-// real gap this file used to have relative to android-app's own
-// NostrClient, whose eventOutbox gets flushed to a relay the moment it
-// reconnects (see NostrSignalingClient.kt's own doc). pendingPublishes is
-// the web equivalent: a bounded, in-memory queue of (event, still-failing
-// relays) retried on the same tick monitorOnlineTimeouts already runs on,
-// so a message lost to a transient relay hiccup gets a real second chance
-// instead of silently vanishing (previously: Promise.allSettled awaited and
-// its outcomes never even inspected). Resending the same already-signed
-// event is safe either way — a relay that already has it just gets a
-// harmless redelivery, and the receiving side's own callCore.
+// Publish retry. nostr-tools' SimplePool.publish() returns one promise per
+// relay that's a single ensureRelay()+publish() attempt and nothing more --
+// no retry, no resend when a relay that was briefly down comes back. The
+// queue bookkeeping (what's still outstanding, what's too old, the size
+// bound) lives in call-core's signal_retry module, shared with android-app,
+// whose quartz NostrClient has the identical gap; this file supplies only
+// what's genuinely web-native: the real publish() calls, and translating
+// each settled promise into callCore.recordPublishAck. Resending the same
+// already-signed event is safe either way -- a relay that already has it just
+// gets a harmless redelivery, and the receiving side's own callCore.
 // markSeenOrIsDuplicate already guards against acting on it twice.
 // ---------------------------------------------------------------------------
-const PENDING_PUBLISH_MAX_AGE_MS = 5 * 60 * 1000; // beyond this, whatever this event was about has almost certainly moved on
-const PENDING_PUBLISH_MAX_ENTRIES = 50; // hard cap so a long offline stretch can't grow this queue unboundedly
-let pendingPublishes = []; // { event, relays: Set<string> still failing, createdAt }
 
 // A relay that actively rejects a publish (an explicit NIP-01 `OK false
 // <reason>`, not a dropped connection) is telling us, for whatever reason,
@@ -556,46 +549,38 @@ function cooldownDurationFor(reason) {
 }
 
 /** Publishes `event` to every relay not currently in a rejection cooldown,
- * queuing whichever ones reject it (or are skipped for being in cooldown)
- * for [retryPendingPublishes] instead of just discarding the failure. */
+ * handing call-core's retry queue whichever ones reject it (or are skipped
+ * for being in cooldown) instead of just discarding the failure. */
 async function publishToRelays(event) {
   const now = Date.now();
   const targets = RELAYS.filter(url => !relayCooldownUntil.has(url) || relayCooldownUntil.get(url) <= now);
-  const failedRelays = new Set(RELAYS.filter(url => !targets.includes(url)));
+  const failedRelays = RELAYS.filter(url => !targets.includes(url));
   const settled = await Promise.allSettled(pool.publish(targets, event));
   settled.forEach((result, i) => {
     if (result.status === 'rejected') {
-      failedRelays.add(targets[i]);
+      failedRelays.push(targets[i]);
       console.warn('publish failed, will retry:', targets[i], result.reason);
       relayCooldownUntil.set(targets[i], now + cooldownDurationFor(result.reason));
     }
   });
-  if (failedRelays.size === 0) return;
-  if (pendingPublishes.length >= PENDING_PUBLISH_MAX_ENTRIES) pendingPublishes.shift();
-  pendingPublishes.push({ event, relays: failedRelays, createdAt: now });
+  if (failedRelays.length > 0) callCore.recordPendingPublish(event.id, JSON.stringify(event), failedRelays, now);
 }
 
-/** Retries every still-outstanding (event, relay) pair from a prior failed
- * [publishToRelays] call, skipping any relay currently in a rejection
- * cooldown. An entry drops out once every relay it needed has confirmed, or
- * once it's old enough that retrying is no longer useful. */
+/** Republishes whatever call-core says is still outstanding, skipping any
+ * relay currently in a rejection cooldown (that filter stays here: the
+ * cooldown map is web-only state). */
 async function retryPendingPublishes() {
-  if (pendingPublishes.length === 0) return;
   const now = Date.now();
-  const stillPending = [];
-  for (const entry of pendingPublishes) {
-    if (now - entry.createdAt >= PENDING_PUBLISH_MAX_AGE_MS) continue; // give up silently -- superseded by now regardless
-    const relays = [...entry.relays].filter(url => !relayCooldownUntil.has(url) || relayCooldownUntil.get(url) <= now);
-    if (relays.length > 0) {
-      const settled = await Promise.allSettled(pool.publish(relays, entry.event));
-      settled.forEach((result, i) => {
-        if (result.status === 'fulfilled') entry.relays.delete(relays[i]);
-        else relayCooldownUntil.set(relays[i], now + cooldownDurationFor(result.reason));
-      });
-    }
-    if (entry.relays.size > 0) stillPending.push(entry);
+  for (const entry of JSON.parse(callCore.dueForRetry(now))) {
+    const relays = entry.relays.filter(url => !relayCooldownUntil.has(url) || relayCooldownUntil.get(url) <= now);
+    if (relays.length === 0) continue;
+    const event = JSON.parse(entry.event_json);
+    const settled = await Promise.allSettled(pool.publish(relays, event));
+    settled.forEach((result, i) => {
+      if (result.status === 'fulfilled') callCore.recordPublishAck(event.id, relays[i], true);
+      else relayCooldownUntil.set(relays[i], now + cooldownDurationFor(result.reason));
+    });
   }
-  pendingPublishes = stillPending;
 }
 
 /**

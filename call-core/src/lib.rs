@@ -59,6 +59,16 @@ pub mod presence;
 /// design, including why the actual relay connection stays platform-native.
 pub mod nostr_protocol;
 
+/// The signaling-publish retry queue — bookkeeping for a signal message
+/// that missed one or more relays at send time, so the shell's own
+/// periodic tick can give it a real second chance instead of the message
+/// silently vanishing. Independent of every other module here, same as
+/// [`nostr_protocol`] — this doesn't call into anything else, and nothing
+/// else calls into this. See its own doc for the full design, including
+/// why neither platform's relay-client library already does this on its
+/// own.
+pub mod signal_retry;
+
 /// A peer's self-reported, untrusted display name is capped and stripped
 /// of bidi-override/zero-width characters before ever being stored — it's
 /// exactly what a human reads on the "Pair with [name]?" screen to confirm
@@ -171,6 +181,7 @@ struct AppState {
     presence: presence::PresenceState,
     call: call_arbitration::CallState,
     dedup: nostr_protocol::DedupState,
+    signal_retry: signal_retry::SignalRetryState,
 }
 
 impl AppState {
@@ -180,6 +191,7 @@ impl AppState {
             presence: presence::PresenceState::new(),
             call: call_arbitration::CallState::new(),
             dedup: nostr_protocol::DedupState::new(),
+            signal_retry: signal_retry::SignalRetryState::new(),
         }
     }
 }

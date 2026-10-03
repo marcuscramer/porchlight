@@ -9,6 +9,8 @@ import com.vitorpamplona.quartz.nip01Core.relay.client.NostrClient
 import com.vitorpamplona.quartz.nip01Core.relay.client.listeners.RelayConnectionListener
 import com.vitorpamplona.quartz.nip01Core.relay.client.reqs.SubscriptionListener
 import com.vitorpamplona.quartz.nip01Core.relay.client.single.IRelayClient
+import com.vitorpamplona.quartz.nip01Core.relay.commands.toClient.Message
+import com.vitorpamplona.quartz.nip01Core.relay.commands.toClient.OkMessage
 import com.vitorpamplona.quartz.nip01Core.relay.filters.Filter
 import com.vitorpamplona.quartz.nip01Core.relay.normalizer.NormalizedRelayUrl
 import com.vitorpamplona.quartz.nip01Core.relay.normalizer.normalizeRelayUrlOrNull
@@ -250,6 +252,15 @@ class NostrSignalingClient(
     private var closed = false
     private var heartbeatFuture: java.util.concurrent.ScheduledFuture<*>? = null
 
+    // Retry bookkeeping for publishes that missed a relay lives in call-core
+    // (`signal_retry`, see its doc for the full design); this class only
+    // supplies the two things that are genuinely native: which relays were
+    // connected at send time, and each relay's real NIP-01 OK. quartz-android
+    // itself never retries — its PoolEventOutbox records per-relay send
+    // state but nothing in the library reads it back out (confirmed by
+    // decompiling 1.08.0 and 1.12.6) — so without this a relay that's briefly
+    // down when publish() fires loses that message for good.
+
     // Set the moment connectedRelays.size first drops below relayUrls.size,
     // cleared the moment every relay is connected again — see [monitor]'s
     // own doc.
@@ -287,6 +298,20 @@ class NostrSignalingClient(
                     connectedRelays.remove(relay.url)
                     if (connectedRelays.isEmpty()) listener.onSignalingDisconnected()
                 }
+            }
+            // The real per-relay, per-event ack the retry queue needs — NOT
+            // RelayConnectionListener.onSent, whose "success" is only
+            // WebSocket.send() returning true (the local socket accepted the
+            // write, nothing about the relay) and whose string param is the
+            // command JSON, not an event id (checked by decompiling
+            // BasicRelayClient.sendIfConnected). A relay's actual NIP-01
+            // response to an EVENT is OkMessage, delivered here because
+            // onIncomingMessage fires for every raw message type a relay
+            // sends. A relay that was never connected enough to be sent to
+            // gets no OK at all — enqueuePendingPublish covers that case.
+            override fun onIncomingMessage(relay: IRelayClient, msgStr: String, msg: Message) {
+                val ok = msg as? OkMessage ?: return
+                executor.safeExecute { CallCoreBridge.recordPublishAck(ok.eventId, relay.url.url, ok.success) }
             }
         })
         client.connect()
@@ -534,6 +559,7 @@ class NostrSignalingClient(
         val now = System.currentTimeMillis()
         listener.onPresenceUpdate(CallCoreBridge.checkOnlineTimeouts(now))
         listener.onCallTimeoutCheck(CallCoreBridge.checkCallTimeout(now))
+        retryPendingPublishes()
 
         if (connectedRelays.size >= relayUrls.size) {
             relaysDegradedSinceMs = null
@@ -628,9 +654,34 @@ class NostrSignalingClient(
                 val wrapJson = CallCoreBridge.buildWrappedEvent(ownPrivateKeyHex, targetPubkeyHex, payloadJson) ?: return@launch
                 val wrapEvent = Event.fromJsonOrNull(wrapJson) ?: return@launch
                 client.publish(wrapEvent, relayUrls)
+                enqueuePendingPublish(wrapEvent, wrapJson)
             } catch (t: Throwable) {
                 Log.e(TAG, "failed to encrypt/publish to $targetPubkeyHex", t)
             }
+        }
+    }
+
+    /**
+     * Hands call-core's retry queue whichever of [relayUrls] aren't in
+     * [connectedRelays] right now — certain misses, since a disconnected
+     * relay's socket was never sent anything (and so can't send back an
+     * OkMessage either). A connected relay that still rejects the event is
+     * recorded separately, by the onIncomingMessage override. Runs on
+     * [executor] (via [scope]'s own dispatcher), same as every other read of
+     * [connectedRelays].
+     */
+    private fun enqueuePendingPublish(event: Event, eventJson: String) {
+        val missing = (relayUrls - connectedRelays).map { it.url }
+        if (missing.isNotEmpty()) CallCoreBridge.recordPendingPublish(event.id, eventJson, missing, System.currentTimeMillis())
+    }
+
+    /** Republishes whatever call-core says is still outstanding — called
+     * from [monitor]'s existing 10s tick. Resending to a relay that already
+     * has the event is harmless (the receiving side dedupes by event id). */
+    private fun retryPendingPublishes() {
+        for (retry in CallCoreBridge.dueForRetry(System.currentTimeMillis())) {
+            val event = Event.fromJsonOrNull(retry.eventJson) ?: continue
+            client.publish(event, retry.relays.mapNotNull { it.normalizeRelayUrlOrNull() }.toSet())
         }
     }
 
@@ -647,6 +698,7 @@ class NostrSignalingClient(
                 val eventJson = CallCoreBridge.buildBootstrapEvent(ownPrivateKeyHex, rendezvousTag, targetPubkeyHex, payload.toString()) ?: return@launch
                 val event = Event.fromJsonOrNull(eventJson) ?: return@launch
                 client.publish(event, relayUrls)
+                enqueuePendingPublish(event, eventJson)
             } catch (t: Throwable) {
                 Log.e(TAG, "failed to publish bootstrap message at $rendezvousTag", t)
             }

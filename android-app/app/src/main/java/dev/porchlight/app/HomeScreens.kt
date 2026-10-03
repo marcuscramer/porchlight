@@ -311,7 +311,6 @@ internal fun HomeScreen(
                 // nice-to-have.
                 WaitingScreen(
                     contacts = state.contacts,
-                    pairings = config.pairings,
                     onCall = { pairingId -> service?.requestCall(pairingId) },
                     onOpenSettings = onOpenSettings,
                     onAddContact = onAddContact,
@@ -743,7 +742,6 @@ private fun CallOutcomeScreen(
 @Composable
 private fun WaitingScreen(
     contacts: List<CameraAgentService.ContactState>,
-    pairings: List<Pairing>,
     onCall: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onAddContact: () -> Unit,
@@ -902,7 +900,7 @@ private fun WaitingScreen(
                         canCall = contact.isPaired && !contact.connected && !anyCallActive,
                         status = contact.status,
                         onCall = { onCall(contact.id) },
-                        autoAnswer = pairings.find { it.id == contact.id }?.autoAnswer == true,
+                        autoAnswer = contact.autoAnswer,
                         onToggleAutoAnswer = { enabled -> onToggleAutoAnswer(contact.id, enabled) },
                         onDelete = { pendingDelete = contact },
                     )

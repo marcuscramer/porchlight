@@ -82,6 +82,13 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         val id: String,
         val name: String,
         val isPaired: Boolean,
+        // Mirrors Pairing.autoAnswer — carried here, not read separately
+        // from Config by the UI, so the Settings > Contacts toggle always
+        // reflects this running service's own live pairings map instead of
+        // whatever the Activity's own Config snapshot last happened to have
+        // loaded (which a just-confirmed contact isn't in yet — see
+        // setAutoAnswer's own doc).
+        val autoAnswer: Boolean = false,
         // This contact's live presence, from this device's own point of
         // view — mirrors the Rust crate's own `presence::PresenceStatus`
         // doc: exactly one of OFFLINE/ONLINE/BUSY, never a combination.
@@ -447,11 +454,16 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     } ?: Unit
 
     /** Per-contact auto-answer toggle (Settings > Contacts) — see
-     * [Pairing.autoAnswer]'s doc for why this is per-contact, not global. */
+     * [Pairing.autoAnswer]'s doc for why this is per-contact, not global.
+     * Updates [ContactState.autoAnswer] too, not just [pairings]/[Config] —
+     * that's the copy the UI's switch actually reads (see ContactState's own
+     * doc), so this takes effect immediately regardless of whether the
+     * Activity's own Config snapshot has caught up with this pairing yet. */
     fun setAutoAnswer(pairingId: String, enabled: Boolean) = callExecutor?.execute {
         val updated = pairings[pairingId]?.copy(autoAnswer = enabled) ?: return@execute
         pairings[pairingId] = updated
         Config.addOrUpdatePairing(this, updated)
+        updateContact(pairingId) { it.copy(autoAnswer = enabled) }
     } ?: Unit
 
     /** The live call's Audio/Video mute toggles (CallScreen's own control
@@ -853,6 +865,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
             id = pairing.id,
             name = pairing.peerName,
             isPaired = pairing.isConfirmed,
+            autoAnswer = pairing.autoAnswer,
             status = status,
         )
         updateState { state ->

@@ -221,6 +221,15 @@ object CallCoreBridge {
     @JvmStatic
     private external fun nativeProtocolConstants(): String?
 
+    @JvmStatic
+    private external fun nativeRecordPendingPublish(eventId: String, eventJson: String, relaysJson: String, nowMs: Long)
+
+    @JvmStatic
+    private external fun nativeRecordPublishAck(eventId: String, relay: String, success: Boolean)
+
+    @JvmStatic
+    private external fun nativeDueForRetry(nowMs: Long): String
+
     /** What starting a new attempt hands back — see the Rust crate's own
      * `StartResult` doc. [generation] must be passed back verbatim to
      * [handleTimeout] when the live window elapses. */
@@ -667,6 +676,34 @@ object CallCoreBridge {
      * it silently). Falls back to `true` on a panic — see that function's
      * own doc for why this one deliberately fails *open*. */
     fun markSeenOrIsDuplicate(eventId: String): Boolean = nativeMarkSeenOrIsDuplicate(eventId)
+
+    /** One publish [dueForRetry] says to resend — see the Rust crate's own
+     * `signal_retry::PendingRetry` doc. [eventJson] is exactly what was
+     * passed to [recordPendingPublish]; [relays] is whichever of its
+     * targets are still outstanding. */
+    data class PendingRetry(val eventJson: String, val relays: List<String>)
+
+    /** See the Rust crate's own `signal_retry::record_pending_publish` doc:
+     * call right after the real publish attempt, with whichever [relays]
+     * (plain URL strings) are already known to have missed it. */
+    fun recordPendingPublish(eventId: String, eventJson: String, relays: Collection<String>, nowMs: Long) =
+        nativeRecordPendingPublish(eventId, eventJson, JSONArray(relays).toString(), nowMs)
+
+    /** See the Rust crate's own `signal_retry::record_publish_ack` doc: one
+     * relay's real outcome for [eventId]. */
+    fun recordPublishAck(eventId: String, relay: String, success: Boolean) = nativeRecordPublishAck(eventId, relay, success)
+
+    /** See the Rust crate's own `signal_retry::due_for_retry` doc: call from
+     * the existing periodic tick, then republish each entry to its
+     * [PendingRetry.relays]. */
+    fun dueForRetry(nowMs: Long): List<PendingRetry> {
+        val arr = JSONArray(nativeDueForRetry(nowMs))
+        return (0 until arr.length()).map { i ->
+            val obj = arr.getJSONObject(i)
+            val relays = obj.getJSONArray("relays")
+            PendingRetry(obj.getString("event_json"), (0 until relays.length()).map { relays.getString(it) })
+        }
+    }
 
     /** Mirrors `currentFilters`'s exact filter-set construction — see the
      * Rust crate's own `nostr_protocol::build_relay_filters` doc. */

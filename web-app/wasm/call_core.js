@@ -341,6 +341,26 @@ export function currentHeartbeatIntervalMs(pending_pairing_ids, now_ms) {
 }
 
 /**
+ * See [`crate::signal_retry::due_for_retry`]'s own doc. Returns a
+ * JSON-encoded `Vec<`[`crate::signal_retry::PendingRetry`]`>`, falling back
+ * to `"[]"` on a panic — fail-closed, nothing to retry this tick.
+ * @param {number} now_ms
+ * @returns {string}
+ */
+export function dueForRetry(now_ms) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.dueForRetry(now_ms);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * See [`crate::call_arbitration::forget_pairing`]'s own doc. Same
  * always-a-JSON-array contract as the other effect-returning functions
  * above.
@@ -837,6 +857,40 @@ export function pruneStalePending(current_pending_ids) {
     const ptr0 = passArrayJsValueToWasm0(current_pending_ids, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     wasm.pruneStalePending(ptr0, len0);
+}
+
+/**
+ * See [`crate::signal_retry::record_pending_publish`]'s own doc. No return
+ * value; a panic is a silent no-op, same reasoning as `pruneStalePending`'s
+ * own.
+ * @param {string} event_id
+ * @param {string} event_json
+ * @param {string[]} relays
+ * @param {number} now_ms
+ */
+export function recordPendingPublish(event_id, event_json, relays, now_ms) {
+    const ptr0 = passStringToWasm0(event_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(event_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayJsValueToWasm0(relays, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    wasm.recordPendingPublish(ptr0, len0, ptr1, len1, ptr2, len2, now_ms);
+}
+
+/**
+ * See [`crate::signal_retry::record_publish_ack`]'s own doc. No return
+ * value; a panic is a silent no-op.
+ * @param {string} event_id
+ * @param {string} relay
+ * @param {boolean} success
+ */
+export function recordPublishAck(event_id, relay, success) {
+    const ptr0 = passStringToWasm0(event_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(relay, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    wasm.recordPublishAck(ptr0, len0, ptr1, len1, success);
 }
 
 /**

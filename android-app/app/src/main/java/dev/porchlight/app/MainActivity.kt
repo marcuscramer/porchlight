@@ -870,22 +870,20 @@ private fun AppRoot(
                 // Settings destination (see AdminScreen.EnteringPhrase's doc).
                 onAddContact = { adminScreen = AdminScreen.EnteringPhrase },
                 // Update this composable's own `config` snapshot directly
-                // from the known change, rather than reloading right after
-                // — removePairing/setAutoAnswer both run on
-                // CameraAgentService's callExecutor asynchronously, so a
-                // same-frame reload here reliably raced ahead of the
-                // background write and read back the pre-change value (for
-                // setAutoAnswer specifically, the switch visibly showed the
-                // *previous* state after every toggle). No race possible
-                // this way: the outcome is already known.
+                // from the known change, rather than reloading right after —
+                // removePairing runs on CameraAgentService's callExecutor
+                // asynchronously, so a same-frame reload here could race
+                // ahead of the background write and read back the
+                // pre-change value. No race possible this way: the outcome
+                // is already known. Only `config.isValid` (pairings.
+                // isNotEmpty()) actually depends on this; nothing still
+                // reads config.pairings for display (see ContactState.
+                // autoAnswer's doc for why auto-answer moved off this path).
                 onDeleteContact = { id ->
                     service?.removePairing(id)
                     config = config.copy(pairings = config.pairings.filterNot { it.id == id })
                 },
-                onToggleAutoAnswer = { id, enabled ->
-                    service?.setAutoAnswer(id, enabled)
-                    config = config.copy(pairings = config.pairings.map { if (it.id == id) it.copy(autoAnswer = enabled) else it })
-                },
+                onToggleAutoAnswer = { id, enabled -> service?.setAutoAnswer(id, enabled) },
             )
         }
     }

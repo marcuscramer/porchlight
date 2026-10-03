@@ -947,3 +947,61 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeProtocolCons
         |_env| Some(crate::protocol_constants()),
     )
 }
+
+// ---------------------------------------------------------------------------
+// Signal-publish retry queue — see `crate::signal_retry`'s own doc for the
+// full design. `relays_json` is a JSON array of relay-URL strings, same
+// "`Vec<String>` crosses as JSON" convention `nativeCurrentHeartbeatIntervalMs`
+// already uses.
+// ---------------------------------------------------------------------------
+
+fn empty_pending_retries_json() -> String {
+    "[]".to_string()
+}
+
+/// See [`crate::signal_retry::record_pending_publish`]'s own doc. No return
+/// value; malformed input or a panic is a silent no-op — same reasoning as
+/// `nativePruneStalePending`'s own.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRecordPendingPublish<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    event_id: JString<'local>,
+    event_json: JString<'local>,
+    relays_json: JString<'local>,
+    now_ms: jlong,
+) {
+    run_catching(&mut env, |env| {
+        let Some(event_id) = get_string(env, &event_id) else { return };
+        let Some(event_json) = get_string(env, &event_json) else { return };
+        let Some(relays_json) = get_string(env, &relays_json) else { return };
+        let Ok(relays) = serde_json::from_str::<Vec<String>>(&relays_json) else { return };
+        crate::signal_retry::record_pending_publish(&event_id, &event_json, &relays, now_ms);
+    });
+}
+
+/// See [`crate::signal_retry::record_publish_ack`]'s own doc. No return
+/// value; malformed input or a panic is a silent no-op.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRecordPublishAck<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    event_id: JString<'local>,
+    relay: JString<'local>,
+    success: jni::sys::jboolean,
+) {
+    run_catching(&mut env, |env| {
+        let Some(event_id) = get_string(env, &event_id) else { return };
+        let Some(relay) = get_string(env, &relay) else { return };
+        crate::signal_retry::record_publish_ack(&event_id, &relay, success != 0);
+    });
+}
+
+/// See [`crate::signal_retry::due_for_retry`]'s own doc. Returns a
+/// JSON-encoded `Vec<`[`crate::signal_retry::PendingRetry`]`>`, falling back
+/// to `"[]"` on a panic — fail-closed: nothing to retry this tick, same as
+/// any other missed tick.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeDueForRetry<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, now_ms: jlong) -> jstring {
+    encode_or_fallback(&mut env, empty_pending_retries_json, |_env| Some(crate::signal_retry::due_for_retry(now_ms)))
+}

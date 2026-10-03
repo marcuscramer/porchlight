@@ -628,3 +628,37 @@ pub fn protocol_constants() -> String {
         .flatten()
         .unwrap_or_else(|| "{\"signal_kind\":20331,\"wrap_kind\":20336,\"max_name_length\":100,\"pake_live_window_ms\":120000,\"max_sdp_length\":65536,\"max_ice_candidate_length\":4096}".to_string())
 }
+
+// ---------------------------------------------------------------------------
+// Signal-publish retry queue — see `crate::signal_retry`'s own doc for the
+// full design. `relays`/`now_ms` follow this file's own existing
+// conventions: `Vec<String>` crosses directly as a JS array of strings (see
+// `currentHeartbeatIntervalMs`), `now_ms` is `f64` (see `markSeen`'s own
+// doc).
+// ---------------------------------------------------------------------------
+
+/// See [`crate::signal_retry::record_pending_publish`]'s own doc. No return
+/// value; a panic is a silent no-op, same reasoning as `pruneStalePending`'s
+/// own.
+#[wasm_bindgen(js_name = recordPendingPublish)]
+pub fn record_pending_publish(event_id: &str, event_json: &str, relays: Vec<String>, now_ms: f64) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::record_pending_publish(event_id, event_json, &relays, now_ms as i64)));
+}
+
+/// See [`crate::signal_retry::record_publish_ack`]'s own doc. No return
+/// value; a panic is a silent no-op.
+#[wasm_bindgen(js_name = recordPublishAck)]
+pub fn record_publish_ack(event_id: &str, relay: &str, success: bool) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::record_publish_ack(event_id, relay, success)));
+}
+
+/// See [`crate::signal_retry::due_for_retry`]'s own doc. Returns a
+/// JSON-encoded `Vec<`[`crate::signal_retry::PendingRetry`]`>`, falling back
+/// to `"[]"` on a panic — fail-closed, nothing to retry this tick.
+#[wasm_bindgen(js_name = dueForRetry)]
+pub fn due_for_retry(now_ms: f64) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::signal_retry::due_for_retry(now_ms as i64)).ok()))
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "[]".to_string())
+}
