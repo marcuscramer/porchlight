@@ -17,13 +17,21 @@ on:
 
 jobs:
   cargo-test:
-    name: cargo test (call-core, pake-bridge)
+    name: cargo test + doc (call-core, pake-bridge)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo test --workspace
         run: cargo test --workspace --verbose
+      # The call-state and presence invariants live in these crates' docs (see
+      # call-core/src/call_arbitration.rs), so a doc build that warns — a link
+      # that no longer resolves, a link to a private item — fails the build,
+      # same as .githooks/pre-push does locally.
+      - name: cargo doc (warnings are errors)
+        run: cargo doc --no-deps --workspace
+        env:
+          RUSTDOCFLAGS: "-D warnings"
 
   android-build:
     name: Android debug build
