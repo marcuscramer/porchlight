@@ -39,10 +39,10 @@ import org.webrtc.VideoSink
  * Runs the call engine as a foreground service so capture and WebRTC survive
  * when the app is backgrounded, with a persistent notification while active.
  *
- * See `/CALL_STATE.md` at the repo root before changing `onOffer`,
- * `onShouldOffer`, `hangUp`, `requestCall`, `acceptIncomingCall`, or
- * anything else call-arbitration-related — it's the single write-up of the
- * invariants `call-core`'s `call_arbitration` module now enforces. This
+ * See `call-core/src/call_arbitration.rs`'s module docs ("Invariants") before
+ * changing `onOffer`, `onShouldOffer`, `hangUp`, `requestCall`,
+ * `acceptIncomingCall`, or anything else call-arbitration-related — the
+ * single write-up of the invariants that module enforces. This
  * class is the imperative shell around it, forwarding events in and
  * executing whatever `CallEffect`s come back. [activePairingId] is purely a
  * UI-facing mirror of `call-core`'s own state, kept in sync by
@@ -671,7 +671,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
      * [activePairingId] is set directly here for every effect that means
      * "the call slot is now claimed for this pairing" (`CreateOffer`/
      * `SendCall`/`ApplyRemoteOffer`/`StartRinging`) — matches
-     * `CALL_STATE.md` invariant #1: claimed the moment a call *could*
+     * `call_arbitration` invariant #1: claimed the moment a call *could*
      * happen, not once it's accepted. It's cleared the other way, in
      * [onPeerConnected], not here.
      */

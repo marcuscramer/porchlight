@@ -1,8 +1,7 @@
 #!/bin/sh
-# Runs `cargo test` before every push, mirroring what CALL_STATE.md itself
-# treats as the actual enforcement mechanism for every call-state invariant
-# ("this state machine has exactly one implementation... verified by cargo
-# test"). Not a substitute for `.github/workflows/ci.yml` (hosted CI runs
+# Runs `cargo test` before every push — the actual enforcement mechanism for
+# every call-state invariant (the state machine has exactly one implementation,
+# call-core/src/call_arbitration.rs, documented and tested there). Not a substitute for `.github/workflows/ci.yml` (hosted CI runs
 # this same `cargo test` workspace plus a full real Android cross-compile
 # this hook deliberately skips — see below) — this is the fast, local,
 # *pre*-push layer in front of it: instant feedback before a regression

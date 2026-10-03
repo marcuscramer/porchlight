@@ -804,10 +804,10 @@ function confirmPeer(pairingId, publicKeyHex) {
 // Call arbitration + WebRTC (shared across every pairing — only one call
 // can be live at a time, mirrors CameraAgentService/WebRtcEngine).
 //
-// See /CALL_STATE.md at the repo root before changing onOfferReceived,
-// onShouldOffer, hangUp, requestCall, acceptIncomingCall, or anything else
-// call-arbitration-related — it's the single write-up of the invariants
-// call-core's `call_arbitration` module enforces. This file is the
+// See call-core/src/call_arbitration.rs's module docs ("Invariants") before
+// changing onOfferReceived, onShouldOffer, hangUp, requestCall,
+// acceptIncomingCall, or anything else call-arbitration-related — the single
+// write-up of the invariants that module enforces. This file is the
 // imperative shell around it: forward events in, execute whatever
 // CallEffects come back.
 // ---------------------------------------------------------------------------
@@ -985,7 +985,7 @@ function releaseLocalStream() {
  * CameraAgentService.applyCallEffects on Android. activePairingId is set
  * directly here for every effect that means "the call slot is now claimed"
  * (CreateOffer/SendCall/ApplyRemoteOffer/StartRinging) — matches
- * CALL_STATE.md invariant #1: the slot is claimed the moment a call *could*
+ * call_arbitration invariant #1: the slot is claimed the moment a call *could*
  * happen, not once it's accepted. It's cleared the other way, inside
  * closePeerConnection, not here.
  */
@@ -1111,7 +1111,7 @@ function onShouldOffer(pairingId, callId, ownPubkeyHex, peerPubkeyHex) {
  * See callCore.handleOffer's own doc for the full guard sequence (busy,
  * already-active redelivery, already-ringing redelivery, then the
  * pubkey-tie-break fast-path that applies immediately with no ring —
- * CALL_STATE.md invariant #3). Auto-answer isn't a web feature — every
+ * call_arbitration invariant #3). Auto-answer isn't a web feature — every
  * incoming call rings for a manual Accept/Decline. Mirrors
  * CameraAgentService.onOffer.
  */

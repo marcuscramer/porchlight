@@ -32,6 +32,34 @@
 //! `HashMap<String, PresenceStatus>` makes "offline but also busy" a state
 //! that cannot be constructed at all — see [`set_status`]/[`ensure_status`]
 //! for the single choke point every transition now goes through.
+//!
+//! # Invariants
+//!
+//! - **A pairing's presence is one `PresenceStatus`, and `Busy` implies
+//!   `Online` structurally.** `handle_peer_busy_reply` does its own
+//!   `Offline` -> `Busy` transition through the single choke point rather
+//!   than assuming the shell already called `mark_seen` for the same
+//!   message. Test:
+//!   `handle_peer_busy_reply_transitions_a_still_offline_pairing_structurally_not_by_convention`.
+//! - **A `leaving` message *removes* `last_seen_at`; the timeout sweep only
+//!   leaves it stale** for a later `mark_seen` to overwrite. Not
+//!   interchangeable. Test:
+//!   `handle_leaving_message_removes_last_seen_and_transitions_offline`.
+//! - **Deleting a pairing takes two calls**: `remove_pairing` clears this
+//!   module's own state but can't (and shouldn't) touch
+//!   `call_arbitration`'s deferred-call state, so both shells' removal also
+//!   calls `call_arbitration::forget_pairing`. Test:
+//!   `remove_pairing_with_an_in_flight_deferred_call_also_needs_forget_pairing`.
+//! - **A `hello` is answered at most once per pairing per
+//!   `HELLO_REPLY_MIN_INTERVAL_MS`, and the answer never carries `hello`
+//!   itself** — two devices can't ping-pong however they misbehave. Tests:
+//!   `hello_replies_are_rate_limited_per_pairing`,
+//!   `a_reload_hello_is_answered_once_and_the_answer_does_not_ask_for_another`.
+//! - **Nothing speeds the heartbeat up for a call.** A call placed to an
+//!   offline-looking peer asks for exactly one prompt `hello` heartbeat
+//!   (`CallEffect::KickHeartbeat`); only a live pairing attempt shortens the
+//!   tick. Tests: `a_deferred_call_does_not_speed_the_heartbeat_up`,
+//!   `a_live_pairing_attempt_uses_the_pairing_cadence_a_dead_one_does_not`.
 
 use crate::call_arbitration::CallEffect;
 use serde::Serialize;

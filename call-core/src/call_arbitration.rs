@@ -1,7 +1,9 @@
-//! Pure decision logic for the call-arbitration state machine, ported from
-//! `CameraAgentService`/`NostrSignalingClient.kt` and `app.js`'s call
-//! arbitration + WebRTC section — see `CALL_STATE.md` for the invariants
-//! this is checked against.
+//! Pure decision logic for the call-arbitration state machine — the one
+//! implementation, shared by Android (`CallCoreBridge.kt`) and web (`app.js`,
+//! via the WASM build), both of which are thin shells that forward events in
+//! and execute whatever `CallEffect`s come back. Ported from what used to be
+//! two hand-mirrored copies; see the **Invariants** section below for the
+//! rules this has to keep, and **Changing this module** for how.
 //!
 //! **Single global slot, not a per-id registry**: only one call is ever
 //! active device-wide, regardless of how many pairings exist, so
@@ -18,6 +20,140 @@
 //! inferred here); wake locks/foreground-service bring-up (Android-only);
 //! and presence/online tracking itself — this module only owns what happens
 //! *once* a peer is known to be online, via [`handle_peer_online`].
+//!
+//! # The state
+//!
+//! `CallState`'s `slot` is the device's one call slot, exactly one of:
+//!
+//! - `Idle` — nothing claimed.
+//! - `Ringing(PendingOffer)` — an incoming offer has arrived but hasn't been
+//!   handed to the `PeerConnection` yet: counting down (auto-answer) or
+//!   waiting on a human tap. Holds the raw SDP plus an `ice_buffer` for ICE
+//!   candidates that arrive during that window (trickle ICE means the caller
+//!   can be sending them before ringing resolves, and the `PeerConnection`
+//!   doesn't exist yet to hand them to — see `handle_remote_ice`'s
+//!   `Buffered` outcome).
+//! - `Claimed(ActiveCall)` — a call is placed or being negotiated:
+//!   `pairing_id` and `call_id` (distinct because a pairing can be called
+//!   again right after an attempt ends; every offer/answer/ice/bye is tagged
+//!   with `call_id`, and anything arriving with a different one for the same
+//!   pairing is a stale or abandoned attempt, not the current call), plus
+//!   `answer_applied`/`offer_applied`/`connected_once`.
+//!
+//! Only one pairing can hold the slot (any variant but `Idle`) at a time; a
+//! second pairing trying to call in meanwhile gets a `busy` reply
+//! (`handle_should_offer`/`handle_offer`'s first guard). The `PeerConnection`
+//! itself is deliberately **not** owned here — only
+//! `has_active_peer_connection: bool` where a function still needs it, passed
+//! in by the shell. It exists only once an offer has actually been applied,
+//! i.e. *after* ringing resolves: the line between "a slot is reserved" and
+//! "a call is actually being negotiated".
+//!
+//! # Invariants
+//!
+//! Each is enforced by a specific function here and pinned by the named
+//! test(s). Three real bugs shipped in one feature (per-contact auto-answer)
+//! because these rules existed only as scattered comments — this list is the
+//! one place a change can check itself against. A violation is fixed *here*
+//! (then `cargo test`), and both platforms inherit it; never hand-patch one
+//! shell and port it later.
+//!
+//! 1. **The slot is claimed the moment a call *could* happen, not once it's
+//!    accepted.** `request_call`, `handle_offer` and `handle_should_offer`
+//!    all move the slot out of `Idle` immediately — before any human has
+//!    decided — so a second contact calling during that window gets `busy`
+//!    instead of silently racing the first. Don't gate the claim on
+//!    acceptance. Tests:
+//!    `request_call_claims_slot_and_offers_when_peer_online_and_own_pubkey_wins_tiebreak`,
+//!    `handle_should_offer_claims_slot_and_rings_respecting_auto_answer`,
+//!    `handle_offer_fresh_call_starts_ringing_not_apply`.
+//! 2. **`Ringing` is the *only* thing acceptance gates.** The
+//!    `PeerConnection` must not exist until a real accept (manual tap,
+//!    countdown reaching zero, or the tie-break bypass in #3). Anything that
+//!    needs "is this call really live" must check the `PeerConnection`, not
+//!    whether the slot is merely claimed. Tests:
+//!    `handle_offer_fresh_call_starts_ringing_not_apply`,
+//!    `accept_incoming_call_hands_back_offer_and_buffered_ice_then_clears_pending`.
+//! 3. **An offer that completes a call *this side* already placed must skip
+//!    ringing.** The side that loses the pubkey tie-break sends a plain
+//!    `call` and *waits for the other side's offer* as the next step of the
+//!    same call; that offer arrives through the same `handle_offer` path as
+//!    a fresh incoming call. The check is the slot already being `Claimed`
+//!    with this exact `pairing_id`/`call_id` — then apply immediately
+//!    (`ApplyRemoteOffer`), no ring, no countdown. Without it a caller sees
+//!    its own outgoing call reflected back as a bogus "Incoming call from X".
+//!    It only reproduces in *one* tie-break direction, so both are tests:
+//!    `handle_offer_applies_immediately_when_it_completes_a_call_this_side_already_placed_tiebreak_direction_a`
+//!    and `..._direction_b`.
+//! 4. **Ending a call reads the pairing/call id before tearing anything
+//!    down.** `hang_up` captures both with one `std::mem::replace` that
+//!    clears the slot in the same statement — structurally atomic — then
+//!    builds the `SendBye` from the captured values. The bug class (reading
+//!    state after clearing it) can't be reintroduced in a shell: there is one
+//!    `hang_up`. Tests: `hang_up_sends_bye_using_the_captured_pairing_and_call_id`,
+//!    `hang_up_clears_state_so_a_second_hang_up_sends_no_bye`.
+//! 5. **A media/capture failure only means "end the call" if a call is
+//!    actually in progress.** `should_end_call_on_media_failure` is trivial
+//!    today (the input echoed back) but kept as one place to route through:
+//!    ringing acquires the camera before anyone has decided anything, so it
+//!    must not be as fragile to a camera failure as an active call is. Web
+//!    has no camera-failure trigger wired to it yet — a known, accepted gap.
+//!    Test: `should_end_call_on_media_failure_matches_has_active_peer_connection`.
+//! 6. **Every teardown path clears the incoming-call state, not just the
+//!    slot.** `hang_up`/`handle_peer_hangup`/`handle_peer_left`/
+//!    `forget_pairing` all set the slot to `Idle` (one enum, so that clears a
+//!    live ring in the same motion) and emit `ClearIncomingCallTimer`. A
+//!    stale countdown tick firing after the call resolved some other way is
+//!    the bug this guards; `tick_incoming_call_countdown` also re-checks the
+//!    slot is still `Ringing` for this exact id, but that's a second line of
+//!    defense, not a substitute for clearing eagerly. Tests:
+//!    `handle_peer_hangup_clears_a_pending_ring_too`,
+//!    `forget_pairing_closes_the_active_call_without_sending_bye`,
+//!    `tick_incoming_call_countdown_is_stale_after_accept`.
+//! 7. **Redelivery of the same offer/call while already ringing is a no-op,
+//!    not a reset.** Public relays redeliver ephemeral events under load; a
+//!    redelivered offer must not restart an auto-answer countdown from 5 or
+//!    re-ring a contact already ringing. `handle_offer` guards on the slot
+//!    being `Claimed` with its offer applied, and on being `Ringing` for the
+//!    same ids; `handle_should_offer` on the pairing already owning the
+//!    slot. Tests: `handle_offer_redelivered_while_ringing_is_a_no_op`,
+//!    `handle_should_offer_is_a_no_op_when_redelivered_for_the_same_call`,
+//!    `handle_should_offer_is_a_no_op_for_a_second_call_id_while_already_active`,
+//!    `handle_offer_is_a_no_op_when_already_active_with_a_real_peer_connection`,
+//!    `handle_offer_redelivered_after_accept_before_pc_exists_is_a_no_op`.
+//! 8. **The pubkey tie-break is the *first* thing `handle_should_offer`
+//!    checks, before busy/redelivery** — a `call` from the side that should
+//!    have lost is a silent no-op. Every other message type is forwarded
+//!    into this crate unconditionally with Rust deciding each no-op; `call`
+//!    gets the same treatment. Test:
+//!    `handle_should_offer_no_ops_when_this_side_would_lose_the_tiebreak`.
+//! 9. **A `busy` reply releases the *caller's own* slot**, not just a
+//!    contact-list badge — otherwise a caller bounced by busy is stuck on the
+//!    calling screen, unable to call anyone. `handle_peer_busy` is gated like
+//!    `handle_peer_hangup` (both `pairing_id` and `call_id` must match the
+//!    active attempt). Tests:
+//!    `handle_peer_busy_releases_the_callers_slot_when_pairing_and_call_id_match`,
+//!    `handle_peer_busy_requires_both_pairing_and_call_id_to_match`.
+//!
+//! # Changing this module
+//!
+//! - Change the Rust and add a test; don't "port to both platforms". What
+//!   genuinely stays per-platform: the `answerApplied`/real-`signalingState`
+//!   second guard in `WebRtcEngine.kt`'s `handleRemoteAnswer` and `app.js`'s
+//!   `onAnswer` (a deliberate second guard on WebRTC state this module can't
+//!   see); wake-lock/foreground-service lifecycle (Android only); and the
+//!   shells' timer-loop scheduling mechanics (intentionally different, no
+//!   observable consequence).
+//! - Anything that runs *before* a call is accepted (a preview, a background
+//!   acquisition) must not be able to kill the slot or a pending offer on
+//!   failure — see #5.
+//! - A new way for a call to end must go through the shared teardown path
+//!   (#6), and must capture the ids before clearing (#4).
+//! - Touching `request_call`, `handle_peer_online`, `handle_should_offer` or
+//!   `wins_tiebreak`: add tests for **both** tie-break directions — one
+//!   can't prove the other (#3). A live two-peer test is still worth doing
+//!   for anything touching real WebRTC negotiation, though the tie-break
+//!   *decision* is fully covered by `cargo test`.
 
 use serde::Serialize;
 #[cfg(test)]
@@ -379,7 +515,7 @@ pub fn handle_should_offer(pairing_id: &str, call_id: &str, own_pubkey_hex: &str
 
 /// Mirrors `onOffer`/`onOfferReceived`: busy guard, already-active
 /// redelivery guard, already-ringing redelivery guard, then the
-/// pubkey-tie-break fast-path (`CALL_STATE.md` invariant #3: an offer that
+/// pubkey-tie-break fast-path (module-doc invariant #3: an offer that
 /// completes a call *this side* already placed applies immediately, no
 /// ring). Otherwise claims the slot, stores the pending offer, and tells
 /// the shell to acquire media + start ringing. `auto_answer` is looked up
@@ -565,7 +701,7 @@ pub fn tick_incoming_call_countdown(pairing_id: &str, call_id: &str) -> TickOutc
     TickOutcome::Continue { seconds_remaining: pending.seconds_remaining }
 }
 
-/// **The `CALL_STATE.md` invariant #4 function.** Captures `pairing_id`/
+/// **The module-doc invariant #4 function.** Captures `pairing_id`/
 /// `call_id` before clearing anything, so `SendBye` is built from the
 /// captured values, never re-read after the slot is already cleared.
 /// Clears `pending_offer`/timer state and any deferred-call bookkeeping.
@@ -1034,7 +1170,7 @@ mod tests {
     #[test]
     fn handle_offer_applies_immediately_when_it_completes_a_call_this_side_already_placed_tiebreak_direction_b() {
         let _guard = reset_state_for_test();
-        // Same as above, opposite tie-break direction — CALL_STATE.md
+        // Same as above, opposite tie-break direction — module-doc
         // invariant #3 only reproduces in one direction, so both need
         // covering.
         let id = fresh_id();
