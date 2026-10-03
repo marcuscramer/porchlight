@@ -18,6 +18,9 @@
     <string name="settings_renameRow">Dieses Gerät umbenennen</string>
     <string name="settings_kioskMode_title">Kiosk-Modus</string>
     <string name="settings_kioskMode_subtitle">Startet Porchlight automatisch nach dem (Neu-)Start und wenn der Bildschirmschoner endet</string>
+    <string name="settings_callWakeUp_title">Anruf-Aufwecken</string>
+    <string name="settings_callWakeUp_on">An: Ein Anruf schaltet den Fernseher auf das Portal um und erscheint über dem Bildschirmschoner</string>
+    <string name="settings_callWakeUp_off">Aus: Aus dem Ruhezustand erscheint ein Anruf eventuell nicht. Zum Einschalten siehe README</string>
     <string name="settings_update_checking">Suche nach Updates…</string>
     <string name="settings_update_disabled">Die Update-Prüfung ist für diese Version nicht eingerichtet.</string>
     <string name="settings_update_upToDate">Du hast die neueste Version (v%1$s)</string>
@@ -78,6 +81,7 @@
     <string name="contacts_statusBusy">Beschäftigt</string>
     <string name="contacts_statusOnline">Online</string>
     <string name="contacts_statusOffline">Offline</string>
+    <string name="accessibility_serviceDescription">Erlaubt Porchlight, bei einem eingehenden Anruf die Home-Taste zu drücken, damit Ihr Fernseher auf dieses Gerät umschaltet. Es kann nichts auf dem Bildschirm sehen oder lesen.</string>
     <string name="notifications_callStatusChannelName">Anrufstatus</string>
     <string name="notifications_callStatusChannelDesc">Zeigt an, wenn Kamera und Mikrofon während eines Anrufs aktiv sind.</string>
     <string name="notifications_connectedTitle">Porchlight — verbunden</string>

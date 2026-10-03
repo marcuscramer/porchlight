@@ -26,6 +26,11 @@
       "title": "Kiosk mode",
       "subtitle": "Bring Porchlight up automatically after (re)boot and when the screensaver ends"
     },
+    "callWakeUp": {
+      "title": "Call wake-up",
+      "on": "On: a call switches the TV to the Portal and shows over the screensaver",
+      "off": "Off: from sleep, a call may not show. See the README to turn it on"
+    },
     "update": {
       "checking": "Checking for updates…",
       "disabled": "Update checking isn't set up for this build.",
@@ -98,6 +103,9 @@
     "statusBusy": "Busy",
     "statusOnline": "Online",
     "statusOffline": "Offline"
+  },
+  "accessibility": {
+    "serviceDescription": "Lets Porchlight press the Home key when a call comes in, so your TV switches to this device. It can't see or read anything on the screen."
   },
   "notifications": {
     "callStatusChannelName": "Call status",

@@ -104,28 +104,32 @@ you don't need to do this manually — its provisioning kit disables the
 same verifier automatically as part of setup, for the same reason (it
 needs to install and update apps on-device too).
 
-### Letting an incoming call beat the screensaver
+### Waking the Portal for incoming calls
 
-On real Portal TV hardware, the stock screensaver can re-take the screen
-right as an incoming call tries to show, so the call is there but never
-visible. Porchlight can prevent this by turning the screensaver off for
-the few seconds a call is actually ringing (and back on the moment it's
-answered, declined, or times out) — but doing that needs a permission
-Android only grants from `adb shell`, the same way as the self-update
-step above:
+When a call arrives while the Portal is asleep, its screensaver can take over
+the screen so the call is there but never visible, and the TV stays on
+whatever input it was showing. Porchlight can fix both: when a call rings it
+presses the Portal's Home key, which ends the screensaver and makes the
+Portal switch the TV to its input. For that, Porchlight needs its accessibility
+service switched on. The Portal's own Settings has no screen for this, so it
+is one `adb` command, run once from the same computer as the install:
 
 ```
-adb shell pm grant dev.porchlight.app android.permission.WRITE_SECURE_SETTINGS
+adb shell 'cur=$(settings get secure enabled_accessibility_services); [ "$cur" = null ] && cur=""; settings put secure enabled_accessibility_services "${cur:+$cur:}dev.porchlight.app/dev.porchlight.app.CallWakeUpAccessibilityService"; settings put secure accessibility_enabled 1'
 ```
 
-This is a one-time step, same computer as the initial install. Skip it
-and calls still ring but may be hidden behind the screensaver.
+The command adds Porchlight to the Portal's existing accessibility services
+and doesn't replace them (the Portal already runs two of its own), so run it
+only once. The service can't read anything on the screen; all Porchlight does
+with it is press Home when a call rings. Settings in Porchlight shows whether
+it is on. Without it, calls still ring, but from sleep they may be hidden
+behind the screensaver, and the TV doesn't switch. You may see the Portal's
+home screen for a fraction of a second as a call comes in.
 
-Unlike the self-update step, **this one isn't covered by Immortal's own
-provisioning kit** even if you're using Immortal — provisioning grants
-that permission to Immortal's own app, not Porchlight's, since permission
-grants are always per-app. Run the command above for Porchlight either
-way.
+To turn it off again, read the list with
+`adb shell settings get secure enabled_accessibility_services`, remove the
+`dev.porchlight.app/…` entry and put the rest back with
+`adb shell settings put secure enabled_accessibility_services "<the rest>"`.
 
 ## Using the web version
 

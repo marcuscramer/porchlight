@@ -18,6 +18,9 @@
     <string name="settings_renameRow">Rename this device</string>
     <string name="settings_kioskMode_title">Kiosk mode</string>
     <string name="settings_kioskMode_subtitle">Bring Porchlight up automatically after (re)boot and when the screensaver ends</string>
+    <string name="settings_callWakeUp_title">Call wake-up</string>
+    <string name="settings_callWakeUp_on">On: a call switches the TV to the Portal and shows over the screensaver</string>
+    <string name="settings_callWakeUp_off">Off: from sleep, a call may not show. See the README to turn it on</string>
     <string name="settings_update_checking">Checking for updates…</string>
     <string name="settings_update_disabled">Update checking isn\'t set up for this build.</string>
     <string name="settings_update_upToDate">You\'re on the latest version (v%1$s)</string>
@@ -78,6 +81,7 @@
     <string name="contacts_statusBusy">Busy</string>
     <string name="contacts_statusOnline">Online</string>
     <string name="contacts_statusOffline">Offline</string>
+    <string name="accessibility_serviceDescription">Lets Porchlight press the Home key when a call comes in, so your TV switches to this device. It can\'t see or read anything on the screen.</string>
     <string name="notifications_callStatusChannelName">Call status</string>
     <string name="notifications_callStatusChannelDesc">Shows when the camera and microphone are active during a call.</string>
     <string name="notifications_connectedTitle">Porchlight — connected</string>

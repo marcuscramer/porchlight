@@ -212,7 +212,7 @@ class MainActivity : ComponentActivity() {
      */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        service?.hangUp()
+        service?.onUserLeaveHint()
     }
 
     private fun requestPermissions() {
@@ -1137,6 +1137,19 @@ private fun AdminChoiceScreen(
                             }
                         },
                     )
+                }
+                // Status only: turning this on is a one-time adb step (see the
+                // README), since the Portal's Settings has no screen for it.
+                val callWakeUpOn by CallWakeUpAccessibilityService.enabled.collectAsState()
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.settings_callWakeUp_title), color = GeneratedColor.colorTextDim)
+                        Text(
+                            stringResource(if (callWakeUpOn) R.string.settings_callWakeUp_on else R.string.settings_callWakeUp_off),
+                            color = GeneratedColor.colorTextDim,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
                 val installInteractionSource = remember { MutableInteractionSource() }
                 val installFocused by installInteractionSource.collectIsFocusedAsState()

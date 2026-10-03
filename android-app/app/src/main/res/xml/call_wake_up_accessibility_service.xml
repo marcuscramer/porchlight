@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Deliberately minimal: no event types, no window content, no gestures, no
+     key filtering. The only thing this service can do is perform a global
+     action, and the only one the app performs is Home (see
+     CallWakeUpAccessibilityService). -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="false"
+    android:canPerformGestures="false"
+    android:canRequestFilterKeyEvents="false"
+    android:description="@string/accessibility_serviceDescription" />

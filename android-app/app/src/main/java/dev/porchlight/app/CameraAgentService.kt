@@ -18,7 +18,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.provider.Settings
 import android.util.Log
 import com.vitorpamplona.quartz.nip01Core.core.hexToByteArray
 import com.vitorpamplona.quartz.nip01Core.core.toHexKey
@@ -252,11 +251,10 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     // not yet playing anything back.
     private var ringtoneTrack: android.media.AudioTrack? = null
 
-    // Non-null while a call has suppressed the system screensaver — the value
-    // it held before suppression, so restoreScreensaver() can put back what
-    // was actually there rather than assuming it was always on. See
-    // suppressScreensaverForCall's own doc for why this exists at all.
-    private var screensaverEnabledBeforeCall: Int? = null
+    // Puts the incoming-call screen in front of the screensaver and switches
+    // the TV input, by pressing Home through the optional accessibility
+    // service — see RingScreenGuard.
+    private val ringScreenGuard by lazy { RingScreenGuard(this, mainHandler, ::bringToForeground) }
 
     // True while ringtoneTrack is only the settings screen's volume preview,
     // not a real ring — a real ring arriving mid-preview takes over.
@@ -393,7 +391,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         incomingCallTickFuture = null
         stopRingtone()
         cancelIncomingCallNotification()
-        restoreScreensaver()
+        ringScreenGuard.cancel()
         if (_state.value.incomingCall != null) updateState { it.copy(incomingCall = null) }
     }
 
@@ -688,9 +686,11 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                     // much as an already-answered call does — see
                     // bringToForeground's own doc.
                     acquireCallWakeLock()
-                    suppressScreensaverForCall()
-                    bringToForeground()
                     postIncomingCallNotification(effect.pairingId)
+                    ringScreenGuard.ringStarted {
+                        cancelIncomingCallNotification()
+                        postIncomingCallNotification(effect.pairingId)
+                    }
                     startRingtone()
                     updateState { it.copy(incomingCall = IncomingCall(autoAnswer = effect.autoAnswer, secondsRemaining = effect.secondsRemaining)) }
                     if (effect.autoAnswer) scheduleNextCountdownTick(effect.pairingId, effect.callId)
@@ -804,6 +804,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         startForeground(NOTIF_ID, buildNotification(getString(R.string.notifications_connectingStatus)))
         acquireWakeLock()
         registerScreensaverReceiver()
+        ringScreenGuard.register()
 
         val executor = Executors.newSingleThreadScheduledExecutor()
         callExecutor = executor
@@ -869,6 +870,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         releaseWakeLock()
         releaseCallWakeLock()
         unregisterScreensaverReceiver()
+        ringScreenGuard.unregister()
         _state.value = AgentState(statusText = getString(R.string.notifications_disconnectedStatus))
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -880,6 +882,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         releaseWakeLock()
         releaseCallWakeLock()
         unregisterScreensaverReceiver()
+        ringScreenGuard.unregister()
         super.onDestroy()
     }
 
@@ -1202,47 +1205,10 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(INCOMING_CALL_NOTIF_ID)
     }
 
-    /**
-     * Found live on real (stock, non-Immortal) Portal hardware: neither
-     * [bringToForeground]'s startActivity() nor the full-screen-intent
-     * notification above can reliably hold the screen once a call is
-     * ringing — the Portal's own screensaver re-engages repeatedly (5
-     * separate resume/pause cycles within one second, confirmed in logcat),
-     * driven by Meta's proprietary presence/ambient layer, not anything in
-     * AOSP's own DreamManagerService (confirmed by reading Android 9's real
-     * source: it has no mechanism to even notice an activity launching).
-     * Immortal — the alternative launcher this project already depends on —
-     * solves the identical problem the same way: `WRITE_SECURE_SETTINGS`
-     * (a signature permission, grantable via a one-time `adb shell pm
-     * grant`, same mechanism as this app's own self-update feature) to
-     * flip the `screensaver_enabled` secure setting off, removing the
-     * screensaver entirely for the duration rather than fighting it.
-     * Confirmed live: with this set, the incoming-call screen stayed up
-     * continuously for a full ~9s ring with zero further screensaver
-     * re-engagement, versus every prior attempt losing within ~1s.
-     *
-     * A silent no-op without the permission (checked explicitly rather than
-     * letting the `SecurityException` happen, so a missing grant can never
-     * crash a ringing call) — the ring still works, it just can't win
-     * against the screensaver on a Portal that hasn't granted this.
-     */
-    private fun suppressScreensaverForCall() {
-        if (checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
-        if (screensaverEnabledBeforeCall != null) return // already suppressed for this call
-        runCatching {
-            val resolver = contentResolver
-            screensaverEnabledBeforeCall = Settings.Secure.getInt(resolver, "screensaver_enabled", 1)
-            Settings.Secure.putInt(resolver, "screensaver_enabled", 0)
-        }
-    }
-
-    /** Restores whatever [suppressScreensaverForCall] actually found — not a
-     * hardcoded re-enable — so a Portal that already had its screensaver off
-     * for its own reasons doesn't get it silently turned back on. */
-    private fun restoreScreensaver() {
-        val previous = screensaverEnabledBeforeCall ?: return
-        screensaverEnabledBeforeCall = null
-        runCatching { Settings.Secure.putInt(contentResolver, "screensaver_enabled", previous) }
+    /** The person pressed Home while the app was in front: hang up, unless it was this app's own press. */
+    fun onUserLeaveHint() {
+        if (ringScreenGuard.pressedHomeRecently()) return
+        hangUp()
     }
 
     /**

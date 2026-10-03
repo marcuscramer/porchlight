@@ -140,10 +140,15 @@ number.
 - **Optional setup steps weaken the device further.** To let the app update
   itself, the README has you turn off Meta's install verifier and Android's
   package verification as a whole, so the device stops checking any
-  sideloaded install. To let an incoming call beat the screensaver, you grant
-  this app `WRITE_SECURE_SETTINGS`, which lets it change system settings; it
-  only changes the screensaver setting, but any app holding that permission
-  could do more. Both are optional, and skipping them costs only convenience.
+  sideloaded install. To let an incoming call show over the screensaver and
+  switch the TV to the Portal, you switch on Porchlight's accessibility
+  service with one `adb` command. The service is declared with no access to
+  screen content and no events, and the app only uses it to press the Home
+  key when a call rings. Android's accessibility mechanism is powerful in
+  general, so this still means trusting the app's code and its updates, but it
+  is a much narrower grant than a permission to change system settings, which
+  Porchlight does not use. Both are optional, and skipping them costs only
+  convenience.
 - **The platform itself is unmaintained.** Meta Portal hardware is
   discontinued and Meta doesn't guarantee further updates, so any weakness in
   the underlying Android build stays unpatched, with or without Porchlight.

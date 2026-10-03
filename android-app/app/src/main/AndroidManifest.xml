@@ -25,16 +25,6 @@
          manifest permission can shortcut. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- Lets an incoming call suppress the system screensaver for the duration
-         of the ring (see CameraAgentService's suppressScreensaverForCall doc) —
-         a signature permission, declaring it alone grants nothing; a human
-         must separately run `adb shell pm grant dev.porchlight.app
-         android.permission.WRITE_SECURE_SETTINGS` once per device. A silent
-         no-op without it: the ring still works, it just can't win against the
-         screensaver on a Portal running stock (non-Immortal) software. -->
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
-
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 
@@ -119,5 +109,24 @@
             android:enabled="true"
             android:exported="false" />
 
+
+        <!-- Optional: lets an incoming call press the Home key, which makes the
+             Portal switch the TV to its input. Off until the person enables it
+             in Settings > Accessibility; minimal by design (see
+             res/xml/call_wake_up_accessibility_service.xml). exported="true" is
+             required for the system to bind it; the BIND_ACCESSIBILITY_SERVICE
+             permission means only the system can. -->
+        <service
+            android:name=".CallWakeUpAccessibilityService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/call_wake_up_accessibility_service" />
+        </service>
     </application>
 </manifest>
