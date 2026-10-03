@@ -904,6 +904,7 @@ function clearIncomingCall() {
  * when the real offer gets created and sent). A no-op if there's nothing
  * pending. */
 async function acceptIncomingCall() {
+  primeVideos();
   const json = callCore.acceptIncomingCall(Date.now());
   if (!json) return;
   const result = JSON.parse(json);
@@ -939,6 +940,17 @@ function setVideoSource(video, stream) {
   // in Low Power Mode (even for a muted video), and then puts its own big
   // play button over the video.
   keepPlaying(video);
+}
+
+/** Asks every video to play right now, while the tap that started or
+ * accepted the call is still fresh. iOS Safari only lets a page start video
+ * after a user gesture, and the call's own video arrives seconds later, long
+ * after the gesture has expired. A play() made inside the gesture is
+ * remembered for the element, so when the stream is attached afterwards it
+ * is allowed to start without another tap. Must run first in the tap
+ * handler, before anything async. */
+function primeVideos() {
+  for (const video of document.querySelectorAll('video')) video.play().catch(() => {});
 }
 
 /** Starts [video], and if the browser refuses (Safari, for an unmuted stream
@@ -1099,6 +1111,7 @@ function applyCallEffects(effectsJson) {
  * pre-check blocking this call would mean that prompt never fires at all,
  * leaving no way to grant access in the first place. */
 function requestCall(pairingId) {
+  primeVideos();
   const peer = findPairing(pairingId);
   if (!peer) return;
   const ownPubkeyHex = ownPubkeyHexFor(peer.ownPrivateKeyHex);
