@@ -432,26 +432,16 @@ pub fn is_online(pairing_id: &str) -> bool {
 }
 
 /// See [`crate::presence::current_heartbeat_interval_ms`]'s own doc.
-/// `now_ms`: see [`mark_seen`]'s own doc for why `f64`. Returns `u32`
-/// directly (a plain JS `number`) — small enough this module doesn't need
+/// Returns `u32` directly (a plain JS `number`) — small enough this module doesn't need
 /// the `handleTimeout`-style `u32`-at-the-boundary workaround, it just is
 /// one already. Falls back to [`crate::presence::HEARTBEAT_INTERVAL_MS`]
 /// (the slow, steady-state cadence) on a panic, matching
 /// `nativeCurrentHeartbeatIntervalMs`'s own fail-closed choice — a
 /// performance detail, not a correctness one.
 #[wasm_bindgen(js_name = currentHeartbeatIntervalMs)]
-pub fn current_heartbeat_interval_ms(pending_pairing_ids: Vec<String>, now_ms: f64) -> u32 {
-    catch_unwind(std::panic::AssertUnwindSafe(|| crate::presence::current_heartbeat_interval_ms(&pending_pairing_ids, now_ms as i64)))
+pub fn current_heartbeat_interval_ms(pending_pairing_ids: Vec<String>) -> u32 {
+    catch_unwind(std::panic::AssertUnwindSafe(|| crate::presence::current_heartbeat_interval_ms(&pending_pairing_ids)))
         .unwrap_or(crate::presence::HEARTBEAT_INTERVAL_MS)
-}
-
-/// See [`crate::presence::prune_stale_pending`]'s own doc. No return value;
-/// a panic is a silent no-op (the map just doesn't get pruned this tick —
-/// it'll be pruned next time, same as any other missed tick, matching
-/// `nativePruneStalePending`'s own reasoning).
-#[wasm_bindgen(js_name = pruneStalePending)]
-pub fn prune_stale_pending(current_pending_ids: Vec<String>) {
-    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::presence::prune_stale_pending(&current_pending_ids)));
 }
 
 /// See [`crate::presence::remove_pairing`]'s own doc. No return value — a
@@ -644,8 +634,7 @@ pub fn protocol_constants() -> String {
 // ---------------------------------------------------------------------------
 
 /// See [`crate::signal_retry::record_pending_publish`]'s own doc. No return
-/// value; a panic is a silent no-op, same reasoning as `pruneStalePending`'s
-/// own.
+/// value; a panic is a silent no-op, same reasoning as every other no-return export here.
 #[wasm_bindgen(js_name = recordPendingPublish)]
 pub fn record_pending_publish(event_id: &str, event_json: &str, payload_json: &str, relays: Vec<String>, now_ms: f64) {
     let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::record_pending_publish(event_id, event_json, payload_json, &relays, now_ms as i64)));

@@ -710,6 +710,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                 is CallCoreBridge.CallEffect.SendBye -> signaling?.hangUp(effect.pairingId, effect.callId)
                 CallCoreBridge.CallEffect.ClosePeerConnection -> engine?.closePeer()
                 CallCoreBridge.CallEffect.ClearIncomingCallTimer -> clearIncomingCall()
+                CallCoreBridge.CallEffect.KickHeartbeat -> signaling?.kickHeartbeat()
                 is CallCoreBridge.CallEffect.ShowCallOutcome ->
                     updateState { it.copy(pendingCallOutcome = PendingCallOutcome(effect.pairingId, effect.reason, engine?.iceDiagnosis())) }
             }
@@ -986,7 +987,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                         pairingId = pairing.id,
                         ownPrivateKeyHex = pairing.ownPrivateKeyHex,
                         rendezvousTag = snapshot?.rendezvousTag,
-                        bootstrapPayload = snapshot?.payload,
+                        bootstrapPayloads = snapshot?.payloads ?: emptyList(),
                         bootstrapTarget = snapshot?.candidatePubkey,
                     )
                 }

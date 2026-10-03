@@ -615,40 +615,20 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIsOnline<'lo
 /// See [`crate::presence::current_heartbeat_interval_ms`]'s own doc.
 /// `pending_pairing_ids_json` is a JSON array of pairing-id strings.
 /// Returns [`crate::presence::HEARTBEAT_INTERVAL_MS`] (the slow, steady-
-/// state cadence) on a panic or malformed input — the fail-closed choice,
-/// matching [`crate::call_arbitration::any_call_wanted`]'s own fail-closed
-/// reasoning: a performance detail, not a correctness one.
+/// state cadence) on a panic or malformed input — the fail-closed choice:
+/// a performance detail, not a correctness one.
 #[no_mangle]
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCurrentHeartbeatIntervalMs<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     pending_pairing_ids_json: JString<'local>,
-    now_ms: jlong,
 ) -> jni::sys::jint {
     let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
         let json = get_string(&mut env, &pending_pairing_ids_json)?;
         let pending: Vec<String> = serde_json::from_str(&json).ok()?;
-        Some(crate::presence::current_heartbeat_interval_ms(&pending, now_ms))
+        Some(crate::presence::current_heartbeat_interval_ms(&pending))
     }));
     result.ok().flatten().unwrap_or(crate::presence::HEARTBEAT_INTERVAL_MS) as jni::sys::jint
-}
-
-/// See [`crate::presence::prune_stale_pending`]'s own doc.
-/// `current_pending_ids_json` is a JSON array of pairing-id strings. No
-/// return value; malformed input or a panic is a silent no-op (the map just
-/// doesn't get pruned this tick — it'll be pruned next time, same as any
-/// other missed tick).
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativePruneStalePending<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    current_pending_ids_json: JString<'local>,
-) {
-    run_catching(&mut env, |env| {
-        let Some(json) = get_string(env, &current_pending_ids_json) else { return };
-        let Ok(current) = serde_json::from_str::<Vec<String>>(&json) else { return };
-        crate::presence::prune_stale_pending(&current);
-    });
 }
 
 /// See [`crate::presence::remove_pairing`]'s own doc. No return value; a
@@ -967,8 +947,7 @@ fn empty_pending_retries_json() -> String {
 }
 
 /// See [`crate::signal_retry::record_pending_publish`]'s own doc. No return
-/// value; malformed input or a panic is a silent no-op — same reasoning as
-/// `nativePruneStalePending`'s own.
+/// value; malformed input or a panic is a silent no-op.
 #[no_mangle]
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRecordPendingPublish<'local>(
     mut env: JNIEnv<'local>,

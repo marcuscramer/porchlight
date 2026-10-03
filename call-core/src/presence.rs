@@ -41,11 +41,16 @@ use std::collections::HashMap;
 /// `pub(crate)` so the JNI/WASM bindings can fail closed to this exact
 /// value on a panic, rather than hand-duplicating the number.
 pub(crate) const HEARTBEAT_INTERVAL_MS: u32 = 25_000;
-/// Faster cadence used while a pairing is still pending confirmation and
-/// young (see [`current_heartbeat_interval_ms`]).
-const FAST_HEARTBEAT_INTERVAL_MS: u32 = 3_000;
-/// How long after a pending pairing is first seen the fast cadence applies.
-const FAST_HEARTBEAT_WINDOW_MS: i64 = 30_000;
+/// Cadence while a pairing attempt is live (see
+/// [`current_heartbeat_interval_ms`]). Not the main mechanism for getting a
+/// joiner through quickly — answering a newcomer immediately is
+/// (`Effect::KickHeartbeat` on first sight of a candidate, see
+/// `handle_bootstrap_message`) — but the backstop for a lost message, and
+/// the only thing that gets a pairing message out when the *other* side is
+/// the one who has to speak first. Used to be 3s for the first 30s and then
+/// the steady 25s, which both wasted traffic early and left a late joiner
+/// waiting out 25s.
+const PAIRING_REPUBLISH_INTERVAL_MS: u32 = 10_000;
 /// How long without a heartbeat before a peer is declared offline by
 /// [`check_online_timeouts`].
 const ONLINE_TIMEOUT_MS: i64 = 70_000;
@@ -74,7 +79,6 @@ pub enum PresenceStatus {
 pub(crate) struct PresenceState {
     last_seen_at: HashMap<String, i64>,
     status: HashMap<String, PresenceStatus>,
-    pending_created_at: HashMap<String, i64>,
     last_hello_reply_at: HashMap<String, i64>,
     /// Whether the next heartbeat this device builds should carry `hello`.
     /// Starts `true`: a freshly started process (a browser reload, an app
@@ -84,11 +88,15 @@ pub(crate) struct PresenceState {
 }
 
 impl PresenceState {
+    /// Same as [`request_hello`], for a caller already holding the state lock.
+    pub(crate) fn request_hello(&mut self) {
+        self.hello_pending = true;
+    }
+
     pub(crate) fn new() -> Self {
         PresenceState {
             last_seen_at: HashMap::new(),
             status: HashMap::new(),
-            pending_created_at: HashMap::new(),
             last_hello_reply_at: HashMap::new(),
             hello_pending: true,
         }
@@ -343,45 +351,29 @@ pub fn is_online(pairing_id: &str) -> bool {
     current_status(&state.presence, pairing_id) != PresenceStatus::Offline
 }
 
-/// Mirrors `currentHeartbeatIntervalMs` exactly, including its side effect
-/// of seeding `pending_created_at` the first time a given pending id is
-/// seen (matching both platforms' `getOrPut`/`entry().or_insert()` shape).
-/// Fast cadence applies whenever any deferred call is waiting
-/// ([`crate::call_arbitration::any_call_wanted`] — both platforms already
-/// call this inline in this exact function today, so this just relocates
-/// an existing call, not new coupling) or any pending pairing is still
-/// within [`FAST_HEARTBEAT_WINDOW_MS`] of first being seen.
-pub fn current_heartbeat_interval_ms(pending_pairing_ids: &[String], now_ms: i64) -> u32 {
-    let mut state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
-    if crate::call_arbitration::inner_any_call_wanted(&state.call) {
-        return FAST_HEARTBEAT_INTERVAL_MS;
-    }
-    for pairing_id in pending_pairing_ids {
-        let created_at = *state.presence.pending_created_at.entry(pairing_id.clone()).or_insert(now_ms);
-        if now_ms - created_at < FAST_HEARTBEAT_WINDOW_MS {
-            return FAST_HEARTBEAT_INTERVAL_MS;
-        }
+/// The delay before the next heartbeat tick: [`PAIRING_REPUBLISH_INTERVAL_MS`]
+/// while any of `pending_pairing_ids` has a live pairing attempt (its
+/// bootstrap messages are republished on the same tick), otherwise the
+/// steady [`HEARTBEAT_INTERVAL_MS`]. Everything else that wants a prompt
+/// heartbeat asks for exactly one — a `hello` (see [`mark_seen`]) or an
+/// explicit kick — instead of raising the rate: a deferred call used to
+/// speed everything up to 3s even though our own heartbeats do nothing to
+/// make the peer answer sooner.
+pub fn current_heartbeat_interval_ms(pending_pairing_ids: &[String]) -> u32 {
+    let state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    if pending_pairing_ids.iter().any(|id| state.pairing_registry.contains_key(id)) {
+        return PAIRING_REPUBLISH_INTERVAL_MS;
     }
     HEARTBEAT_INTERVAL_MS
 }
 
-/// Mirrors `pruneStalePendingCreatedAt`/the inline `retainAll` in
-/// Kotlin's `heartbeatTick` — called by the shell at the top of its own
-/// heartbeat-tick function, same as today, so `pending_created_at` doesn't
-/// grow forever for pairings that got confirmed or deleted.
-pub fn prune_stale_pending(current_pending_ids: &[String]) {
-    let mut state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
-    state.presence.pending_created_at.retain(|pairing_id, _| current_pending_ids.contains(pairing_id));
-}
-
-/// Clears `last_seen_at`/`status`/`pending_created_at` for a deleted
+/// Clears `last_seen_at`/`status`/`last_hello_reply_at` for a deleted
 /// contact. Called from both platforms' `removePairing`, alongside
 /// [`crate::call_arbitration::forget_pairing`].
 pub fn remove_pairing(pairing_id: &str) {
     let mut state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     state.presence.last_seen_at.remove(pairing_id);
     state.presence.status.remove(pairing_id);
-    state.presence.pending_created_at.remove(pairing_id);
     state.presence.last_hello_reply_at.remove(pairing_id);
 }
 
@@ -536,57 +528,38 @@ mod tests {
     // --- current_heartbeat_interval_ms ---
 
     #[test]
-    fn current_heartbeat_interval_ms_is_slow_with_no_pending_and_no_wanted_call() {
+    fn current_heartbeat_interval_ms_is_steady_with_nothing_pending() {
         let _guard = reset_state_for_test();
-        assert_eq!(current_heartbeat_interval_ms(&[], 1_000), HEARTBEAT_INTERVAL_MS);
+        assert_eq!(current_heartbeat_interval_ms(&[]), HEARTBEAT_INTERVAL_MS);
     }
 
     #[test]
-    fn current_heartbeat_interval_ms_is_fast_when_a_call_is_wanted() {
+    fn a_deferred_call_does_not_speed_the_heartbeat_up() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
         crate::call_arbitration::request_call(&id, "aaa", "bbb", false, 0);
-        assert_eq!(current_heartbeat_interval_ms(&[], 1_000), FAST_HEARTBEAT_INTERVAL_MS);
+        assert_eq!(current_heartbeat_interval_ms(&[]), HEARTBEAT_INTERVAL_MS);
     }
 
     #[test]
-    fn current_heartbeat_interval_ms_is_fast_within_window_of_a_pending_pairing_then_slows() {
+    fn a_live_pairing_attempt_uses_the_pairing_cadence_a_dead_one_does_not() {
         let _guard = reset_state_for_test();
-        let id = fresh_id();
-        let pending = vec![id.clone()];
-        // First call seeds pending_created_at at now=1_000.
-        assert_eq!(current_heartbeat_interval_ms(&pending, 1_000), FAST_HEARTBEAT_INTERVAL_MS);
-        // Still within the window.
-        assert_eq!(current_heartbeat_interval_ms(&pending, 1_000 + FAST_HEARTBEAT_WINDOW_MS - 1), FAST_HEARTBEAT_INTERVAL_MS);
-        // Past the window: slow, and the seeded created_at wasn't reset by
-        // the calls above (proven by this now actually being slow).
-        assert_eq!(current_heartbeat_interval_ms(&pending, 1_000 + FAST_HEARTBEAT_WINDOW_MS + 1), HEARTBEAT_INTERVAL_MS);
-    }
-
-    // --- prune_stale_pending ---
-
-    #[test]
-    fn prune_stale_pending_removes_entries_not_in_the_current_list() {
-        let _guard = reset_state_for_test();
-        let id_a = fresh_id();
-        let id_b = fresh_id();
-        current_heartbeat_interval_ms(&[id_a.clone(), id_b.clone()], 1_000);
-        prune_stale_pending(std::slice::from_ref(&id_a));
-        // id_b's pending_created_at was pruned, so it re-seeds fresh "now"
-        // rather than reusing the old timestamp — proven by it counting as
-        // fast again arbitrarily far past the original window.
-        let far_future = 1_000 + FAST_HEARTBEAT_WINDOW_MS * 100;
-        assert_eq!(current_heartbeat_interval_ms(std::slice::from_ref(&id_b), far_future), FAST_HEARTBEAT_INTERVAL_MS);
+        let live = fresh_id();
+        let dead = fresh_id();
+        crate::start_attempt(&live, "pubkey-a", "A", "cadence test");
+        assert_eq!(current_heartbeat_interval_ms(std::slice::from_ref(&live)), PAIRING_REPUBLISH_INTERVAL_MS);
+        assert_eq!(current_heartbeat_interval_ms(std::slice::from_ref(&dead)), HEARTBEAT_INTERVAL_MS, "a pending pairing with no live attempt has nothing to republish");
+        crate::cancel_attempt(&live);
+        assert_eq!(current_heartbeat_interval_ms(std::slice::from_ref(&live)), HEARTBEAT_INTERVAL_MS);
     }
 
     // --- remove_pairing ---
 
     #[test]
-    fn remove_pairing_clears_all_three_maps() {
+    fn remove_pairing_clears_the_pairings_presence_state() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
         mark_seen(&id, "aaa", "bbb", 1_000, None, false);
-        current_heartbeat_interval_ms(std::slice::from_ref(&id), 1_000);
         assert!(is_online(&id));
 
         remove_pairing(&id);
@@ -595,10 +568,6 @@ mod tests {
         // time out (no effect emitted) for this id.
         let sweep = check_online_timeouts(1_000 + ONLINE_TIMEOUT_MS + 1);
         assert!(sweep.presence_effects.is_empty(), "{:?}", sweep.presence_effects);
-        // pending_created_at cleared: re-seeds fresh rather than reusing
-        // the old (now long-past-window) timestamp.
-        let far_future = 1_000 + FAST_HEARTBEAT_WINDOW_MS * 100;
-        assert_eq!(current_heartbeat_interval_ms(std::slice::from_ref(&id), far_future), FAST_HEARTBEAT_INTERVAL_MS);
     }
 
     #[test]

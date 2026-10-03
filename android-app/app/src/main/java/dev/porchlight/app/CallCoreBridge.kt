@@ -154,10 +154,7 @@ object CallCoreBridge {
     private external fun nativeIsCallActive(): Boolean
 
     @JvmStatic
-    private external fun nativeCurrentHeartbeatIntervalMs(pendingPairingIdsJson: String, nowMs: Long): Int
-
-    @JvmStatic
-    private external fun nativePruneStalePending(currentPendingIdsJson: String)
+    private external fun nativeCurrentHeartbeatIntervalMs(pendingPairingIdsJson: String): Int
 
     @JvmStatic
     private external fun nativePresenceRemovePairing(pairingId: String)
@@ -244,7 +241,7 @@ object CallCoreBridge {
     /** Everything needed to (re)publish a heartbeat tick for one live
      * pending pairing, all at once — see the Rust crate's own
      * `PendingSnapshot` doc. */
-    data class PendingSnapshot(val rendezvousTag: String, val payload: JSONObject, val candidatePubkey: String?)
+    data class PendingSnapshot(val rendezvousTag: String, val payloads: List<JSONObject>, val candidatePubkey: String?)
 
     /** Effects the caller must actually perform — signaling sends, UI-facing
      * contact-state updates, timer kicks. Mirrors the Rust crate's `Effect`
@@ -279,6 +276,8 @@ object CallCoreBridge {
         data class ShowCallOutcome(val pairingId: String, val callId: String, val reason: CallOutcomeReason) : CallEffect
         data object ClosePeerConnection : CallEffect
         data object ClearIncomingCallTimer : CallEffect
+        /** Send a heartbeat now — see the Rust `CallEffect::KickHeartbeat` doc. */
+        data object KickHeartbeat : CallEffect
     }
 
     enum class CallOutcomeReason { PEER_ENDED, NEVER_CONNECTED, DROPPED }
@@ -359,16 +358,17 @@ object CallCoreBridge {
     fun cancelAttempt(pairingId: String) = nativeCancelAttempt(pairingId)
 
     /** Everything needed to (re)publish a heartbeat tick for one live
-     * pending pairing — rendezvous tag, current payload (`pake1` or
-     * `pake-confirm` depending on how far the exchange has gotten), and
-     * the candidate's pubkey once known. `null` if there's no live attempt
+     * pending pairing — rendezvous tag, the messages to publish (always
+     * `pake1`, plus `pake-confirm` once a candidate's `pake1` has been
+     * processed — see the Rust `build_bootstrap_payload` doc for why both),
+     * and the candidate's pubkey once known. `null` if there's no live attempt
      * for [pairingId]. */
     fun pendingSnapshot(pairingId: String): PendingSnapshot? {
         val json = nativeBuildBootstrapPayload(pairingId) ?: return null
         val obj = JSONObject(json)
         return PendingSnapshot(
             rendezvousTag = obj.getString("rendezvous_tag"),
-            payload = obj.getJSONObject("payload"),
+            payloads = obj.getJSONArray("payloads").let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } },
             candidatePubkey = if (obj.isNull("candidate_pubkey")) null else obj.getString("candidate_pubkey"),
         )
     }
@@ -561,14 +561,9 @@ object CallCoreBridge {
     fun isOnline(pairingId: String): Boolean = nativeIsOnline(pairingId)
 
     /** See the Rust crate's own `presence::current_heartbeat_interval_ms`
-     * doc, including its side effect of seeding `pending_created_at` the
-     * first time a given pending id is seen. */
-    fun currentHeartbeatIntervalMs(pendingPairingIds: List<String>, nowMs: Long): Int =
-        nativeCurrentHeartbeatIntervalMs(JSONArray(pendingPairingIds).toString(), nowMs)
-
-    /** See the Rust crate's own `presence::prune_stale_pending` doc — call
-     * at the top of `heartbeatTick`, same as today. */
-    fun pruneStalePending(currentPendingIds: List<String>) = nativePruneStalePending(JSONArray(currentPendingIds).toString())
+     * doc: the delay until the next heartbeat tick. */
+    fun currentHeartbeatIntervalMs(pendingPairingIds: List<String>): Int =
+        nativeCurrentHeartbeatIntervalMs(JSONArray(pendingPairingIds).toString())
 
     /** See the Rust crate's own `presence::remove_pairing` doc — call
      * alongside [forgetPairing] from `removePairing`. */
@@ -885,6 +880,7 @@ object CallCoreBridge {
                 )
                 "ClosePeerConnection" -> CallEffect.ClosePeerConnection
                 "ClearIncomingCallTimer" -> CallEffect.ClearIncomingCallTimer
+                "KickHeartbeat" -> CallEffect.KickHeartbeat
                 else -> error("CallCoreBridge: unknown call effect kind from native layer: $kind")
             }
         }

@@ -339,21 +339,19 @@ export function checkOnlineTimeouts(now_ms) {
 
 /**
  * See [`crate::presence::current_heartbeat_interval_ms`]'s own doc.
- * `now_ms`: see [`mark_seen`]'s own doc for why `f64`. Returns `u32`
- * directly (a plain JS `number`) — small enough this module doesn't need
+ * Returns `u32` directly (a plain JS `number`) — small enough this module doesn't need
  * the `handleTimeout`-style `u32`-at-the-boundary workaround, it just is
  * one already. Falls back to [`crate::presence::HEARTBEAT_INTERVAL_MS`]
  * (the slow, steady-state cadence) on a panic, matching
  * `nativeCurrentHeartbeatIntervalMs`'s own fail-closed choice — a
  * performance detail, not a correctness one.
  * @param {string[]} pending_pairing_ids
- * @param {number} now_ms
  * @returns {number}
  */
-export function currentHeartbeatIntervalMs(pending_pairing_ids, now_ms) {
+export function currentHeartbeatIntervalMs(pending_pairing_ids) {
     const ptr0 = passArrayJsValueToWasm0(pending_pairing_ids, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.currentHeartbeatIntervalMs(ptr0, len0, now_ms);
+    const ret = wasm.currentHeartbeatIntervalMs(ptr0, len0);
     return ret >>> 0;
 }
 
@@ -865,22 +863,8 @@ export function protocolConstants() {
 }
 
 /**
- * See [`crate::presence::prune_stale_pending`]'s own doc. No return value;
- * a panic is a silent no-op (the map just doesn't get pruned this tick —
- * it'll be pruned next time, same as any other missed tick, matching
- * `nativePruneStalePending`'s own reasoning).
- * @param {string[]} current_pending_ids
- */
-export function pruneStalePending(current_pending_ids) {
-    const ptr0 = passArrayJsValueToWasm0(current_pending_ids, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    wasm.pruneStalePending(ptr0, len0);
-}
-
-/**
  * See [`crate::signal_retry::record_pending_publish`]'s own doc. No return
- * value; a panic is a silent no-op, same reasoning as `pruneStalePending`'s
- * own.
+ * value; a panic is a silent no-op, same reasoning as every other no-return export here.
  * @param {string} event_id
  * @param {string} event_json
  * @param {string} payload_json

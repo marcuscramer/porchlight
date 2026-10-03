@@ -227,7 +227,7 @@ function confirmedPeers() {
   ));
 }
 /** Mirrors NostrSignalingClient.kt's PendingPairing — rendezvousTag/
- * bootstrapPayload/bootstrapTarget are null when there's no *live* attempt
+ * bootstrapPayloads (empty)/bootstrapTarget are null when there's no *live* attempt
  * right now (a fresh page load, or a timed-out/collided attempt): nothing
  * to publish or subscribe for until a human starts a new one. */
 function pendingPairingsList() {
@@ -238,7 +238,7 @@ function pendingPairingsList() {
       pairingId: p.id,
       ownPrivateKeyHex: p.ownPrivateKeyHex,
       rendezvousTag: snapshot ? snapshot.rendezvous_tag : null,
-      bootstrapPayload: snapshot ? snapshot.payload : null,
+      bootstrapPayloads: snapshot ? snapshot.payloads : [],
       bootstrapTarget: snapshot ? snapshot.candidate_pubkey : null,
     };
   });
@@ -470,7 +470,6 @@ function applyPresenceUpdate(json) {
 }
 
 function heartbeatTick() {
-  callCore.pruneStalePending(pendingPairingsList().map((p) => p.pairingId));
   // callCore.isCallActive(): this device's own single call slot, broadcast
   // identically to every contact regardless of who (if anyone) it's
   // actually occupied by. Read once per tick, not once per peer.
@@ -481,19 +480,17 @@ function heartbeatTick() {
   const heartbeat = callCore.buildHeartbeatPayload(deviceName, busy);
   if (heartbeat) for (const peer of confirmedPeers()) sendToConfirmedPeer(peer.pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, () => heartbeat);
   for (const pending of pendingPairingsList()) {
-    if (!pending.rendezvousTag || !pending.bootstrapPayload) continue;
-    sendPairingBootstrap(pending.ownPrivateKeyHex, pending.rendezvousTag, pending.bootstrapTarget, pending.bootstrapPayload);
+    if (!pending.rendezvousTag) continue;
+    for (const payload of pending.bootstrapPayloads) sendPairingBootstrap(pending.ownPrivateKeyHex, pending.rendezvousTag, pending.bootstrapTarget, payload);
   }
 }
 
-/** Adaptive cadence, not a flat interval — see call-core's own
- * `presence::current_heartbeat_interval_ms` doc for the full rationale
- * (the decision itself, including every constant, now lives entirely
- * there). Applies globally (every pairing gets the faster rate while *any*
- * one needs it), not per-pairing — a deliberate simplification, same
- * trade-off as the Kotlin side. */
+/** The delay until the next tick — steady, or shorter while a live pairing
+ * attempt republishes its bootstrap messages on it. See call-core's own
+ * `presence::current_heartbeat_interval_ms` doc: anything else that wants a
+ * prompt heartbeat asks for exactly one (kickHeartbeat + hello) instead. */
 function currentHeartbeatIntervalMs() {
-  return callCore.currentHeartbeatIntervalMs(pendingPairingsList().map((p) => p.pairingId), Date.now());
+  return callCore.currentHeartbeatIntervalMs(pendingPairingsList().map((p) => p.pairingId));
 }
 
 function scheduleHeartbeat(delayMs) {
@@ -1058,6 +1055,11 @@ function applyCallEffects(effectsJson) {
         break;
       case 'ClearIncomingCallTimer':
         clearIncomingCall();
+        break;
+      case 'KickHeartbeat':
+        // A call placed to a peer we think is offline: one immediate
+        // heartbeat carrying `hello` (call-core already requested it).
+        kickHeartbeat();
         break;
       case 'ShowCallOutcome':
         pendingCallOutcome = { pairingId: effect.pairing_id, callId: effect.call_id, reason: effect.reason };

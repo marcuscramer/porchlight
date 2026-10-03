@@ -1063,7 +1063,7 @@ mod full_stack_chain_tests {
         // 1. Alice wants to call Bob, but he's offline right now --
         //    request_call's deferred-call branch.
         let request = call_arbitration::request_call(pairing_id, &alice_pk, &bob_pk, false, 0);
-        assert_eq!(request.effects, vec![call_arbitration::CallEffect::AcquireMedia]);
+        assert_eq!(request.effects, vec![call_arbitration::CallEffect::AcquireMedia, call_arbitration::CallEffect::KickHeartbeat]);
 
         // 2. Bob's device sends its regular gift-wrapped heartbeat,
         //    wrapped from Bob to Alice.

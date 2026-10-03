@@ -186,6 +186,14 @@ pub enum CallEffect {
     ShowCallOutcome { pairing_id: String, call_id: String, reason: CallOutcomeReason },
     ClosePeerConnection,
     ClearIncomingCallTimer,
+    /// Send a heartbeat now, outside the shell's schedule — emitted when a
+    /// call is placed to a peer we believe is offline, together with a
+    /// request that this heartbeat carry `hello` (see
+    /// [`crate::presence::mark_seen`]): if the peer is actually online and we
+    /// merely haven't heard from it (a reload, a missed heartbeat), it answers
+    /// within a round trip and the call proceeds; if it really is offline, its
+    /// own hello on coming back resolves the call.
+    KickHeartbeat,
 }
 
 /// Why a call ended, for [`CallEffect::ShowCallOutcome`] — not every
@@ -262,7 +270,8 @@ fn wins_tiebreak(own_pubkey_hex: &str, peer_pubkey_hex: &str) -> bool {
 /// call. `peer_online` is supplied by the shell's own presence tracking;
 /// this function only decides what happens once that fact is known.
 pub fn request_call(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, peer_online: bool, now_ms: i64) -> RequestCallResult {
-    let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let mut guard = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let app = &mut *guard;
     let state = &mut app.call;
     if let Some(active) = state.slot.pairing_id() {
         if active != pairing_id {
@@ -272,6 +281,7 @@ pub fn request_call(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &st
     let call_id = random_call_id();
 
     if !peer_online {
+        app.presence.request_hello();
         state.deferred_call = Some(DeferredCall { pairing_id: pairing_id.to_string(), call_id: call_id.clone() });
         state.slot = CallSlot::Claimed(ActiveCall {
             pairing_id: pairing_id.to_string(),
@@ -281,7 +291,7 @@ pub fn request_call(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &st
             connected_once: false,
             claimed_at_ms: now_ms,
         });
-        return RequestCallResult { call_id: Some(call_id), effects: vec![CallEffect::AcquireMedia] };
+        return RequestCallResult { call_id: Some(call_id), effects: vec![CallEffect::AcquireMedia, CallEffect::KickHeartbeat] };
     }
 
     if wins_tiebreak(own_pubkey_hex, peer_pubkey_hex) {
@@ -865,7 +875,7 @@ mod tests {
         let id = fresh_id();
         let result = request_call(&id, "aaa", "bbb", false, 0);
         assert!(result.call_id.is_some());
-        assert_eq!(result.effects, vec![CallEffect::AcquireMedia]);
+        assert_eq!(result.effects, vec![CallEffect::AcquireMedia, CallEffect::KickHeartbeat]);
         let effects = handle_peer_online(&id, "aaa", "bbb", 0);
         assert!(matches!(effects.as_slice(), [CallEffect::CreateOffer { .. }]), "{:?}", effects);
     }
@@ -1583,5 +1593,23 @@ mod tests {
         let id = random_call_id();
         assert_eq!(id.len(), 8);
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn a_deferred_call_asks_the_next_heartbeat_to_say_hello() {
+        let _guard = reset_state_for_test();
+        let _ = crate::presence::take_hello(); // consume the start-of-process hello
+        let id = fresh_id();
+        request_call(&id, "aaa", "bbb", false, 0);
+        assert!(crate::presence::take_hello(), "a call to a peer we think is offline asks it to answer");
+    }
+
+    #[test]
+    fn a_call_to_an_online_peer_does_not_ask_for_a_hello() {
+        let _guard = reset_state_for_test();
+        let _ = crate::presence::take_hello();
+        let id = fresh_id();
+        request_call(&id, "aaa", "bbb", true, 0);
+        assert!(!crate::presence::take_hello());
     }
 }

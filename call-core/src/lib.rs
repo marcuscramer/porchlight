@@ -251,29 +251,34 @@ pub fn cancel_attempt(pairing_id: &str) {
 
 /// A JSON-encoded [`PendingSnapshot`] for one live pairing attempt — what
 /// the shell needs, all at once, to (re)publish a heartbeat tick for it:
-/// the rendezvous tag, `pake1` (until a candidate's own `pake1` has
-/// actually been processed) or `pake-confirm` after, and the candidate's
-/// pubkey once known. Returns `None` if there's no live attempt for
-/// `pairing_id`.
+/// the rendezvous tag, the messages to publish, and the candidate's pubkey
+/// once known. Returns `None` if there's no live attempt for `pairing_id`.
+///
+/// **`pake1` is always among the messages, and `pake-confirm` joins it once
+/// this side has processed a candidate's `pake1`.** Relays don't store
+/// ephemeral events, so a peer that joins later only ever sees what is
+/// published *after* it subscribes. If this side stopped publishing its
+/// `pake1` the moment it finished (as an earlier version did), a late joiner
+/// received this side's `pake-confirm` but could never complete its own half
+/// of the exchange — it needs this side's `pake1` for that — and the pairing
+/// fell back to the 120s timeout unless the timing happened to line up.
 pub fn build_bootstrap_payload(pairing_id: &str) -> Option<String> {
     let state = STATE.lock().unwrap_or_else(|p| p.into_inner());
     let attempt = state.pairing_registry.get(pairing_id)?;
-    let payload = match (&attempt.keys, &attempt.local_sealed_name, &attempt.candidate_pubkey) {
-        (Some(keys), Some(sealed_name), Some(_)) => {
-            BootstrapPayload::PakeConfirm { confirmation: keys.confirmation_hex().to_string(), sealed_name: sealed_name.clone() }
-        }
-        _ => BootstrapPayload::Pake1 { outbound: attempt.outbound_hex.clone() },
-    };
+    let mut payloads = vec![BootstrapPayload::Pake1 { outbound: attempt.outbound_hex.clone() }];
+    if let (Some(keys), Some(sealed_name), Some(_)) = (&attempt.keys, &attempt.local_sealed_name, &attempt.candidate_pubkey) {
+        payloads.push(BootstrapPayload::PakeConfirm { confirmation: keys.confirmation_hex().to_string(), sealed_name: sealed_name.clone() });
+    }
     let snapshot = PendingSnapshot {
         rendezvous_tag: attempt.rendezvous_tag.clone(),
-        payload,
+        payloads,
         candidate_pubkey: attempt.candidate_pubkey.clone(),
     };
     serde_json::to_string(&snapshot).ok()
 }
 
 /// Everything the shell needs to (re)publish a heartbeat tick for one live
-/// pending pairing — bundled into one call/lookup rather than three,
+/// pending pairing (`payloads`: each is published as its own event) — bundled into one call/lookup rather than three,
 /// since all of it comes from the same attempt and none of it is useful
 /// without the others. `candidate_pubkey` mirrors
 /// `NostrSignalingClient.PendingPairing.bootstrapTarget`'s own doc: once
@@ -283,7 +288,7 @@ pub fn build_bootstrap_payload(pairing_id: &str) -> Option<String> {
 #[derive(Serialize, Debug, PartialEq)]
 pub struct PendingSnapshot {
     pub rendezvous_tag: String,
-    pub payload: BootstrapPayload,
+    pub payloads: Vec<BootstrapPayload>,
     pub candidate_pubkey: Option<String>,
 }
 
@@ -308,7 +313,8 @@ pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &s
         return vec![];
     }
 
-    if attempt.candidate_pubkey.is_none() {
+    let first_sight = attempt.candidate_pubkey.is_none();
+    if first_sight {
         attempt.candidate_pubkey = Some(sender_pubkey.to_string());
     } else if attempt.candidate_pubkey.as_deref() != Some(sender_pubkey) {
         // A second, distinct sender at this rendezvous tag — refuse
@@ -323,11 +329,24 @@ pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &s
         ];
     }
 
-    match type_ {
+    let mut effects = match type_ {
         "pake1" => handle_pake1(registry, pairing_id, sender_pubkey, payload_json),
         "pake-confirm" => handle_pake_confirm(registry, pairing_id, sender_pubkey, payload_json),
         _ => vec![],
+    };
+    // The first time anyone answers at this rendezvous point, answer back
+    // right now: publish everything we have, addressed to them. They joined
+    // *after* our last periodic publish, so waiting for the next one would
+    // leave them stuck for up to a full interval — and they can't finish
+    // without our `pake1`, which a relay will not replay.
+    if first_sight && attempt_still_live(registry, pairing_id) {
+        effects.push(Effect::KickHeartbeat);
     }
+    effects
+}
+
+fn attempt_still_live(registry: &HashMap<String, PakeAttempt>, pairing_id: &str) -> bool {
+    registry.contains_key(pairing_id)
 }
 
 fn handle_pake1(registry: &mut HashMap<String, PakeAttempt>, pairing_id: &str, sender_pubkey: &str, payload_json: &str) -> Vec<Effect> {
@@ -593,8 +612,12 @@ mod tests {
         (id_a, id_b)
     }
 
+    /// The one `SendBootstrap(pake-confirm)` among `effects` — a first-sight
+    /// message also yields a `KickHeartbeat` (see `handle_bootstrap_message`),
+    /// which is allowed to ride along but nothing else is.
     fn expect_send_confirm(effects: &[Effect]) -> SentConfirm {
-        match effects {
+        let rest: Vec<&Effect> = effects.iter().filter(|e| !matches!(e, Effect::KickHeartbeat)).collect();
+        match rest.as_slice() {
             [Effect::SendBootstrap { payload: BootstrapPayload::PakeConfirm { confirmation, sealed_name }, .. }] => {
                 SentConfirm { confirmation: confirmation.clone(), sealed_name: sealed_name.clone() }
             }
@@ -714,7 +737,9 @@ mod tests {
         // A receives B's pake-confirm BEFORE processing B's pake1 at all —
         // must stash, not error.
         let stash_effects = handle_bootstrap_message(&id_a, "pubkey-b", "pake-confirm", &pake_confirm_json(&b_confirm));
-        assert!(stash_effects.is_empty(), "an early pake-confirm must be stashed silently: {stash_effects:?}");
+        // Stashed (nothing resolves yet); the only effect is the first-sight
+        // kick that makes this side publish its own pake1 right away.
+        assert_eq!(stash_effects, vec![Effect::KickHeartbeat], "an early pake-confirm must be stashed: {stash_effects:?}");
 
         // Now A processes B's pake1 — this must trigger the stashed
         // recheck and resolve immediately, in the same call.
@@ -889,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn build_bootstrap_payload_is_pake1_before_a_candidate_confirms_and_pake_confirm_after() {
+    fn build_bootstrap_payload_is_pake1_before_a_candidate_confirms_and_pake1_plus_pake_confirm_after() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
         let a = start_attempt(&id_a, "pubkey-a", "Alice", "payload shape test");
@@ -901,7 +926,33 @@ mod tests {
         let _ = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
         let after = build_bootstrap_payload(&id_a).unwrap();
         assert!(after.contains("\"type\":\"pake-confirm\""), "{after}");
+        assert!(after.contains("\"type\":\"pake1\""), "pake1 must keep being republished for a late joiner: {after}");
         let _ = a; // silence unused warning if reordered later
+    }
+
+    #[test]
+    fn a_late_joiner_resolves_from_what_the_waiting_side_republishes() {
+        let id_a = fresh_pairing_id();
+        let id_b = fresh_pairing_id();
+        let _a = start_attempt(&id_a, "pubkey-a", "Alice", "late joiner");
+        // A has been waiting; B only now types the phrase and publishes its pake1.
+        let b = start_attempt(&id_b, "pubkey-b", "Bob", "late joiner");
+        let effects_a = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
+        assert!(effects_a.contains(&Effect::KickHeartbeat), "A must answer immediately: {effects_a:?}");
+        let a_confirm = expect_send_confirm(&effects_a);
+
+        // B never saw A's original pake1 (published before B subscribed). All it
+        // gets is what A republishes next: the snapshot's payloads.
+        let snapshot: serde_json::Value = serde_json::from_str(&build_bootstrap_payload(&id_a).unwrap()).unwrap();
+        let payloads = snapshot["payloads"].as_array().unwrap();
+        let a_pake1 = payloads.iter().find(|p| p["type"] == "pake1").expect("A republishes its pake1")["outbound"].as_str().unwrap().to_string();
+
+        let effects_b = handle_bootstrap_message(&id_b, "pubkey-a", "pake1", &pake1_json(&a_pake1));
+        let b_confirm = expect_send_confirm(&effects_b);
+        let resolved_b = handle_bootstrap_message(&id_b, "pubkey-a", "pake-confirm", &pake_confirm_json(&a_confirm));
+        assert!(resolved_b.iter().any(|e| matches!(e, Effect::SetConfirmedCandidate { .. })), "{resolved_b:?}");
+        let resolved_a = handle_bootstrap_message(&id_a, "pubkey-b", "pake-confirm", &pake_confirm_json(&b_confirm));
+        assert!(resolved_a.iter().any(|e| matches!(e, Effect::SetConfirmedCandidate { .. })), "{resolved_a:?}");
     }
 
     #[test]

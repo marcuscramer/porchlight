@@ -73,8 +73,8 @@ data class CandidatePeer(val publicKey: String, val name: String)
  *
  * Presence is a client-side heartbeat here, not a network primitive: Nostr
  * has no membership list. A confirmed pairing gets a heartbeat every
- * `presence::HEARTBEAT_INTERVAL_MS` normally, faster while something needs
- * quick detection (see [currentHeartbeatIntervalMs]/[kickHeartbeat]); its
+ * `presence::HEARTBEAT_INTERVAL_MS`, plus one immediately whenever something
+ * needs a prompt answer (see [currentHeartbeatIntervalMs]/[kickHeartbeat]); its
  * peer is considered online if one arrived within
  * `presence::ONLINE_TIMEOUT_MS`, checked on [monitor]'s own tick — the
  * decision itself lives entirely in `call-core`'s `presence` module,
@@ -180,8 +180,8 @@ class NostrSignalingClient(
     )
 
     /**
-     * A pairing awaiting confirmation. [rendezvousTag] and [bootstrapPayload]
-     * are null when there's no *live* attempt right now (e.g. this device
+     * A pairing awaiting confirmation. [rendezvousTag] and [bootstrapPayloads]
+     * are null/empty when there's no *live* attempt right now (e.g. this device
      * restarted mid-attempt, or the attempt already timed out/collided) —
      * heartbeatTick() simply skips publishing anything for it in that case.
      * [bootstrapTarget] is the peer's pubkey once discovered from their own
@@ -193,7 +193,7 @@ class NostrSignalingClient(
         val pairingId: String,
         val ownPrivateKeyHex: String,
         val rendezvousTag: String?,
-        val bootstrapPayload: JSONObject?,
+        val bootstrapPayloads: List<JSONObject>,
         val bootstrapTarget: String?,
     )
 
@@ -500,7 +500,6 @@ class NostrSignalingClient(
     }
 
     private fun heartbeatTick() {
-        CallCoreBridge.pruneStalePending(resolver.pendingPairings().map { it.pairingId })
         // isCallActive(): this device's own single call slot, broadcast
         // identically to every contact regardless of who (if anyone) it's
         // actually occupied by. Read once per tick, not once per peer.
@@ -512,29 +511,22 @@ class NostrSignalingClient(
         if (heartbeat != null) for (peer in resolver.confirmedPeers()) sendToConfirmedPeer(peer) { heartbeat }
         for (pending in resolver.pendingPairings()) {
             val tag = pending.rendezvousTag ?: continue
-            val payload = pending.bootstrapPayload ?: continue
-            publishBootstrap(pending.ownPrivateKeyHex, tag, pending.bootstrapTarget, payload)
+            for (payload in pending.bootstrapPayloads) publishBootstrap(pending.ownPrivateKeyHex, tag, pending.bootstrapTarget, payload)
         }
     }
 
     /**
-     * Adaptive cadence, not a flat interval: while anything actually needs
-     * fast detection — a pairing attempt new enough a human is plausibly
-     * still watching it, or a call attempt waiting on an offline peer —
-     * heartbeats (and bootstrap re-publishes) go out at `call-core`'s own
-     * `presence::FAST_HEARTBEAT_INTERVAL_MS` instead of the normal
-     * `presence::HEARTBEAT_INTERVAL_MS` (the decision itself lives in
-     * `CallCoreBridge.currentHeartbeatIntervalMs`). Motivated by a real
-     * ~28s detection lag seen in testing a freshly-confirmed pairing under
-     * an earlier flat-interval design. Applies globally (every pairing
-     * gets the faster rate while *any* one needs it), not per-pairing — a
-     * deliberate simplification trading a little extra relay traffic for
-     * simpler code.
+     * Slower or faster only for one reason: a live pairing attempt republishes
+     * its bootstrap messages on this same tick, so the tick runs more often
+     * while one exists (the decision, and the cadence itself, live in
+     * `call-core`'s `presence::current_heartbeat_interval_ms`). Everything else
+     * that wants a prompt heartbeat — a call placed to an offline-looking peer,
+     * regained connectivity, a peer coming online — asks for exactly one via
+     * [kickHeartbeat] and a `hello`, instead of raising the rate.
      */
     private fun currentHeartbeatIntervalMs(): Long {
-        val now = System.currentTimeMillis()
         val pendingIds = resolver.pendingPairings().map { it.pairingId }
-        return CallCoreBridge.currentHeartbeatIntervalMs(pendingIds, now).toLong()
+        return CallCoreBridge.currentHeartbeatIntervalMs(pendingIds).toLong()
     }
 
     private fun scheduleHeartbeat(delayMs: Long) {
