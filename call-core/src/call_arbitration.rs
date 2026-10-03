@@ -33,7 +33,7 @@ const AUTO_ANSWER_COUNTDOWN_SECONDS: u32 = 5;
 /// phone-ring timeouts (long enough that a slow network or a slow human
 /// isn't punished, short enough that a lost message doesn't strand someone
 /// on "Calling…" indefinitely).
-const CALL_ANSWER_TIMEOUT_MS: i64 = 60_000;
+pub(crate) const CALL_ANSWER_TIMEOUT_MS: i64 = 60_000;
 
 /// The one call this device is currently placing, ringing for, or
 /// negotiating. The payload of [`CallSlot::Claimed`].

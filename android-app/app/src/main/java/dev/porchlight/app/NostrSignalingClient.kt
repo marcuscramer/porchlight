@@ -216,7 +216,13 @@ class NostrSignalingClient(
     private val relayUrls: Set<NormalizedRelayUrl> =
         RELAYS.mapNotNull { it.normalizeRelayUrlOrNull() }.toSet()
 
-    private val httpClient = OkHttpClient()
+    // pingInterval: without it OkHttp never notices a relay socket that died
+    // silently (NAT mapping expired, Wi-Fi roam, relay restart with no FIN) —
+    // the connection stays "open" while every publish vanishes and nothing
+    // arrives, with connectedRelays still counting it as healthy. A ping every
+    // 30s fails such a socket within one missed pong, which fires the normal
+    // disconnect/reconnect path.
+    private val httpClient = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
     private val websocketBuilder = object : WebsocketBuilder {
         override fun build(url: NormalizedRelayUrl, out: WebSocketListener): WebSocket =
             BasicOkHttpWebSocket(url, { httpClient }, out)
@@ -278,7 +284,17 @@ class NostrSignalingClient(
                 executor.safeExecute {
                     val wasEmpty = connectedRelays.isEmpty()
                     connectedRelays.add(relay.url)
-                    if (wasEmpty && connectedRelays.isNotEmpty()) listener.onSignalingConnected()
+                    if (wasEmpty && connectedRelays.isNotEmpty()) {
+                        listener.onSignalingConnected()
+                        // Signaling just came back (or came up for the first
+                        // time — the t=0 heartbeat in connect() went out
+                        // before any relay was connected): what this device
+                        // believes about its peers is stale or empty, and
+                        // theirs about this one may be too. Say hello now
+                        // rather than waiting out a full heartbeat interval.
+                        CallCoreBridge.requestHello()
+                        kickHeartbeat()
+                    }
                 }
             }
             override fun onDisconnected(relay: IRelayClient) {
@@ -448,8 +464,15 @@ class NostrSignalingClient(
     private fun dispatchFromConfirmedPeer(pairing: ConfirmedPeer, message: CallCoreBridge.SignalMessage?) {
         val pairingId = pairing.pairingId
         val ownPubkeyHex = ownPubkeyHexFor(pairing.ownPrivateKeyHex)
-        val peerBusy = (message as? CallCoreBridge.SignalMessage.Heartbeat)?.busy
-        listener.onPresenceUpdate(CallCoreBridge.markSeen(pairingId, ownPubkeyHex, pairing.peerPublicKey, System.currentTimeMillis(), peerBusy))
+        val heartbeat = message as? CallCoreBridge.SignalMessage.Heartbeat
+        val presence = CallCoreBridge.markSeen(pairingId, ownPubkeyHex, pairing.peerPublicKey, System.currentTimeMillis(), heartbeat?.busy, heartbeat?.hello == true)
+        // A peer that just came online asked for an immediate answer (see
+        // CallCoreBridge.PresenceEffect.ReplyHeartbeat) — a signaling-layer
+        // matter, so it's handled here and never reaches the UI listener.
+        if (presence.presenceEffects.any { it is CallCoreBridge.PresenceEffect.ReplyHeartbeat && it.pairingId == pairingId }) {
+            sendHeartbeatTo(pairing, CallCoreBridge.isCallActive())
+        }
+        listener.onPresenceUpdate(presence.copy(presenceEffects = presence.presenceEffects.filterNot { it is CallCoreBridge.PresenceEffect.ReplyHeartbeat }))
         message ?: return
         when (message) {
             is CallCoreBridge.SignalMessage.Heartbeat -> {
@@ -482,9 +505,11 @@ class NostrSignalingClient(
         // identically to every contact regardless of who (if anyone) it's
         // actually occupied by. Read once per tick, not once per peer.
         val busy = CallCoreBridge.isCallActive()
-        for (peer in resolver.confirmedPeers()) {
-            sendToConfirmedPeer(peer) { CallCoreBridge.buildHeartbeatPayload(resolver.deviceName(), busy) }
-        }
+        // Built once per tick, not once per peer: whether this heartbeat
+        // carries `hello` is consumed by the build itself (see
+        // `presence::take_hello`), so one payload has to serve every peer.
+        val heartbeat = CallCoreBridge.buildHeartbeatPayload(resolver.deviceName(), busy)
+        if (heartbeat != null) for (peer in resolver.confirmedPeers()) sendToConfirmedPeer(peer) { heartbeat }
         for (pending in resolver.pendingPairings()) {
             val tag = pending.rendezvousTag ?: continue
             val payload = pending.bootstrapPayload ?: continue
@@ -590,6 +615,14 @@ class NostrSignalingClient(
     fun sendIce(pairingId: String, sdpMid: String?, sdpMLineIndex: Int, candidate: String, callId: String) =
         sendConfirmedOrPending(pairingId) { CallCoreBridge.buildIcePayload(sdpMid, sdpMLineIndex, candidate, callId) }
 
+    /** One ordinary heartbeat to just [peer], right now — the answer to its
+     * `hello`. Deliberately a fresh build: [CallCoreBridge.buildHeartbeatPayload]
+     * only sets `hello` once per [CallCoreBridge.requestHello], never here
+     * (that would make two devices answer each other forever). */
+    private fun sendHeartbeatTo(peer: ConfirmedPeer, busy: Boolean) {
+        sendToConfirmedPeer(peer) { CallCoreBridge.buildHeartbeatPayload(resolver.deviceName(), busy) }
+    }
+
     private fun sendConfirmedOrPending(pairingId: String, buildPayload: () -> String?) {
         val peer = resolver.confirmedPeers().find { it.pairingId == pairingId } ?: return
         sendToConfirmedPeer(peer, buildPayload)
@@ -653,7 +686,7 @@ class NostrSignalingClient(
             try {
                 val wrapJson = CallCoreBridge.buildWrappedEvent(ownPrivateKeyHex, targetPubkeyHex, payloadJson) ?: return@launch
                 val wrapEvent = Event.fromJsonOrNull(wrapJson) ?: return@launch
-                publishAndQueueMisses(wrapEvent, wrapJson)
+                publishAndQueueMisses(wrapEvent, wrapJson, payloadJson)
             } catch (t: Throwable) {
                 Log.e(TAG, "failed to encrypt/publish to $targetPubkeyHex", t)
             }
@@ -670,13 +703,13 @@ class NostrSignalingClient(
      * onIncomingMessage override. Runs on [executor] (via [scope]'s own
      * dispatcher), same as every other read of [connectedRelays].
      */
-    private fun publishAndQueueMisses(event: Event, eventJson: String) {
+    private fun publishAndQueueMisses(event: Event, eventJson: String, payloadJson: String) {
         val now = System.currentTimeMillis()
         val available = CallCoreBridge.availableRelays(relayUrls.map { it.url }, now).toSet()
         val targets = relayUrls.filter { it.url in available }.toSet()
         if (targets.isNotEmpty()) client.publish(event, targets)
         val missed = relayUrls.filter { it !in targets || it !in connectedRelays }.map { it.url }
-        if (missed.isNotEmpty()) CallCoreBridge.recordPendingPublish(event.id, eventJson, missed, now)
+        if (missed.isNotEmpty()) CallCoreBridge.recordPendingPublish(event.id, eventJson, payloadJson, missed, now)
     }
 
     /** Republishes whatever call-core says is still outstanding — called
@@ -701,7 +734,7 @@ class NostrSignalingClient(
             try {
                 val eventJson = CallCoreBridge.buildBootstrapEvent(ownPrivateKeyHex, rendezvousTag, targetPubkeyHex, payload.toString()) ?: return@launch
                 val event = Event.fromJsonOrNull(eventJson) ?: return@launch
-                publishAndQueueMisses(event, eventJson)
+                publishAndQueueMisses(event, eventJson, payload.toString())
             } catch (t: Throwable) {
                 Log.e(TAG, "failed to publish bootstrap message at $rendezvousTag", t)
             }

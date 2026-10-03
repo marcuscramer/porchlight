@@ -130,7 +130,10 @@ object CallCoreBridge {
     // crate's own `nativeMarkSeen` doc for why JNI needs a sentinel here
     // instead of a real nullable boolean.
     @JvmStatic
-    private external fun nativeMarkSeen(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, nowMs: Long, peerBusy: Int): String
+    private external fun nativeMarkSeen(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, nowMs: Long, peerBusy: Int, peerHello: Boolean): String
+
+    @JvmStatic
+    private external fun nativeRequestHello()
 
     @JvmStatic
     private external fun nativeHandleLeavingMessage(pairingId: String): String
@@ -222,7 +225,7 @@ object CallCoreBridge {
     private external fun nativeProtocolConstants(): String?
 
     @JvmStatic
-    private external fun nativeRecordPendingPublish(eventId: String, eventJson: String, relaysJson: String, nowMs: Long)
+    private external fun nativeRecordPendingPublish(eventId: String, eventJson: String, payloadJson: String, relaysJson: String, nowMs: Long)
 
     @JvmStatic
     private external fun nativeRecordPublishResult(eventId: String, relay: String, accepted: Boolean, reason: String, nowMs: Long)
@@ -327,6 +330,10 @@ object CallCoreBridge {
      * `onPresenceUpdate` implementer for that. */
     sealed interface PresenceEffect {
         data class SetStatus(val pairingId: String, val status: PresenceStatus) : PresenceEffect
+        /** Send [pairingId]'s peer one ordinary heartbeat right now — see the
+         * Rust crate's own `presence::PresenceEffect::ReplyHeartbeat` doc.
+         * Handled by [NostrSignalingClient] itself, never forwarded. */
+        data class ReplyHeartbeat(val pairingId: String) : PresenceEffect
     }
 
     /** What every presence-mutating call hands back — see the Rust crate's
@@ -508,8 +515,13 @@ object CallCoreBridge {
      * `"heartbeat"` (the only payload that actually carries this field);
      * pass whatever was parsed (or wasn't found) straight through rather
      * than branching on message type at the call site. */
-    fun markSeen(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, nowMs: Long, peerBusy: Boolean?): PresenceUpdateResult =
-        parsePresenceUpdateResult(nativeMarkSeen(pairingId, ownPubkeyHex, peerPubkeyHex, nowMs, peerBusy.toSentinelInt()))
+    fun markSeen(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, nowMs: Long, peerBusy: Boolean?, peerHello: Boolean): PresenceUpdateResult =
+        parsePresenceUpdateResult(nativeMarkSeen(pairingId, ownPubkeyHex, peerPubkeyHex, nowMs, peerBusy.toSentinelInt(), peerHello))
+
+    /** See the Rust crate's own `presence::request_hello` doc: the next
+     * heartbeat built asks every peer for an immediate reply. Call when
+     * signaling connectivity returns. */
+    fun requestHello() = nativeRequestHello()
 
     /** See the Rust crate's own `presence::handle_leaving_message` doc —
      * call for the `"leaving"` wire-message case. */
@@ -647,7 +659,7 @@ object CallCoreBridge {
      * now go through [buildHeartbeatPayload]/etc. and [parseSignalPayload]
      * instead. */
     sealed interface SignalMessage {
-        data class Heartbeat(val name: String, val busy: Boolean?) : SignalMessage
+        data class Heartbeat(val name: String, val busy: Boolean?, val hello: Boolean) : SignalMessage
         data object Leaving : SignalMessage
         data class Bye(val callId: String) : SignalMessage
         data class Busy(val callId: String) : SignalMessage
@@ -688,9 +700,11 @@ object CallCoreBridge {
 
     /** See the Rust crate's own `signal_retry::record_pending_publish` doc:
      * call right after the real publish attempt, with whichever [relays]
-     * (plain URL strings) are already known to have missed it. */
-    fun recordPendingPublish(eventId: String, eventJson: String, relays: Collection<String>, nowMs: Long) =
-        nativeRecordPendingPublish(eventId, eventJson, JSONArray(relays).toString(), nowMs)
+     * (plain URL strings) are already known to have missed it, and the plain
+     * [payloadJson] the event wraps (call-core decides from it whether this
+     * kind of message is worth retrying at all). */
+    fun recordPendingPublish(eventId: String, eventJson: String, payloadJson: String, relays: Collection<String>, nowMs: Long) =
+        nativeRecordPendingPublish(eventId, eventJson, payloadJson, JSONArray(relays).toString(), nowMs)
 
     /** See the Rust crate's own `signal_retry::record_publish_result` doc:
      * one relay's real outcome for [eventId]; [reason] is the relay's own
@@ -770,7 +784,7 @@ object CallCoreBridge {
         val json = nativeParseSignalPayload(payloadJson) ?: return null
         val obj = JSONObject(json)
         return when (val type = obj.getString("type")) {
-            "heartbeat" -> SignalMessage.Heartbeat(obj.getString("name"), if (obj.has("busy")) obj.getBoolean("busy") else null)
+            "heartbeat" -> SignalMessage.Heartbeat(obj.getString("name"), if (obj.has("busy")) obj.getBoolean("busy") else null, obj.optBoolean("hello", false))
             "leaving" -> SignalMessage.Leaving
             "bye" -> SignalMessage.Bye(obj.getString("callId"))
             "busy" -> SignalMessage.Busy(obj.getString("callId"))
@@ -903,6 +917,7 @@ object CallCoreBridge {
             val effectObj = presenceArray.getJSONObject(i)
             when (val kind = effectObj.getString("kind")) {
                 "SetStatus" -> PresenceEffect.SetStatus(effectObj.getString("pairing_id"), PresenceStatus.valueOf(effectObj.getString("status").uppercase()))
+                "ReplyHeartbeat" -> PresenceEffect.ReplyHeartbeat(effectObj.getString("pairing_id"))
                 else -> error("CallCoreBridge: unknown presence effect kind from native layer: $kind")
             }
         }

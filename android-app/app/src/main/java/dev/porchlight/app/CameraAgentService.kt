@@ -1024,6 +1024,8 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                 is CallCoreBridge.PresenceEffect.SetStatus -> updateContact(effect.pairingId) {
                     it.copy(status = effect.status, connected = if (effect.status == CallCoreBridge.PresenceStatus.OFFLINE) false else it.connected)
                 }
+                // Answered inside NostrSignalingClient; filtered out before it gets here.
+                is CallCoreBridge.PresenceEffect.ReplyHeartbeat -> Unit
             }
         }
         applyCallEffects(result.callEffects)

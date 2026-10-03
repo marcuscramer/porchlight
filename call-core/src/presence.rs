@@ -49,6 +49,11 @@ const FAST_HEARTBEAT_WINDOW_MS: i64 = 30_000;
 /// How long without a heartbeat before a peer is declared offline by
 /// [`check_online_timeouts`].
 const ONLINE_TIMEOUT_MS: i64 = 70_000;
+/// Minimum gap between two "reply to this hello" effects for one pairing —
+/// a hello is answered with an immediate heartbeat of our own (see
+/// [`mark_seen`]), and a peer that (by bug or malice) set `hello` on every
+/// heartbeat must not turn that into a ping-pong or a flood.
+const HELLO_REPLY_MIN_INTERVAL_MS: i64 = 5_000;
 
 /// A pairing's presence, from this device's own point of view — exactly
 /// one of three values at any moment, never a combination. `Busy` implies
@@ -70,11 +75,23 @@ pub(crate) struct PresenceState {
     last_seen_at: HashMap<String, i64>,
     status: HashMap<String, PresenceStatus>,
     pending_created_at: HashMap<String, i64>,
+    last_hello_reply_at: HashMap<String, i64>,
+    /// Whether the next heartbeat this device builds should carry `hello`.
+    /// Starts `true`: a freshly started process (a browser reload, an app
+    /// restart) knows nothing about any peer, and every presence status it
+    /// holds is "never seen", not "offline".
+    hello_pending: bool,
 }
 
 impl PresenceState {
     pub(crate) fn new() -> Self {
-        PresenceState { last_seen_at: HashMap::new(), status: HashMap::new(), pending_created_at: HashMap::new() }
+        PresenceState {
+            last_seen_at: HashMap::new(),
+            status: HashMap::new(),
+            pending_created_at: HashMap::new(),
+            last_hello_reply_at: HashMap::new(),
+            hello_pending: true,
+        }
     }
 }
 
@@ -91,6 +108,10 @@ impl PresenceState {
 #[serde(tag = "kind")]
 pub enum PresenceEffect {
     SetStatus { pairing_id: String, status: PresenceStatus },
+    /// This peer's heartbeat said `hello` (see [`mark_seen`]): the shell
+    /// should send *that pairing* one ordinary heartbeat right now, outside
+    /// its normal schedule. Not a UI effect — the signaling layer handles it.
+    ReplyHeartbeat { pairing_id: String },
 }
 
 /// What every presence-mutating function hands back: the presence-facing
@@ -204,7 +225,16 @@ fn transition_offline(state: &mut crate::AppState, pairing_id: &str) -> Presence
 /// this module already processes makes a busy indicator continuously
 /// correct, rather than a one-shot reactive flag that auto-clears after a
 /// fixed timeout regardless of whether the peer is still actually busy.
-pub fn mark_seen(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, now_ms: i64, peer_busy: Option<bool>) -> PresenceUpdateResult {
+///
+/// `peer_hello`: the heartbeat carried `hello` — the sender just (re)started
+/// or regained connectivity and has no idea who is online. Presence is
+/// otherwise learned only from the peer's *own* periodic heartbeat (slow,
+/// by design), so without an answer a freshly loaded device would show
+/// everyone offline for up to a full heartbeat interval. Answer with one
+/// immediate heartbeat ([`PresenceEffect::ReplyHeartbeat`]), at most once per
+/// [`HELLO_REPLY_MIN_INTERVAL_MS`] per pairing. The reply itself carries no
+/// `hello`, so two devices can never ping-pong.
+pub fn mark_seen(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, now_ms: i64, peer_busy: Option<bool>, peer_hello: bool) -> PresenceUpdateResult {
     let mut state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     state.presence.last_seen_at.insert(pairing_id.to_string(), now_ms);
     let target = match peer_busy {
@@ -213,7 +243,31 @@ pub fn mark_seen(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, 
         None if current_status(&state.presence, pairing_id) == PresenceStatus::Offline => PresenceStatus::Online,
         None => current_status(&state.presence, pairing_id),
     };
-    ensure_status(&mut state, pairing_id, own_pubkey_hex, peer_pubkey_hex, target, now_ms)
+    let mut result = ensure_status(&mut state, pairing_id, own_pubkey_hex, peer_pubkey_hex, target, now_ms);
+    if peer_hello {
+        let due = state.presence.last_hello_reply_at.get(pairing_id).is_none_or(|&last| now_ms - last >= HELLO_REPLY_MIN_INTERVAL_MS);
+        if due {
+            state.presence.last_hello_reply_at.insert(pairing_id.to_string(), now_ms);
+            result.presence_effects.push(PresenceEffect::ReplyHeartbeat { pairing_id: pairing_id.to_string() });
+        }
+    }
+    result
+}
+
+/// Marks the next [`crate::nostr_protocol::build_heartbeat_payload`] as a
+/// `hello` — call when this device regains signaling connectivity or the
+/// user comes back to a backgrounded page, i.e. whenever what it believes
+/// about its peers may be stale or empty. See [`mark_seen`].
+pub fn request_hello() {
+    crate::STATE.lock().unwrap_or_else(|p| p.into_inner()).presence.hello_pending = true;
+}
+
+/// Whether the heartbeat being built right now should carry `hello` —
+/// consumed: it's `true` once per [`request_hello`] (and once at process
+/// start), so the shell builds one heartbeat per tick and that single
+/// payload goes to every peer.
+pub fn take_hello() -> bool {
+    std::mem::take(&mut crate::STATE.lock().unwrap_or_else(|p| p.into_inner()).presence.hello_pending)
 }
 
 /// Mirrors receiving a `"busy"` reply to our own outgoing call attempt —
@@ -328,6 +382,7 @@ pub fn remove_pairing(pairing_id: &str) {
     state.presence.last_seen_at.remove(pairing_id);
     state.presence.status.remove(pairing_id);
     state.presence.pending_created_at.remove(pairing_id);
+    state.presence.last_hello_reply_at.remove(pairing_id);
 }
 
 #[cfg(test)]
@@ -361,14 +416,14 @@ mod tests {
     fn mark_seen_records_last_seen_and_transitions_online_once() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        let result = mark_seen(&id, "aaa", "bbb", 1_000, None);
+        let result = mark_seen(&id, "aaa", "bbb", 1_000, None, false);
         assert_eq!(result.presence_effects, vec![PresenceEffect::SetStatus { pairing_id: id.clone(), status: PresenceStatus::Online }]);
         assert!(is_online(&id));
 
         // Repeated mark_seen while already online: last_seen_at keeps
         // updating (proven via check_online_timeouts below) but no
         // repeated SetStatus effect.
-        let result = mark_seen(&id, "aaa", "bbb", 2_000, None);
+        let result = mark_seen(&id, "aaa", "bbb", 2_000, None, false);
         assert!(result.presence_effects.is_empty(), "{:?}", result.presence_effects);
     }
 
@@ -386,7 +441,7 @@ mod tests {
         // "aaa" < "bbb": requesting side wins the tie-break once online.
         let call_result = crate::call_arbitration::request_call(&id, "aaa", "bbb", false, 0);
         assert!(crate::call_arbitration::any_call_wanted());
-        let result = mark_seen(&id, "aaa", "bbb", 1_000, None);
+        let result = mark_seen(&id, "aaa", "bbb", 1_000, None, false);
         assert!(
             matches!(result.call_effects.as_slice(), [CallEffect::CreateOffer { call_id, .. }] if Some(call_id.clone()) == call_result.call_id),
             "{:?}",
@@ -401,7 +456,7 @@ mod tests {
     fn handle_leaving_message_removes_last_seen_and_transitions_offline() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        mark_seen(&id, "aaa", "bbb", 1_000, None);
+        mark_seen(&id, "aaa", "bbb", 1_000, None, false);
         let result = handle_leaving_message(&id);
         assert_eq!(result.presence_effects, vec![PresenceEffect::SetStatus { pairing_id: id.clone(), status: PresenceStatus::Offline }]);
         assert!(!is_online(&id));
@@ -418,7 +473,7 @@ mod tests {
     fn handle_leaving_message_ends_an_active_call_via_call_arbitration() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        mark_seen(&id, "aaa", "bbb", 1_000, None);
+        mark_seen(&id, "aaa", "bbb", 1_000, None, false);
         crate::call_arbitration::handle_should_offer(&id, "call1", "aaa", "bbb", false);
         let result = handle_leaving_message(&id);
         assert_eq!(
@@ -439,7 +494,7 @@ mod tests {
     fn check_online_timeouts_leaves_a_recently_seen_pairing_online() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        mark_seen(&id, "aaa", "bbb", 1_000, None);
+        mark_seen(&id, "aaa", "bbb", 1_000, None, false);
         let result = check_online_timeouts(1_000 + ONLINE_TIMEOUT_MS - 1);
         assert!(result.presence_effects.is_empty());
         assert!(is_online(&id));
@@ -449,7 +504,7 @@ mod tests {
     fn check_online_timeouts_transitions_offline_exactly_past_the_threshold() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        mark_seen(&id, "aaa", "bbb", 1_000, None);
+        mark_seen(&id, "aaa", "bbb", 1_000, None, false);
         // At exactly the threshold, not yet timed out (strict >).
         let result = check_online_timeouts(1_000 + ONLINE_TIMEOUT_MS);
         assert!(result.presence_effects.is_empty(), "{:?}", result.presence_effects);
@@ -464,13 +519,13 @@ mod tests {
         let id_a = fresh_id();
         let id_b = fresh_id();
         let id_c = fresh_id();
-        mark_seen(&id_a, "aaa", "111", 1_000, None);
-        mark_seen(&id_b, "aaa", "222", 1_000, None);
-        mark_seen(&id_c, "aaa", "333", 50_000, None); // seen much later, stays online
+        mark_seen(&id_a, "aaa", "111", 1_000, None, false);
+        mark_seen(&id_b, "aaa", "222", 1_000, None, false);
+        mark_seen(&id_c, "aaa", "333", 50_000, None, false); // seen much later, stays online
 
         let result = check_online_timeouts(1_000 + ONLINE_TIMEOUT_MS + 1);
         let mut transitioned: Vec<String> =
-            result.presence_effects.iter().map(|PresenceEffect::SetStatus { pairing_id, .. }| pairing_id.clone()).collect();
+            result.presence_effects.iter().filter_map(|e| match e { PresenceEffect::SetStatus { pairing_id, .. } => Some(pairing_id.clone()), _ => None }).collect();
         transitioned.sort();
         let mut expected = vec![id_a.clone(), id_b.clone()];
         expected.sort();
@@ -530,7 +585,7 @@ mod tests {
     fn remove_pairing_clears_all_three_maps() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        mark_seen(&id, "aaa", "bbb", 1_000, None);
+        mark_seen(&id, "aaa", "bbb", 1_000, None, false);
         current_heartbeat_interval_ms(std::slice::from_ref(&id), 1_000);
         assert!(is_online(&id));
 
@@ -569,7 +624,7 @@ mod tests {
     fn mark_seen_with_peer_busy_true_emits_set_status_busy_and_sticks() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        let result = mark_seen(&id, "aaa", "bbb", 1_000, Some(true));
+        let result = mark_seen(&id, "aaa", "bbb", 1_000, Some(true), false);
         assert!(
             result.presence_effects.contains(&PresenceEffect::SetStatus { pairing_id: id.clone(), status: PresenceStatus::Busy }),
             "{:?}",
@@ -580,7 +635,7 @@ mod tests {
         // A second heartbeat still reporting busy=true is not a change —
         // no repeated effect, matching the plain-online case's own
         // no-repeat guard shape.
-        let result = mark_seen(&id, "aaa", "bbb", 2_000, Some(true));
+        let result = mark_seen(&id, "aaa", "bbb", 2_000, Some(true), false);
         assert!(result.presence_effects.is_empty(), "{:?}", result.presence_effects);
         assert!(is_peer_busy(&id));
     }
@@ -591,9 +646,9 @@ mod tests {
         // mark_seen's own doc) — must not spuriously flip busy either way.
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        mark_seen(&id, "aaa", "bbb", 1_000, Some(true));
+        mark_seen(&id, "aaa", "bbb", 1_000, Some(true), false);
         assert!(is_peer_busy(&id));
-        let result = mark_seen(&id, "aaa", "bbb", 2_000, None);
+        let result = mark_seen(&id, "aaa", "bbb", 2_000, None, false);
         assert!(result.presence_effects.is_empty(), "{:?}", result.presence_effects);
         assert!(is_peer_busy(&id), "status must be left exactly as it was when the message carries no info about busy");
     }
@@ -605,9 +660,9 @@ mod tests {
         // status, unlike the old one-shot-plus-timeout approximation.
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        mark_seen(&id, "aaa", "bbb", 1_000, Some(true));
+        mark_seen(&id, "aaa", "bbb", 1_000, Some(true), false);
         assert!(is_peer_busy(&id));
-        let result = mark_seen(&id, "aaa", "bbb", 2_000, Some(false));
+        let result = mark_seen(&id, "aaa", "bbb", 2_000, Some(false), false);
         assert_eq!(result.presence_effects, vec![PresenceEffect::SetStatus { pairing_id: id.clone(), status: PresenceStatus::Online }]);
         assert!(!is_peer_busy(&id));
         assert!(is_online(&id), "dropping busy must land on Online, not Offline");
@@ -673,8 +728,8 @@ mod tests {
         let _guard = reset_state_for_test();
         let busy_id = fresh_id();
         let never_busy_id = fresh_id();
-        mark_seen(&busy_id, "aaa", "bbb", 1_000, Some(true));
-        mark_seen(&never_busy_id, "aaa", "ccc", 1_000, None);
+        mark_seen(&busy_id, "aaa", "bbb", 1_000, Some(true), false);
+        mark_seen(&never_busy_id, "aaa", "ccc", 1_000, None, false);
         assert!(is_peer_busy(&busy_id));
         assert!(!is_peer_busy(&never_busy_id));
 
@@ -695,9 +750,89 @@ mod tests {
     fn remove_pairing_clears_peer_busy_too() {
         let _guard = reset_state_for_test();
         let id = fresh_id();
-        mark_seen(&id, "aaa", "bbb", 1_000, Some(true));
+        mark_seen(&id, "aaa", "bbb", 1_000, Some(true), false);
         assert!(is_peer_busy(&id));
         remove_pairing(&id);
         assert!(!is_peer_busy(&id));
+    }
+
+    // --- hello / reply ---
+
+    #[test]
+    fn a_hello_heartbeat_gets_one_immediate_reply_effect() {
+        let _guard = reset_state_for_test();
+        let id = fresh_id();
+        let result = mark_seen(&id, "aaa", "bbb", 1_000, Some(false), true);
+        assert_eq!(
+            result.presence_effects,
+            vec![
+                PresenceEffect::SetStatus { pairing_id: id.clone(), status: PresenceStatus::Online },
+                PresenceEffect::ReplyHeartbeat { pairing_id: id.clone() },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_ordinary_heartbeat_never_gets_a_reply() {
+        let _guard = reset_state_for_test();
+        let id = fresh_id();
+        mark_seen(&id, "aaa", "bbb", 1_000, Some(false), false);
+        let result = mark_seen(&id, "aaa", "bbb", 2_000, Some(false), false);
+        assert!(result.presence_effects.is_empty(), "{:?}", result.presence_effects);
+    }
+
+    #[test]
+    fn hello_replies_are_rate_limited_per_pairing() {
+        let _guard = reset_state_for_test();
+        let id = fresh_id();
+        let other = fresh_id();
+        let reply = |r: &PresenceUpdateResult| r.presence_effects.iter().any(|e| matches!(e, PresenceEffect::ReplyHeartbeat { .. }));
+        assert!(reply(&mark_seen(&id, "aaa", "bbb", 1_000, Some(false), true)));
+        assert!(!reply(&mark_seen(&id, "aaa", "bbb", 1_000 + HELLO_REPLY_MIN_INTERVAL_MS - 1, Some(false), true)), "too soon");
+        assert!(reply(&mark_seen(&other, "aaa", "ccc", 1_001, Some(false), true)), "a different pairing has its own budget");
+        assert!(reply(&mark_seen(&id, "aaa", "bbb", 1_000 + HELLO_REPLY_MIN_INTERVAL_MS, Some(false), true)), "budget refilled");
+    }
+
+    #[test]
+    fn hello_is_pending_at_start_is_consumed_once_and_can_be_requested_again() {
+        let _guard = reset_state_for_test();
+        assert!(take_hello(), "a fresh process starts out wanting a hello");
+        assert!(!take_hello(), "consumed");
+        request_hello();
+        assert!(take_hello());
+        assert!(!take_hello());
+    }
+
+    #[test]
+    fn remove_pairing_forgets_the_hello_reply_budget() {
+        let _guard = reset_state_for_test();
+        let id = fresh_id();
+        mark_seen(&id, "aaa", "bbb", 1_000, Some(false), true);
+        remove_pairing(&id);
+        let result = mark_seen(&id, "aaa", "bbb", 1_001, Some(false), true);
+        assert!(result.presence_effects.iter().any(|e| matches!(e, PresenceEffect::ReplyHeartbeat { .. })));
+    }
+
+    #[test]
+    fn a_reload_hello_is_answered_once_and_the_answer_does_not_ask_for_another() {
+        use crate::nostr_protocol::{build_heartbeat_payload, parse_signal_payload, SignalMessage};
+        let _guard = reset_state_for_test();
+        let id = fresh_id();
+
+        // The freshly loaded device's first heartbeat says hello...
+        let hello = build_heartbeat_payload("Browser", false).unwrap();
+        let SignalMessage::Heartbeat { hello: is_hello, .. } = parse_signal_payload(&hello).unwrap() else { panic!("not a heartbeat") };
+        assert!(is_hello);
+
+        // ...the peer's receipt of it asks for an immediate reply...
+        let result = mark_seen(&id, "aaa", "bbb", 1_000, Some(false), is_hello);
+        assert!(result.presence_effects.contains(&PresenceEffect::ReplyHeartbeat { pairing_id: id.clone() }));
+
+        // ...and that reply (built right after, as the shell does) is an
+        // ordinary heartbeat: it neither says hello nor can trigger a reply.
+        let reply = build_heartbeat_payload("Portal", false).unwrap();
+        assert!(!reply.contains("hello"), "{reply}");
+        let SignalMessage::Heartbeat { hello: reply_hello, .. } = parse_signal_payload(&reply).unwrap() else { panic!("not a heartbeat") };
+        assert!(!mark_seen(&id, "bbb", "aaa", 1_500, Some(false), reply_hello).presence_effects.iter().any(|e| matches!(e, PresenceEffect::ReplyHeartbeat { .. })));
     }
 }

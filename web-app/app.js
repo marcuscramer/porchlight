@@ -293,8 +293,13 @@ function connectRelayClient() {
   // any relay connection fails or drops, it just gives up on that relay
   // forever, which a tab left open across a transient relay hiccup would
   // hit. With this on, a dropped/failed relay retries with the library's
-  // own backoff instead of needing a page reload to recover.
-  pool = new SimplePool({ enableReconnect: true });
+  // own backoff instead of needing a page reload to recover. enablePing: a
+  // relay socket that died silently (NAT mapping expired, Wi-Fi roam, a
+  // phone waking from sleep) still reports readyState OPEN, so without a
+  // ping neither reconnect nor anything else ever notices — publishes
+  // vanish and nothing arrives. nostr-tools pings every ~29s and closes a
+  // socket that doesn't answer, which hands it to the reconnect above.
+  pool = new SimplePool({ enableReconnect: true, enablePing: true });
   // nostr-tools' SimplePool has no separate "connect" step — a relay's
   // WebSocket only actually opens once something subscribes or publishes to
   // it. resubscribe() below skips calling pool.subscribe() at all when
@@ -383,7 +388,8 @@ function dispatchFromConfirmedPeer(peer, message) {
   const pairingId = peer.pairingId;
   const ownPubkeyHex = ownPubkeyHexFor(peer.ownPrivateKeyHex);
   const peerBusy = message && message.type === 'heartbeat' && typeof message.busy === 'boolean' ? message.busy : null;
-  applyPresenceUpdate(callCore.markSeen(pairingId, ownPubkeyHex, peer.peerPublicKey, Date.now(), peerBusy));
+  const peerHello = !!(message && message.type === 'heartbeat' && message.hello === true);
+  applyPresenceUpdate(callCore.markSeen(pairingId, ownPubkeyHex, peer.peerPublicKey, Date.now(), peerBusy, peerHello));
   if (!message) return;
   switch (message.type) {
     case 'heartbeat':
@@ -446,6 +452,16 @@ function applyPresenceUpdate(json) {
         // JS enum needed.
         contactUiState.set(effect.pairing_id, { ...uiState(effect.pairing_id), status: effect.status });
         break;
+      case 'ReplyHeartbeat': {
+        // A peer that just came online said hello (see call-core's
+        // presence::mark_seen) — answer with one ordinary heartbeat right
+        // now. The build never sets `hello` here (only requestHello does),
+        // so two devices can't answer each other forever.
+        const peer = confirmedPeers().find((p) => p.pairingId === effect.pairing_id);
+        const heartbeat = callCore.buildHeartbeatPayload(deviceName, callCore.isCallActive());
+        if (peer && heartbeat) sendToConfirmedPeer(peer.pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, () => heartbeat);
+        break;
+      }
       default:
         console.error('applyPresenceUpdate: unknown presence effect kind from call-core', effect.kind);
     }
@@ -459,9 +475,11 @@ function heartbeatTick() {
   // identically to every contact regardless of who (if anyone) it's
   // actually occupied by. Read once per tick, not once per peer.
   const busy = callCore.isCallActive();
-  for (const peer of confirmedPeers()) {
-    sendToConfirmedPeer(peer.pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, () => callCore.buildHeartbeatPayload(deviceName, busy));
-  }
+  // Built once per tick, not once per peer: whether this heartbeat carries
+  // `hello` is consumed by the build itself (call-core's presence::take_hello),
+  // so one payload has to serve every peer.
+  const heartbeat = callCore.buildHeartbeatPayload(deviceName, busy);
+  if (heartbeat) for (const peer of confirmedPeers()) sendToConfirmedPeer(peer.pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, () => heartbeat);
   for (const pending of pendingPairingsList()) {
     if (!pending.rendezvousTag || !pending.bootstrapPayload) continue;
     sendPairingBootstrap(pending.ownPrivateKeyHex, pending.rendezvousTag, pending.bootstrapTarget, pending.bootstrapPayload);
@@ -519,7 +537,7 @@ function monitorOnlineTimeouts() {
 /** Publishes `event` to every relay call-core says isn't cooling down from a
  * recent rejection, handing its retry queue whichever ones reject it (or were
  * skipped for cooling down) instead of just discarding the failure. */
-async function publishToRelays(event) {
+async function publishToRelays(event, payloadJson) {
   const now = Date.now();
   const targets = callCore.availableRelays(RELAYS, now);
   const failedRelays = RELAYS.filter(url => !targets.includes(url));
@@ -533,7 +551,7 @@ async function publishToRelays(event) {
     }
   });
   if (failedRelays.length === 0) return;
-  callCore.recordPendingPublish(event.id, JSON.stringify(event), failedRelays, now);
+  callCore.recordPendingPublish(event.id, JSON.stringify(event), payloadJson, failedRelays, now);
   for (const [relay, reason] of rejections) callCore.recordPublishResult(event.id, relay, false, reason, now);
 }
 
@@ -573,7 +591,7 @@ async function publish(ownPrivateKeyHex, targetPubkeyHex, payloadJson) {
   try {
     const wrapJson = callCore.buildWrappedEvent(ownPrivateKeyHex, targetPubkeyHex, payloadJson);
     if (!wrapJson) return;
-    await publishToRelays(JSON.parse(wrapJson));
+    await publishToRelays(JSON.parse(wrapJson), payloadJson);
   } catch (err) {
     console.error('failed to encrypt/publish', err);
   }
@@ -603,7 +621,7 @@ async function sendPairingBootstrap(ownPrivateKeyHex, tag, targetPubkeyHex, payl
   try {
     const eventJson = callCore.buildBootstrapEvent(ownPrivateKeyHex, tag, targetPubkeyHex ?? null, JSON.stringify(payloadObj));
     if (!eventJson) return;
-    await publishToRelays(JSON.parse(eventJson));
+    await publishToRelays(JSON.parse(eventJson), JSON.stringify(payloadObj));
   } catch (err) {
     console.error('failed to publish bootstrap message', err);
   }
@@ -648,12 +666,20 @@ window.addEventListener('storage', (event) => {
 // instead of waiting for a retry to stumble into it.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
+  callCore.requestHello();
   kickHeartbeat();
   // iOS pauses a playing video when the page is backgrounded; resume it
   // rather than leaving a paused frame for Safari to decorate.
   for (const video of document.querySelectorAll('video')) {
     if (video.srcObject && video.paused) keepPlaying(video);
   }
+});
+
+// The browser regained network (Wi-Fi back, airplane mode off): same staleness
+// as coming back to a backgrounded tab — say hello so peers answer right away.
+window.addEventListener('online', () => {
+  callCore.requestHello();
+  kickHeartbeat();
 });
 
 // ---------------------------------------------------------------------------
@@ -783,7 +809,7 @@ function confirmPeer(pairingId, publicKeyHex) {
   updatePairingPeer(pairingId, publicKeyHex, candidate.name || '');
   kickHeartbeat();
   const peer = findPairing(pairingId);
-  if (peer) applyPresenceUpdate(callCore.markSeen(pairingId, ownPubkeyHexFor(peer.ownPrivateKeyHex), publicKeyHex, Date.now()));
+  if (peer) applyPresenceUpdate(callCore.markSeen(pairingId, ownPubkeyHexFor(peer.ownPrivateKeyHex), publicKeyHex, Date.now(), null, false));
   screen = 'waiting';
   render();
 }

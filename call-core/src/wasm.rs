@@ -357,12 +357,18 @@ pub fn forget_pairing(pairing_id: &str) -> String {
 /// `mark_seen`'s own doc for why this is `Some(_)` only for a `"heartbeat"`
 /// message.
 #[wasm_bindgen(js_name = markSeen)]
-pub fn mark_seen(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, now_ms: f64, peer_busy: Option<bool>) -> String {
+pub fn mark_seen(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, now_ms: f64, peer_busy: Option<bool>, peer_hello: bool) -> String {
     catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let update = crate::presence::mark_seen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms as i64, peer_busy);
+        let update = crate::presence::mark_seen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms as i64, peer_busy, peer_hello);
         serde_json::to_string(&update).unwrap_or_else(|_| empty_presence_result_json())
     }))
     .unwrap_or_else(|_| empty_presence_result_json())
+}
+
+/// See [`crate::presence::request_hello`]'s own doc.
+#[wasm_bindgen(js_name = requestHello)]
+pub fn request_hello() {
+    let _ = catch_unwind(crate::presence::request_hello);
 }
 
 /// See [`crate::presence::handle_peer_busy_reply`]'s own doc. Falls back to
@@ -641,8 +647,8 @@ pub fn protocol_constants() -> String {
 /// value; a panic is a silent no-op, same reasoning as `pruneStalePending`'s
 /// own.
 #[wasm_bindgen(js_name = recordPendingPublish)]
-pub fn record_pending_publish(event_id: &str, event_json: &str, relays: Vec<String>, now_ms: f64) {
-    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::record_pending_publish(event_id, event_json, &relays, now_ms as i64)));
+pub fn record_pending_publish(event_id: &str, event_json: &str, payload_json: &str, relays: Vec<String>, now_ms: f64) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::record_pending_publish(event_id, event_json, payload_json, &relays, now_ms as i64)));
 }
 
 /// See [`crate::signal_retry::record_publish_result`]'s own doc. No return

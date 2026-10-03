@@ -41,10 +41,29 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-/// Beyond this age, whatever a pending publish was about has almost
-/// certainly moved on — [`due_for_retry`] drops it silently rather than
-/// retrying. Matches `app.js`'s own `PENDING_PUBLISH_MAX_AGE_MS` exactly.
-const PENDING_PUBLISH_MAX_AGE_MS: i64 = 5 * 60 * 1000;
+/// How long after being sent a message is still worth retrying, by what it
+/// says (`None`: never queue it) — decided here, from the plain payload the
+/// shell already has, so both platforms share one policy:
+///
+/// - **Call signaling** (`call`/`offer`/`answer`/`ice`/`busy`/`bye`) matters
+///   exactly as long as the call attempt it belongs to can still succeed —
+///   [`crate::call_arbitration::CALL_ANSWER_TIMEOUT_MS`], after which the
+///   caller has given up on its own. Retrying longer would ring a peer's
+///   phone for a call the caller already abandoned.
+/// - **Heartbeats** are never queued: the next one is at most one heartbeat
+///   interval away and supersedes it, and a stale one arriving late would
+///   claim the sender is still online (and still busy, or not) when it may
+///   have left in between.
+/// - **Pairing bootstrap** messages are already republished on every
+///   heartbeat tick by the shell, which is a better retry than this one.
+/// - **`leaving`** is only meaningful in the instant the device goes away.
+fn retry_ttl_ms(payload_json: &str) -> Option<i64> {
+    let value: serde_json::Value = serde_json::from_str(payload_json).ok()?;
+    match value.get("type")?.as_str()? {
+        "call" | "offer" | "answer" | "ice" | "busy" | "bye" => Some(crate::call_arbitration::CALL_ANSWER_TIMEOUT_MS),
+        _ => None,
+    }
+}
 
 /// Hard cap so a long offline stretch can't grow the queue unboundedly.
 /// Matches `app.js`'s own `PENDING_PUBLISH_MAX_ENTRIES` exactly.
@@ -74,7 +93,7 @@ struct PendingPublish {
     event_id: String,
     event_json: String,
     relays: HashSet<String>,
-    created_at_ms: i64,
+    expires_at_ms: i64,
 }
 
 /// A field of `crate::AppState`, not its own separately-locked static —
@@ -135,7 +154,9 @@ pub struct PendingRetry {
 }
 
 /// Records `event_json` (already built/signed by the shell; this module
-/// never looks inside it) as needing delivery to `relays` — call right
+/// never looks inside it) as needing delivery to `relays` — unless
+/// `payload_json`, the plain message it wraps, is one that shouldn't be
+/// retried at all (see [`retry_ttl_ms`]; a no-op then) — call right
 /// after the shell's own publish attempt, passing only whichever targets
 /// it already knows missed (e.g. weren't connected at send time; a relay
 /// that *was* sent to but still rejects it is narrowed back in separately,
@@ -143,7 +164,8 @@ pub struct PendingRetry {
 /// single oldest entry once the queue exceeds [`PENDING_PUBLISH_MAX_ENTRIES`],
 /// same shape as [`crate::nostr_protocol::mark_seen_or_is_duplicate`]'s own
 /// bound.
-pub fn record_pending_publish(event_id: &str, event_json: &str, relays: &[String], now_ms: i64) {
+pub fn record_pending_publish(event_id: &str, event_json: &str, payload_json: &str, relays: &[String], now_ms: i64) {
+    let Some(ttl_ms) = retry_ttl_ms(payload_json) else { return };
     if relays.is_empty() {
         return;
     }
@@ -156,7 +178,7 @@ pub fn record_pending_publish(event_id: &str, event_json: &str, relays: &[String
         event_id: event_id.to_string(),
         event_json: event_json.to_string(),
         relays: relays.iter().cloned().collect(),
-        created_at_ms: now_ms,
+        expires_at_ms: now_ms + ttl_ms,
     });
 }
 
@@ -199,7 +221,7 @@ pub fn available_relays(candidates: &[String], now_ms: i64) -> Vec<String> {
 
 /// Called from the shell's own existing periodic tick (the same one
 /// `check_online_timeouts`/`check_call_timeout` already run on) — prunes
-/// anything past [`PENDING_PUBLISH_MAX_AGE_MS`] first, then hands back every
+/// anything past its own lifetime ([`retry_ttl_ms`]) first, then hands back every
 /// remaining entry's still-outstanding relays that aren't cooling down from a
 /// rejection, for the shell to actually republish to. An entry whose relays
 /// are all cooling down this tick is simply left out (it stays queued).
@@ -208,7 +230,7 @@ pub fn available_relays(candidates: &[String], now_ms: i64) -> Vec<String> {
 pub fn due_for_retry(now_ms: i64) -> Vec<PendingRetry> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.signal_retry;
-    state.pending.retain(|p| now_ms - p.created_at_ms < PENDING_PUBLISH_MAX_AGE_MS);
+    state.pending.retain(|p| now_ms < p.expires_at_ms);
     state
         .pending
         .iter()
@@ -241,6 +263,18 @@ mod tests {
         guard
     }
 
+    const CALL: &str = r#"{"type":"offer","sdp":"x","callId":"c"}"#;
+
+    /// An entry's still-outstanding relays regardless of cooldown (what
+    /// `due_for_retry` deliberately hides), sorted; `None` if not queued.
+    fn pending_relays(event_id: &str) -> Option<Vec<String>> {
+        let app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+        let entry = app.signal_retry.pending.iter().find(|p| p.event_id == event_id)?;
+        let mut v: Vec<String> = entry.relays.iter().cloned().collect();
+        v.sort();
+        Some(v)
+    }
+
     fn relays(urls: &[&str]) -> Vec<String> {
         urls.iter().map(|s| s.to_string()).collect()
     }
@@ -248,7 +282,7 @@ mod tests {
     #[test]
     fn a_fresh_pending_publish_is_due_for_retry_immediately() {
         let _guard = reset_state_for_test();
-        record_pending_publish("id1", "{\"id\":\"id1\"}", &relays(&["wss://a", "wss://b"]), 1_000);
+        record_pending_publish("id1", "{\"id\":\"id1\"}", CALL, &relays(&["wss://a", "wss://b"]), 1_000);
         let due = due_for_retry(1_000);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].event_json, "{\"id\":\"id1\"}");
@@ -260,14 +294,14 @@ mod tests {
     #[test]
     fn recording_an_empty_relay_list_is_a_no_op() {
         let _guard = reset_state_for_test();
-        record_pending_publish("id1", "{}", &[], 1_000);
+        record_pending_publish("id1", "{}", CALL, &[], 1_000);
         assert!(due_for_retry(1_000).is_empty());
     }
 
     #[test]
     fn a_successful_ack_narrows_the_relay_set_and_drops_the_entry_once_empty() {
         let _guard = reset_state_for_test();
-        record_pending_publish("id1", "{}", &relays(&["wss://a", "wss://b"]), 1_000);
+        record_pending_publish("id1", "{}", CALL, &relays(&["wss://a", "wss://b"]), 1_000);
         record_publish_result("id1", "wss://a", true, "", 1_001);
         let due = due_for_retry(1_001);
         assert_eq!(due.len(), 1);
@@ -282,14 +316,12 @@ mod tests {
         let _guard = reset_state_for_test();
         // Only "wss://a" was missing at send time -- "wss://b" was sent to
         // but (per a later result) rejected it.
-        record_pending_publish("id1", "{}", &relays(&["wss://a"]), 1_000);
+        record_pending_publish("id1", "{}", CALL, &relays(&["wss://a"]), 1_000);
         record_publish_result("id1", "wss://b", false, "blocked: nope", 1_001);
         // b is cooling down right now, so only a is due...
         assert_eq!(due_for_retry(1_001)[0].relays, vec!["wss://a".to_string()]);
-        // ...but b really was added back, and returns once the cooldown ends.
-        let mut got = due_for_retry(1_001 + REJECTION_COOLDOWN_MS)[0].relays.clone();
-        got.sort();
-        assert_eq!(got, vec!["wss://a".to_string(), "wss://b".to_string()]);
+        // ...but b really was added back to the entry.
+        assert_eq!(pending_relays("id1"), Some(vec!["wss://a".to_string(), "wss://b".to_string()]));
     }
 
     #[test]
@@ -303,10 +335,10 @@ mod tests {
     #[test]
     fn an_entry_past_max_age_is_dropped_silently() {
         let _guard = reset_state_for_test();
-        record_pending_publish("id1", "{}", &relays(&["wss://a"]), 1_000);
-        let due = due_for_retry(1_000 + PENDING_PUBLISH_MAX_AGE_MS - 1);
+        record_pending_publish("id1", "{}", CALL, &relays(&["wss://a"]), 1_000);
+        let due = due_for_retry(1_000 + crate::call_arbitration::CALL_ANSWER_TIMEOUT_MS - 1);
         assert_eq!(due.len(), 1, "not stale yet");
-        let due = due_for_retry(1_000 + PENDING_PUBLISH_MAX_AGE_MS);
+        let due = due_for_retry(1_000 + crate::call_arbitration::CALL_ANSWER_TIMEOUT_MS);
         assert!(due.is_empty(), "stale now -- strict less-than");
     }
 
@@ -314,13 +346,13 @@ mod tests {
     fn the_queue_evicts_the_oldest_entry_once_full() {
         let _guard = reset_state_for_test();
         for i in 0..PENDING_PUBLISH_MAX_ENTRIES {
-            record_pending_publish(&format!("id{i}"), "{}", &relays(&["wss://a"]), 1_000);
+            record_pending_publish(&format!("id{i}"), "{}", CALL, &relays(&["wss://a"]), 1_000);
         }
         assert_eq!(due_for_retry(1_000).len(), PENDING_PUBLISH_MAX_ENTRIES);
 
         // One more push evicts "id0", the oldest -- queue size stays capped,
         // and the evicted entry is actually gone, not just uncounted.
-        record_pending_publish("idNew", "{}", &relays(&["wss://a"]), 1_000);
+        record_pending_publish("idNew", "{}", CALL, &relays(&["wss://a"]), 1_000);
         let due = due_for_retry(1_000);
         assert_eq!(due.len(), PENDING_PUBLISH_MAX_ENTRIES);
         record_publish_result("id0", "wss://a", true, "", 1_000);
@@ -330,7 +362,7 @@ mod tests {
     #[test]
     fn a_rejection_cools_the_relay_down_for_retries_and_first_publishes_then_expires() {
         let _guard = reset_state_for_test();
-        record_pending_publish("id1", "{}", &relays(&["wss://a", "wss://b"]), 1_000);
+        record_pending_publish("id1", "{}", CALL, &relays(&["wss://a", "wss://b"]), 1_000);
         record_publish_result("id1", "wss://a", false, "blocked: spam", 1_000);
 
         let due = due_for_retry(1_001);
@@ -338,11 +370,9 @@ mod tests {
         assert_eq!(due[0].relays, vec!["wss://b".to_string()], "the rejecting relay is skipped while cooling down");
         assert_eq!(available_relays(&relays(&["wss://a", "wss://b"]), 1_001), vec!["wss://b".to_string()]);
 
-        // Still pending, just cooling down: back once the cooldown ends.
+        // Still pending, just cooling down; and the cooldown really ends.
+        assert_eq!(pending_relays("id1"), Some(vec!["wss://a".to_string(), "wss://b".to_string()]));
         let after = 1_000 + REJECTION_COOLDOWN_MS;
-        let mut got = due_for_retry(after)[0].relays.clone();
-        got.sort();
-        assert_eq!(got, vec!["wss://a".to_string(), "wss://b".to_string()]);
         assert_eq!(available_relays(&relays(&["wss://a"]), after), vec!["wss://a".to_string()]);
     }
 
@@ -356,10 +386,10 @@ mod tests {
     #[test]
     fn an_entry_whose_relays_are_all_cooling_down_is_left_out_but_stays_queued() {
         let _guard = reset_state_for_test();
-        record_pending_publish("id1", "{}", &relays(&["wss://a"]), 1_000);
+        record_pending_publish("id1", "{}", CALL, &relays(&["wss://a"]), 1_000);
         record_publish_result("id1", "wss://a", false, "", 1_000);
         assert!(due_for_retry(1_001).is_empty());
-        assert_eq!(due_for_retry(1_000 + REJECTION_COOLDOWN_MS).len(), 1);
+        assert_eq!(pending_relays("id1"), Some(vec!["wss://a".to_string()]), "still queued, just not due");
     }
 
     #[test]
@@ -375,7 +405,7 @@ mod tests {
     #[test]
     fn a_duplicate_rejection_counts_as_delivered_and_does_not_cool_the_relay_down() {
         let _guard = reset_state_for_test();
-        record_pending_publish("id1", "{}", &relays(&["wss://a"]), 1_000);
+        record_pending_publish("id1", "{}", CALL, &relays(&["wss://a"]), 1_000);
         record_publish_result("id1", "wss://a", false, "duplicate: already have this event", 1_001);
         assert!(due_for_retry(1_002).is_empty(), "entry resolved");
         assert_eq!(available_relays(&relays(&["wss://a"]), 1_002).len(), 1);
@@ -389,5 +419,32 @@ mod tests {
         for no in ["", "blocked: spam", "restricted: not on the allow list", "rate", "proof work", "unrelated"] {
             assert!(!looks_likely_permanent(no), "{no}");
         }
+    }
+
+    #[test]
+    fn only_call_signaling_is_queued_for_retry() {
+        let _guard = reset_state_for_test();
+        for (n, payload) in [
+            ("hb", r#"{"type":"heartbeat","name":"A","busy":false}"#),
+            ("pake", r#"{"type":"pake1","pake":"00"}"#),
+            ("leave", r#"{"type":"leaving"}"#),
+            ("junk", "not json"),
+            ("untyped", "{}"),
+        ] {
+            record_pending_publish(n, "{}", payload, &relays(&["wss://a"]), 1_000);
+        }
+        assert!(due_for_retry(1_000).is_empty(), "none of those are worth retrying");
+
+        for (n, payload) in [
+            ("call", r#"{"type":"call","callId":"c"}"#),
+            ("offer", r#"{"type":"offer","sdp":"s","callId":"c"}"#),
+            ("answer", r#"{"type":"answer","sdp":"s","callId":"c"}"#),
+            ("ice", r#"{"type":"ice","candidate":"c","sdpMLineIndex":0,"callId":"c"}"#),
+            ("busy", r#"{"type":"busy","callId":"c"}"#),
+            ("bye", r#"{"type":"bye","callId":"c"}"#),
+        ] {
+            record_pending_publish(n, "{}", payload, &relays(&["wss://a"]), 1_000);
+        }
+        assert_eq!(due_for_retry(1_000).len(), 6);
     }
 }

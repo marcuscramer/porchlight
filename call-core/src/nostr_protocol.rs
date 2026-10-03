@@ -270,6 +270,15 @@ pub enum SignalMessage {
         /// `presence::mark_seen`'s own `peer_busy: Option<bool>` parameter.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         busy: Option<bool>,
+        /// "I just came online (or regained connectivity) and know nothing
+        /// about your status — please answer with a heartbeat right now
+        /// instead of making me wait out your normal cadence." Absent (not
+        /// `false`) on the wire for an ordinary heartbeat, so an older peer
+        /// that predates this field neither sees nor needs it — and simply
+        /// never replies, which degrades to the old behavior. See
+        /// [`crate::presence::mark_seen`] for how a receiver answers.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        hello: bool,
     },
     #[serde(rename = "leaving")]
     Leaving,
@@ -319,8 +328,16 @@ fn ensure_call_id(call_id: String) -> String {
 /// Mirrors `heartbeatTick`'s payload construction exactly — `name` is this
 /// device's own self-reported name, `busy` is [`crate::call_arbitration::is_call_active`]'s
 /// value, both sent unconditionally on every heartbeat.
+///
+/// Whether this heartbeat carries `hello` is decided here, by
+/// [`crate::presence::take_hello`] — the shell just builds one heartbeat per
+/// tick and sends that same payload to every peer.
 pub fn build_heartbeat_payload(name: &str, busy: bool) -> Option<String> {
-    serde_json::to_string(&SignalMessage::Heartbeat { name: name.to_string(), busy: Some(busy) }).ok()
+    build_heartbeat_payload_with(name, busy, crate::presence::take_hello())
+}
+
+fn build_heartbeat_payload_with(name: &str, busy: bool, hello: bool) -> Option<String> {
+    serde_json::to_string(&SignalMessage::Heartbeat { name: name.to_string(), busy: Some(busy), hello }).ok()
 }
 
 /// Mirrors `close()`'s/its web twin's `sendToConfirmedPeer(peer, "leaving")` — no fields at all.
@@ -384,8 +401,8 @@ pub fn build_ice_payload(sdp_mid: Option<&str>, sdp_m_line_index: i32, candidate
 pub fn parse_signal_payload(payload_json: &str) -> Option<SignalMessage> {
     let message: SignalMessage = serde_json::from_str(payload_json).ok()?;
     Some(match message {
-        SignalMessage::Heartbeat { name, busy } => {
-            SignalMessage::Heartbeat { name: crate::sanitize_name(crate::truncate_chars(&name, crate::MAX_NAME_LENGTH)), busy }
+        SignalMessage::Heartbeat { name, busy, hello } => {
+            SignalMessage::Heartbeat { name: crate::sanitize_name(crate::truncate_chars(&name, crate::MAX_NAME_LENGTH)), busy, hello }
         }
         SignalMessage::Leaving => SignalMessage::Leaving,
         SignalMessage::Bye { call_id } => SignalMessage::Bye { call_id: ensure_call_id(call_id) },
@@ -852,7 +869,7 @@ mod tests {
 
     #[test]
     fn build_heartbeat_payload_matches_the_wire_format_both_platforms_already_send() {
-        let json = build_heartbeat_payload("Living Room", true).unwrap();
+        let json = build_heartbeat_payload_with("Living Room", true, false).unwrap();
         assert_eq!(json, r#"{"type":"heartbeat","name":"Living Room","busy":true}"#);
     }
 
@@ -886,8 +903,8 @@ mod tests {
     #[test]
     fn every_build_payload_round_trips_through_parse_signal_payload() {
         assert_eq!(
-            parse_signal_payload(&build_heartbeat_payload("Alice", false).unwrap()).unwrap(),
-            SignalMessage::Heartbeat { name: "Alice".to_string(), busy: Some(false) }
+            parse_signal_payload(&build_heartbeat_payload_with("Alice", false, false).unwrap()).unwrap(),
+            SignalMessage::Heartbeat { name: "Alice".to_string(), busy: Some(false), hello: false }
         );
         assert_eq!(parse_signal_payload(&build_leaving_payload().unwrap()).unwrap(), SignalMessage::Leaving);
         assert_eq!(
@@ -991,7 +1008,7 @@ mod tests {
         // Truncate-then-sanitize, in that order -- a plain name with
         // nothing to strip, so the result length is exactly the cap.
         let long_name = "b".repeat(crate::MAX_NAME_LENGTH + 50);
-        let json = build_heartbeat_payload(&long_name, false).unwrap();
+        let json = build_heartbeat_payload_with(&long_name, false, false).unwrap();
         let message = parse_signal_payload(&json).unwrap();
         let SignalMessage::Heartbeat { name, .. } = message else { panic!("expected Heartbeat, got {message:?}") };
         assert_eq!(name.chars().count(), crate::MAX_NAME_LENGTH);
@@ -1003,7 +1020,7 @@ mod tests {
         // shrinks the result below MAX_NAME_LENGTH -- asserts the
         // character is gone and the result never exceeds the cap.
         let dirty_name = format!("A\u{200B}{}", "b".repeat(crate::MAX_NAME_LENGTH + 50));
-        let json = build_heartbeat_payload(&dirty_name, false).unwrap();
+        let json = build_heartbeat_payload_with(&dirty_name, false, false).unwrap();
         let message = parse_signal_payload(&json).unwrap();
         let SignalMessage::Heartbeat { name, .. } = message else { panic!("expected Heartbeat, got {message:?}") };
         assert!(!name.contains('\u{200B}'), "zero-width space must be stripped");
@@ -1013,7 +1030,7 @@ mod tests {
     #[test]
     fn parse_signal_payload_leaves_a_missing_heartbeat_busy_as_none() {
         let message = parse_signal_payload(r#"{"type":"heartbeat","name":"Alice"}"#).unwrap();
-        assert_eq!(message, SignalMessage::Heartbeat { name: "Alice".to_string(), busy: None });
+        assert_eq!(message, SignalMessage::Heartbeat { name: "Alice".to_string(), busy: None, hello: false });
     }
 }
 
@@ -1066,7 +1083,7 @@ mod full_stack_chain_tests {
 
         // 5. Every dispatched message calls presence::mark_seen first,
         //    regardless of type.
-        let update = presence::mark_seen(pairing_id, &alice_pk, &bob_pk, 1_000, None);
+        let update = presence::mark_seen(pairing_id, &alice_pk, &bob_pk, 1_000, None, false);
 
         // Bob coming online must resolve Alice's deferred call: accept
         // either legitimate resolution (CreateOffer or SendCall) since the

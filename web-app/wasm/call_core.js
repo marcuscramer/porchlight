@@ -749,10 +749,11 @@ export function markConnected(pairing_id, call_id) {
  * @param {string} own_pubkey_hex
  * @param {string} peer_pubkey_hex
  * @param {number} now_ms
- * @param {boolean | null} [peer_busy]
+ * @param {boolean | null | undefined} peer_busy
+ * @param {boolean} peer_hello
  * @returns {string}
  */
-export function markSeen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms, peer_busy) {
+export function markSeen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms, peer_busy, peer_hello) {
     let deferred4_0;
     let deferred4_1;
     try {
@@ -762,7 +763,7 @@ export function markSeen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms, pe
         const len1 = WASM_VECTOR_LEN;
         const ptr2 = passStringToWasm0(peer_pubkey_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.markSeen(ptr0, len0, ptr1, len1, ptr2, len2, now_ms, isLikeNone(peer_busy) ? 0xFFFFFF : peer_busy ? 1 : 0);
+        const ret = wasm.markSeen(ptr0, len0, ptr1, len1, ptr2, len2, now_ms, isLikeNone(peer_busy) ? 0xFFFFFF : peer_busy ? 1 : 0, peer_hello);
         deferred4_0 = ret[0];
         deferred4_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -882,17 +883,20 @@ export function pruneStalePending(current_pending_ids) {
  * own.
  * @param {string} event_id
  * @param {string} event_json
+ * @param {string} payload_json
  * @param {string[]} relays
  * @param {number} now_ms
  */
-export function recordPendingPublish(event_id, event_json, relays, now_ms) {
+export function recordPendingPublish(event_id, event_json, payload_json, relays, now_ms) {
     const ptr0 = passStringToWasm0(event_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(event_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArrayJsValueToWasm0(relays, wasm.__wbindgen_malloc);
+    const ptr2 = passStringToWasm0(payload_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
-    wasm.recordPendingPublish(ptr0, len0, ptr1, len1, ptr2, len2, now_ms);
+    const ptr3 = passArrayJsValueToWasm0(relays, wasm.__wbindgen_malloc);
+    const len3 = WASM_VECTOR_LEN;
+    wasm.recordPendingPublish(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, now_ms);
 }
 
 /**
@@ -951,6 +955,13 @@ export function requestCall(pairing_id, own_pubkey_hex, peer_pubkey_hex, peer_on
     } finally {
         wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
     }
+}
+
+/**
+ * See [`crate::presence::request_hello`]'s own doc.
+ */
+export function requestHello() {
+    wasm.requestHello();
 }
 
 /**

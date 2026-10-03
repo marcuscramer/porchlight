@@ -506,6 +506,7 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeMarkSeen<'lo
     peer_pubkey_hex: JString<'local>,
     now_ms: jlong,
     peer_busy: jni::sys::jint,
+    peer_hello: jni::sys::jboolean,
 ) -> jstring {
     encode_or_fallback(&mut env, empty_presence_result_json, |env| {
         let pairing_id = get_string(env, &pairing_id)?;
@@ -516,8 +517,14 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeMarkSeen<'lo
             1 => Some(true),
             _ => None,
         };
-        Some(crate::presence::mark_seen(&pairing_id, &own_pubkey_hex, &peer_pubkey_hex, now_ms, peer_busy))
+        Some(crate::presence::mark_seen(&pairing_id, &own_pubkey_hex, &peer_pubkey_hex, now_ms, peer_busy, peer_hello != 0))
     })
+}
+
+/// See [`crate::presence::request_hello`]'s own doc. No return value.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRequestHello<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) {
+    run_catching(&mut env, |_env| crate::presence::request_hello());
 }
 
 /// See [`crate::presence::handle_peer_busy_reply`]'s own doc. Takes the same
@@ -968,15 +975,17 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRecordPendin
     _class: JClass<'local>,
     event_id: JString<'local>,
     event_json: JString<'local>,
+    payload_json: JString<'local>,
     relays_json: JString<'local>,
     now_ms: jlong,
 ) {
     run_catching(&mut env, |env| {
         let Some(event_id) = get_string(env, &event_id) else { return };
         let Some(event_json) = get_string(env, &event_json) else { return };
+        let Some(payload_json) = get_string(env, &payload_json) else { return };
         let Some(relays_json) = get_string(env, &relays_json) else { return };
         let Ok(relays) = serde_json::from_str::<Vec<String>>(&relays_json) else { return };
-        crate::signal_retry::record_pending_publish(&event_id, &event_json, &relays, now_ms);
+        crate::signal_retry::record_pending_publish(&event_id, &event_json, &payload_json, &relays, now_ms);
     });
 }
 
