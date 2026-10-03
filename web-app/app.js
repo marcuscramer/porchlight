@@ -33,7 +33,7 @@ import init, * as callCore from './wasm/call_core.js';
 // already falls back correctly once a second locale file exists, no code
 // here needs to change when one does.
 import { t as translate, resolveLocale } from './strings.js';
-import { RELAYS, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS } from './shared-config.js';
+import { RELAYS, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS } from './shared-config.js';
 
 // call-core's WASM module — a top-level await (legal since this file is
 // loaded as type="module"), so nothing below can run a pairing attempt
@@ -80,7 +80,7 @@ const WRAP_KIND = PROTOCOL_CONSTANTS.wrap_kind;
 // ONLINE_TIMEOUT_MS all live in call-core's `presence` module now — this is
 // the one presence-related constant that stays here, purely this file's own
 // polling cadence for calling callCore.checkOnlineTimeouts.
-const ONLINE_CHECK_INTERVAL_MS = 10000;
+const ONLINE_CHECK_INTERVAL_MS = PRESENCE_TICK_INTERVAL_MS;
 // "At least 120 seconds" per the pairing design doc.
 const PAKE_LIVE_WINDOW_MS = PROTOCOL_CONSTANTS.pake_live_window_ms;
 // Sanity bounds on untrusted network input are enforced inside
@@ -253,7 +253,7 @@ function pendingPairingsList() {
 // is the fix; debounced so a relay that keeps closing for a persistent
 // reason doesn't get hammered in a tight loop.
 let lastCloseResubscribeMs = 0;
-const SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS = 10000;
+const SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS = SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS;
 function onSubscriptionClosed(reasons) {
   console.warn('relay closed our subscription:', reasons);
   const now = Date.now();

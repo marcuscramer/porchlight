@@ -15,5 +15,11 @@ export const STUN_SERVERS = [
 
 export const AUTO_DISMISS_DELAY_MS = 20000;
 
+// How often the presence-timeout / call-timeout / publish-retry sweep runs.
+export const PRESENCE_TICK_INTERVAL_MS = 10000;
+
+// Minimum gap between two re-subscribes after a relay closes our subscription.
+export const SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS = 10000;
+
 // Cycle order of the self-view position.
 export const PREVIEW_POSITIONS = ["bottom-start","top-start","top-end","bottom-end","invisible"];

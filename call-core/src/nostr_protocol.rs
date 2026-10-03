@@ -391,12 +391,12 @@ pub fn build_ice_payload(sdp_mid: Option<&str>, sdp_m_line_index: i32, candidate
 /// (stricter than the old duck-typed `optString`/`optInt` both platforms
 /// used to tolerate — a malformed message from a confirmed,
 /// cryptographically-verified peer is adversarial or buggy either way), an
-/// `offer`/`answer` whose `sdp` is blank or over [`crate::MAX_SDP_LENGTH`],
+/// `offer`/`answer` whose `sdp` is blank or over `crate::MAX_SDP_LENGTH`,
 /// or an `ice` whose `candidate` is blank or over
-/// [`crate::MAX_ICE_CANDIDATE_LENGTH`]. A `heartbeat`'s `name` comes back
-/// already capped to [`crate::MAX_NAME_LENGTH`] and run through
+/// `crate::MAX_ICE_CANDIDATE_LENGTH`. A `heartbeat`'s `name` comes back
+/// already capped to `crate::MAX_NAME_LENGTH` and run through
 /// [`crate::sanitize_name`]. Every `call_id` comes back through
-/// [`ensure_call_id`], substituting a fresh random one for a
+/// `ensure_call_id`, substituting a fresh random one for a
 /// missing/blank value.
 pub fn parse_signal_payload(payload_json: &str) -> Option<SignalMessage> {
     let message: SignalMessage = serde_json::from_str(payload_json).ok()?;
@@ -491,7 +491,7 @@ impl DedupState {
 /// `true` for a genuinely new `event_id` (the caller should process this
 /// event); `false` if it's already been seen (the caller must drop it
 /// silently). Evicts the single oldest entry once the set exceeds
-/// [`MAX_SEEN_EVENT_IDS`].
+/// `MAX_SEEN_EVENT_IDS`.
 pub fn mark_seen_or_is_duplicate(event_id: &str) -> bool {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.dedup;

@@ -8,7 +8,7 @@
 //! **Per-pairing maps, not a single global slot**: unlike
 //! [`crate::call_arbitration`] (one call, device-wide), presence is tracked
 //! independently per pairing — many contacts can be online or offline at
-//! once — so this module's own state, [`PresenceState`], is a few
+//! once — so this module's own state, `PresenceState`, is a few
 //! `HashMap`s. A field of `crate::AppState`, not its own separately-locked
 //! static — see that struct's own doc for why.
 //!
@@ -30,7 +30,7 @@
 //! `online_state` still says `false`, say) unless every call site
 //! remembers to keep the two maps in lockstep. Collapsing both into one
 //! `HashMap<String, PresenceStatus>` makes "offline but also busy" a state
-//! that cannot be constructed at all — see [`set_status`]/[`ensure_status`]
+//! that cannot be constructed at all — see `set_status`/`ensure_status`
 //! for the single choke point every transition now goes through.
 //!
 //! # Invariants
@@ -268,7 +268,7 @@ fn transition_offline(state: &mut crate::AppState, pairing_id: &str) -> Presence
 /// by design), so without an answer a freshly loaded device would show
 /// everyone offline for up to a full heartbeat interval. Answer with one
 /// immediate heartbeat ([`PresenceEffect::ReplyHeartbeat`]), at most once per
-/// [`HELLO_REPLY_MIN_INTERVAL_MS`] per pairing. The reply itself carries no
+/// `HELLO_REPLY_MIN_INTERVAL_MS` per pairing. The reply itself carries no
 /// `hello`, so two devices can never ping-pong.
 pub fn mark_seen(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, now_ms: i64, peer_busy: Option<bool>, peer_hello: bool) -> PresenceUpdateResult {
     let mut state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
@@ -310,7 +310,7 @@ pub fn take_hello() -> bool {
 /// fuses the things that reply means into one call, the same way
 /// [`mark_seen`]/[`handle_leaving_message`] already fuse a presence
 /// transition with whatever `call_arbitration` effects it triggers: this
-/// peer is confirmed reachable and busy *right now* (via [`ensure_status`],
+/// peer is confirmed reachable and busy *right now* (via `ensure_status`,
 /// updated immediately rather than waiting for their next heartbeat), and
 /// our own claimed call slot must be released
 /// ([`crate::call_arbitration::handle_peer_busy`]). `own_pubkey_hex`/
@@ -347,7 +347,7 @@ pub fn handle_leaving_message(pairing_id: &str) -> PresenceUpdateResult {
 
 /// Mirrors `monitor`/`monitorOnlineTimeouts`: sweeps `last_seen_at`,
 /// transitions offline anything whose last heartbeat is more than
-/// [`ONLINE_TIMEOUT_MS`] behind `now_ms`, concatenating every transitioned
+/// `ONLINE_TIMEOUT_MS` behind `now_ms`, concatenating every transitioned
 /// pairing's own result into one combined [`PresenceUpdateResult`]. The
 /// shell calls this once per sweep tick (its own polling cadence, not
 /// owned here); zero, one, or several pairings can time out in a single
@@ -379,10 +379,10 @@ pub fn is_online(pairing_id: &str) -> bool {
     current_status(&state.presence, pairing_id) != PresenceStatus::Offline
 }
 
-/// The delay before the next heartbeat tick: [`PAIRING_REPUBLISH_INTERVAL_MS`]
+/// The delay before the next heartbeat tick: `PAIRING_REPUBLISH_INTERVAL_MS`
 /// while any of `pending_pairing_ids` has a live pairing attempt (its
 /// bootstrap messages are republished on the same tick), otherwise the
-/// steady [`HEARTBEAT_INTERVAL_MS`]. Everything else that wants a prompt
+/// steady `HEARTBEAT_INTERVAL_MS`. Everything else that wants a prompt
 /// heartbeat asks for exactly one — a `hello` (see [`mark_seen`]) or an
 /// explicit kick — instead of raising the rate: a deferred call used to
 /// speed everything up to 3s even though our own heartbeats do nothing to

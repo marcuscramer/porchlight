@@ -791,7 +791,7 @@ class NostrSignalingClient(
         // call-core's `presence` module now — this is the one
         // presence-related constant that stays here, purely this class's
         // own polling cadence for calling CallCoreBridge.checkOnlineTimeouts.
-        private const val ONLINE_CHECK_INTERVAL_MS = 10_000L
+        private const val ONLINE_CHECK_INTERVAL_MS = GeneratedSharedConfig.PRESENCE_TICK_INTERVAL_MS
 
         // See [monitor]'s own doc for why this exists: quartz-android's
         // BasicRelayClient can lock a relay out of reconnecting for a full
@@ -809,6 +809,6 @@ class NostrSignalingClient(
         // See resubscribe()'s onClosed override: a relay sending NIP-01
         // CLOSED for a persistent reason (PoW/auth it'll never satisfy)
         // would otherwise get re-subscribed in a tight loop forever.
-        private const val SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS = 10_000L
+        private const val SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS = GeneratedSharedConfig.SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS
     }
 }

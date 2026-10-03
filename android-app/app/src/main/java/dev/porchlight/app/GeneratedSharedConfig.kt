@@ -18,6 +18,12 @@ object GeneratedSharedConfig {
 
     const val AUTO_DISMISS_DELAY_MS: Long = 20_000L
 
+    /** How often the presence-timeout / call-timeout / publish-retry sweep runs. */
+    const val PRESENCE_TICK_INTERVAL_MS: Long = 10_000L
+
+    /** Minimum gap between two re-subscribes after a relay closes our subscription. */
+    const val SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS: Long = 10_000L
+
     /** Cycle order of the self-view position, as wire names (see PreviewCorner). */
     val PREVIEW_POSITIONS: List<String> = listOf(
         "bottom-start",

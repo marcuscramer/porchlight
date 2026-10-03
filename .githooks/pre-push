@@ -13,7 +13,7 @@
 # explicitly):
 #   git config core.hooksPath .githooks
 #
-# Only runs `cargo test --workspace` (call-core + pake-bridge) — the host
+# Only runs `cargo test --workspace` (call-core + pake-bridge) plus a doc build — the host
 # `rlib` target needs no Android NDK/wasm32 toolchain, so this works on any
 # machine with a plain Rust install. Deliberately does NOT also run the
 # Android/web builds here: those need a real NDK + rustup targets + JDK 17
@@ -28,3 +28,10 @@ echo "pre-push: running cargo test (call-core, pake-bridge)..."
 cargo test --workspace
 
 echo "pre-push: cargo test passed."
+
+# The call-core/pake-bridge docs carry the call-state invariants (see
+# call-core/src/call_arbitration.rs), so a doc build that warns (a link that no
+# longer resolves, a link to a private item) is treated as a failure too.
+echo "pre-push: building docs (warnings are errors)..."
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+echo "pre-push: docs ok."

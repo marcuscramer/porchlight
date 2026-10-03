@@ -156,12 +156,12 @@ pub struct PendingRetry {
 /// Records `event_json` (already built/signed by the shell; this module
 /// never looks inside it) as needing delivery to `relays` — unless
 /// `payload_json`, the plain message it wraps, is one that shouldn't be
-/// retried at all (see [`retry_ttl_ms`]; a no-op then) — call right
+/// retried at all (see `retry_ttl_ms`; a no-op then) — call right
 /// after the shell's own publish attempt, passing only whichever targets
 /// it already knows missed (e.g. weren't connected at send time; a relay
 /// that *was* sent to but still rejects it is narrowed back in separately,
 /// via [`record_publish_result`]). A no-op for an empty `relays`. Evicts the
-/// single oldest entry once the queue exceeds [`PENDING_PUBLISH_MAX_ENTRIES`],
+/// single oldest entry once the queue exceeds `PENDING_PUBLISH_MAX_ENTRIES`,
 /// same shape as [`crate::nostr_protocol::mark_seen_or_is_duplicate`]'s own
 /// bound.
 pub fn record_pending_publish(event_id: &str, event_json: &str, payload_json: &str, relays: &[String], now_ms: i64) {
@@ -188,7 +188,7 @@ pub fn record_pending_publish(event_id: &str, event_json: &str, payload_json: &s
 /// still-outstanding set, dropping the whole entry once empty. Anything else
 /// is an explicit rejection: `relay` goes (back) into the entry — a no-op if
 /// it was already there, or if `event_id` isn't pending at all — and starts
-/// a cooldown (see [`REJECTION_COOLDOWN_MS`]) that keeps [`due_for_retry`]
+/// a cooldown (see `REJECTION_COOLDOWN_MS`) that keeps [`due_for_retry`]
 /// and [`available_relays`] away from it. `reason` is the relay's own text,
 /// or whatever the shell's library surfaces for a rejection; empty is fine.
 pub fn record_publish_result(event_id: &str, relay: &str, accepted: bool, reason: &str, now_ms: i64) {
@@ -221,7 +221,7 @@ pub fn available_relays(candidates: &[String], now_ms: i64) -> Vec<String> {
 
 /// Called from the shell's own existing periodic tick (the same one
 /// `check_online_timeouts`/`check_call_timeout` already run on) — prunes
-/// anything past its own lifetime ([`retry_ttl_ms`]) first, then hands back every
+/// anything past its own lifetime (`retry_ttl_ms`) first, then hands back every
 /// remaining entry's still-outstanding relays that aren't cooling down from a
 /// rejection, for the shell to actually republish to. An entry whose relays
 /// are all cooling down this tick is simply left out (it stays queued).

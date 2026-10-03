@@ -100,7 +100,7 @@ impl PakeSession {
     /// once, here, means neither platform has its own copy of this step to
     /// get out of sync (see this module's own doc).
     ///
-    /// Returns the session, the rendezvous tag (see [`derive_rendezvous_tag`])
+    /// Returns the session, the rendezvous tag (see `derive_rendezvous_tag`)
     /// to find a peer at, and this side's outbound blinded message to
     /// publish once a peer is found. Takes a noticeable fraction of a second
     /// — the tag derivation is deliberately slow.

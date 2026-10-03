@@ -24,6 +24,23 @@
 //! more boilerplate than this crate's actual logic. All the real type
 //! safety lives in these Rust enums (compile-time checked); each platform
 //! just does `JSONObject`/`JSON.parse` on the result.
+//!
+//! **Modules** (each has its own docs; every one is pure decision logic over
+//! plain data, with the shell owning all real I/O):
+//!
+//! - this file — the passphrase-pairing (SPAKE2 bootstrap) state machine;
+//! - `call_arbitration` — the one call slot, its invariants and tie-break;
+//! - `presence` — who is online/busy, the heartbeat cadence, `hello` replies
+//!   (calls into `call_arbitration`; nothing calls back);
+//! - `nostr_protocol` — gift-wrap/bootstrap event construction and
+//!   verification, the signal-message schema, dedup, relay filters;
+//! - `signal_retry` — the retry queue and per-relay rejection cooldown for
+//!   signal messages that missed a relay;
+//! - `ice_evidence` — ICE-candidate evidence and the "why did this call never
+//!   connect?" diagnosis.
+//!
+//! The last three (and `nostr_protocol`) are independent of one another and
+//! of `call_arbitration`/`presence`.
 
 use pake_bridge::{PakeKeys, PakeSession};
 use serde::{Deserialize, Serialize};
@@ -35,49 +52,19 @@ mod android;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
-/// The call-arbitration state machine (`activePairingId`/`activeCallId`/
-/// `pendingOffer`/`wantsCall` in the old hand-mirrored Kotlin/JS) — a
-/// second, conceptually distinct state machine from the pairing-bootstrap
-/// one above, kept in its own module rather than folded in here. See its
-/// own doc for the full design.
 pub mod call_arbitration;
 
-/// Presence/online-tracking and the adaptive-heartbeat decision logic
-/// (`lastSeenAt`/`onlineState`/`pendingCreatedAt` in the old hand-mirrored
-/// Kotlin/JS) — the third and last planned `call-core` module. Calls
-/// directly into [`call_arbitration`] (a one-way sibling dependency). See
-/// its own doc for the full design.
 pub mod presence;
 
-/// The Nostr protocol layer — gift-wrap construction/unwrapping, plain
-/// bootstrap-event construction/verification, event dedup, and relay
-/// filter-set construction (in the old hand-mirrored Kotlin/JS:
-/// `NostrSignalingClient.kt`'s/`app.js`'s `publish`/`handleWrapEvent`/
-/// `publishBootstrap`/`handleBootstrapEvent`/`seenEventIds`/
-/// `currentFilters`). Independent of [`call_arbitration`]/[`presence`] —
-/// this module never calls into either. See its own doc for the full
-/// design, including why the actual relay connection stays platform-native.
 pub mod nostr_protocol;
 
-/// The signaling-publish retry queue — bookkeeping for a signal message
-/// that missed one or more relays at send time, so the shell's own
-/// periodic tick can give it a real second chance instead of the message
-/// silently vanishing. Independent of every other module here, same as
-/// [`nostr_protocol`] — this doesn't call into anything else, and nothing
-/// else calls into this. See its own doc for the full design, including
-/// why neither platform's relay-client library already does this on its
-/// own.
 pub mod signal_retry;
 
-/// The ICE-candidate evidence collected while a `PeerConnection` negotiates
-/// and the "why did this call never connect?" diagnosis drawn from it
-/// (`WebRtcEngine.kt`/`app.js`'s two hand-written copies). Independent of
-/// every other module here. See its own doc for the full design.
 pub mod ice_evidence;
 
 /// A peer's self-reported, untrusted display name is capped and stripped
 /// of bidi-override/zero-width characters before ever being stored — it's
-/// exactly what a human reads on the "Pair with [name]?" screen to confirm
+/// exactly what a human reads on the "Pair with \[name\]?" screen to confirm
 /// they're pairing with who they expect (see [`sanitize_name`]'s own doc).
 const MAX_NAME_LENGTH: usize = 100;
 
@@ -446,7 +433,7 @@ fn handle_pake_confirm(registry: &mut HashMap<String, PakeAttempt>, pairing_id: 
 
 /// A match proves both sides derived the identical SPAKE2 secret — i.e.,
 /// both typed the same passphrase — and is what actually surfaces the
-/// "Pair with [name]?" tap, not merely completing this far without an
+/// "Pair with \[name\]?" tap, not merely completing this far without an
 /// error. A mismatch just means a wrong passphrase somewhere; quietly
 /// discard and let the human retry with a fresh phrase, same as a
 /// timeout. Mirrors `CameraAgentService.verifyPairingConfirmation`.
@@ -534,7 +521,7 @@ pub enum BootstrapPayload {
 
 /// Strips control, bidi-override, and zero-width characters from a name
 /// before it's ever stored — a peer's self-reported name is exactly what a
-/// human reads on the "Pair with [name]?" screen to confirm they're
+/// human reads on the "Pair with \[name\]?" screen to confirm they're
 /// pairing with who they expect, so this isn't cosmetic: a RIGHT-TO-LEFT
 /// OVERRIDE or zero-width character could visually spoof that name into
 /// reading as something else entirely. Ported directly from

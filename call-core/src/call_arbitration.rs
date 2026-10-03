@@ -7,11 +7,11 @@
 //!
 //! **Single global slot, not a per-id registry**: only one call is ever
 //! active device-wide, regardless of how many pairings exist, so
-//! [`CallState`] is one struct, not a `HashMap`.
+//! `CallState` is one struct, not a `HashMap`.
 //!
 //! Lives behind `crate::STATE`'s shared lock, not one of its own.
 //! [`request_call`]/[`handle_offer`]/etc. stay the locking entry points the
-//! shell calls; a few functions [`presence`] needs to call while already
+//! shell calls; a few functions `presence` needs to call while already
 //! holding the lock have a `pub(crate) inner_*` twin that takes
 //! `&mut CallState` directly instead of re-locking.
 //!
@@ -335,7 +335,7 @@ pub enum CallEffect {
 /// Why a call ended, for [`CallEffect::ShowCallOutcome`] — not every
 /// teardown path emits this (`hang_up`/`forget_pairing` never do).
 /// `PeerEnded` is the one case with an explicit signal (a real `"bye"`);
-/// the other two are distinguished only by [`ActiveCall::connected_once`].
+/// the other two are distinguished only by `ActiveCall::connected_once`.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum CallOutcomeReason {
@@ -451,11 +451,11 @@ pub fn request_call(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &st
 }
 
 /// Called by the shell's presence layer the moment a peer transitions
-/// online — resolves any [`DeferredCall`] waiting on this pairing. `[]` if
+/// online — resolves any `DeferredCall` waiting on this pairing. `[]` if
 /// none was actually wanted.
 ///
-/// Locking wrapper around [`inner_handle_peer_online`] for `android.rs`/
-/// `wasm.rs`; `presence` itself calls [`inner_handle_peer_online`] directly
+/// Locking wrapper around `inner_handle_peer_online` for `android.rs`/
+/// `wasm.rs`; `presence` itself calls `inner_handle_peer_online` directly
 /// since it's already holding `crate::STATE`'s guard.
 pub fn handle_peer_online(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, now_ms: i64) -> Vec<CallEffect> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
@@ -490,7 +490,7 @@ pub(crate) fn inner_handle_peer_online(state: &mut CallState, pairing_id: &str, 
 /// slot), else claims the slot and **rings**, same as a fresh
 /// [`handle_offer`] call — this side does not create the offer immediately
 /// even though it won the tie-break, since a human still needs to see and
-/// accept the ring (see [`PendingOfferKind`]'s doc for the bug this fixes).
+/// accept the ring (see `PendingOfferKind`'s doc for the bug this fixes).
 ///
 /// Deliberately does not gate the redelivery guard on
 /// `has_active_peer_connection`: `state.slot`'s own `pairing_id()` match is
@@ -561,8 +561,8 @@ pub fn handle_offer(pairing_id: &str, call_id: &str, sdp: &str, auto_answer: boo
 /// `pc`-internal state with no equivalent here, and stays a second,
 /// independent guard inside `WebRtcEngine`/`ensurePeerConnection`.
 ///
-/// Only ever `true` while [`CallSlot::Claimed`], never
-/// [`CallSlot::Ringing`] — a real answer can only be a reply to an offer
+/// Only ever `true` while `CallSlot::Claimed`, never
+/// `CallSlot::Ringing` — a real answer can only be a reply to an offer
 /// this side already sent, and this side only ever sends one from
 /// `Claimed`, never mid-ring.
 pub fn should_apply_answer(pairing_id: &str, call_id: &str) -> bool {
@@ -622,7 +622,7 @@ pub fn handle_remote_ice(pairing_id: &str, call_id: &str, sdp_mid: Option<&str>,
 /// Everything the shell needs to actually apply an accepted incoming call —
 /// mirrors `acceptIncomingCall`: takes `pending_offer` if present (clearing
 /// it and its countdown-timer state), and tells the shell which of the two
-/// things [`PendingOfferKind`] describes it needs to do now.
+/// things `PendingOfferKind` describes it needs to do now.
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(tag = "kind")]
 pub enum AcceptOutcome {
@@ -669,10 +669,10 @@ pub fn accept_incoming_call(now_ms: i64) -> Option<AcceptOutcome> {
 
 /// One tick of the auto-answer countdown — the *decision* only; the shell
 /// keeps owning the actual timer loop (a 1-second reschedule on
-/// [`Continue`]), the same way pairing-bootstrap's `handle_timeout` already
+/// `Continue`), the same way pairing-bootstrap's `handle_timeout` already
 /// works (core decides, shell schedules). The shell calls this once per
 /// second starting one second *after* [`handle_offer`] returned
-/// [`StartRinging`] with `seconds_remaining: 5` — never a synchronous
+/// `StartRinging` with `seconds_remaining: 5` — never a synchronous
 /// zeroth call.
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(tag = "outcome")]
@@ -736,14 +736,14 @@ pub fn hang_up() -> Vec<CallEffect> {
 /// [`crate::presence::check_online_timeouts`]'s shape exactly — a pure,
 /// periodically-polled function rather than an internal timer, since this
 /// module has no clock of its own) — gives up on a call that's been
-/// [`CallSlot::Claimed`] too long without ever reaching
+/// `CallSlot::Claimed` too long without ever reaching
 /// [`mark_connected`]. Covers every way a `Claimed` slot can be waiting on
 /// the *other* side's very first response with nothing left to fail from
 /// on its own: a sent offer with no answer yet, a sent `"call"` ping with
 /// no reply, or a deferred call whose peer never came online — `request_call`
 /// sets `Claimed` (and `claimed_at_ms`) synchronously in all three cases, so
 /// one check covers all three. Deliberately does **not** apply to
-/// [`CallSlot::Ringing`]: an incoming ring is bounded by a human (Accept/
+/// `CallSlot::Ringing`: an incoming ring is bounded by a human (Accept/
 /// Decline are always on screen) or by auto-answer's own short countdown,
 /// never by this.
 ///
@@ -792,7 +792,7 @@ fn end_active_call_if_matching(state: &mut CallState, pairing_id: &str, call_id:
 /// bye) plus [`CallEffect::ShowCallOutcome`] with
 /// [`CallOutcomeReason::PeerEnded`] — an explicit "bye" is the most
 /// specific signal available, reported regardless of
-/// [`ActiveCall::connected_once`].
+/// `ActiveCall::connected_once`.
 pub fn handle_peer_hangup(pairing_id: &str, call_id: &str) -> Vec<CallEffect> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.call;
@@ -829,7 +829,7 @@ pub(crate) fn inner_handle_peer_busy(state: &mut CallState, pairing_id: &str, ca
 /// call_id-scoped guard**: a peer going fully offline ends *any* call with
 /// them regardless of which `call_id`. Confirmed intentional on both
 /// platforms, not a bug to fix. Reports [`CallOutcomeReason::NeverConnected`]
-/// or `::Dropped` based on [`ActiveCall::connected_once`] — the best signal
+/// or `::Dropped` based on `ActiveCall::connected_once` — the best signal
 /// available for a peer that vanished from presence without an explicit
 /// "bye".
 pub fn handle_peer_left(pairing_id: &str) -> Vec<CallEffect> {
@@ -885,7 +885,7 @@ pub fn forget_pairing(pairing_id: &str) -> Vec<CallEffect> {
 ///
 /// Emits [`CallEffect::ShowCallOutcome`] (`NeverConnected`/`Dropped`, same
 /// `connected_once` heuristic as [`handle_peer_left`]) *only* when the slot
-/// isn't already [`CallSlot::Idle`]. Every other teardown path already
+/// isn't already `CallSlot::Idle`. Every other teardown path already
 /// clears the slot (and, where relevant, already emits its own outcome)
 /// before its own `ClosePeerConnection` reaches the shell — so by the time
 /// the shell's own teardown calls this function, it correctly no-ops unless
