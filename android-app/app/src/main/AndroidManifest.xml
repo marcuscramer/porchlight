@@ -57,6 +57,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <!-- Plain LAUNCHER: confirmed from Immortal's own source
