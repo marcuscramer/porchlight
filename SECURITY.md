@@ -137,23 +137,25 @@ number.
   needs Developer Options/USB debugging, which is a strictly weaker device
   posture than a locked-down consumer device. This is a property of
   sideloading generally, not specific to this app.
-- **Optional setup steps weaken the device further.** To let the app update
-  itself, the README has you turn off Meta's install verifier and Android's
-  package verification as a whole, so the device stops checking any
-  sideloaded install. To let an incoming call show over the screensaver and
-  switch the TV to the Portal, you switch on Porchlight's accessibility
-  service with one `adb` command. The service is declared with no access to
-  screen content and no events, and the app only uses it to press the Home
-  key when a call rings. Android's accessibility mechanism is powerful in
-  general, so this still means trusting the app's code and its updates, but it
-  is a much narrower grant than a permission to change system settings, which
-  Porchlight does not use. A second, also optional, step ("display over other
-  apps") lets the app cover the screen with a plain panel for the moment it's
-  pressing Home, so the Portal's own home screen never flashes through —
-  the same category of permission a floating-chat-head app would hold, shown
-  only while a call is ringing and removed as soon as the call screen is up,
-  with a timer that force-removes it regardless. All of these steps are
-  optional, and skipping them costs only convenience.
+- **The convenience setup weakens the device further.** The README's
+  "Convenience" section has two parts, both skippable. To let the app update
+  itself, you turn off Meta's install verifier and Android's package
+  verification as a whole, so the device stops checking any sideloaded
+  install. To let an incoming call show over the screensaver and switch the
+  TV to the Portal (the call wake-up, which is optional as a whole), you run
+  two `adb` commands. The first switches on Porchlight's accessibility
+  service, which is declared with no access to screen content and no events;
+  the app only uses it to press the Home key when a call rings. Android's
+  accessibility mechanism is powerful in general, so this still means
+  trusting the app's code and its updates, but it is a much narrower grant
+  than a permission to change system settings, which Porchlight does not
+  use. The second grants "display over other apps", so the app can cover the
+  screen with a plain panel for the moment it's pressing Home and the
+  Portal's own home screen never flashes through. That is the same category
+  of permission a floating-chat-head app would hold, used only while a call
+  is ringing and removed as soon as the call screen is up, with a timer that
+  force-removes it regardless. None of this is needed for calls to work;
+  skipping it costs only convenience.
 - **The platform itself is unmaintained.** Meta Portal hardware is
   discontinued and Meta doesn't guarantee further updates, so any weakness in
   the underlying Android build stays unpatched, with or without Porchlight.
