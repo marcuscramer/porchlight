@@ -21,6 +21,23 @@ export function acceptIncomingCall(now_ms) {
 }
 
 /**
+ * See [`crate::signal_retry::available_relays`]'s own doc. Falls back to
+ * "no relays" on a panic — every skipped relay is recorded as a miss by the
+ * caller and retried, so nothing is lost.
+ * @param {string[]} candidates
+ * @param {number} now_ms
+ * @returns {string[]}
+ */
+export function availableRelays(candidates, now_ms) {
+    const ptr0 = passArrayJsValueToWasm0(candidates, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.availableRelays(ptr0, len0, now_ms);
+    var v2 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
+
+/**
  * See [`crate::nostr_protocol::build_answer_payload`]'s own doc.
  * @param {string} sdp
  * @param {string} call_id
@@ -879,18 +896,22 @@ export function recordPendingPublish(event_id, event_json, relays, now_ms) {
 }
 
 /**
- * See [`crate::signal_retry::record_publish_ack`]'s own doc. No return
+ * See [`crate::signal_retry::record_publish_result`]'s own doc. No return
  * value; a panic is a silent no-op.
  * @param {string} event_id
  * @param {string} relay
- * @param {boolean} success
+ * @param {boolean} accepted
+ * @param {string} reason
+ * @param {number} now_ms
  */
-export function recordPublishAck(event_id, relay, success) {
+export function recordPublishResult(event_id, relay, accepted, reason, now_ms) {
     const ptr0 = passStringToWasm0(event_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passStringToWasm0(relay, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
-    wasm.recordPublishAck(ptr0, len0, ptr1, len1, success);
+    const ptr2 = passStringToWasm0(reason, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    wasm.recordPublishResult(ptr0, len0, ptr1, len1, accepted, ptr2, len2, now_ms);
 }
 
 /**
@@ -1245,6 +1266,17 @@ function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();
     wasm.__wbindgen_externrefs.set(idx, obj);
     return idx;
+}
+
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getDataViewMemory0();
+    const result = [];
+    for (let i = ptr; i < ptr + 4 * len; i += 4) {
+        result.push(wasm.__wbindgen_externrefs.get(mem.getUint32(i, true)));
+    }
+    wasm.__externref_drop_slice(ptr, len);
+    return result;
 }
 
 function getArrayU8FromWasm0(ptr, len) {

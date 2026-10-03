@@ -645,11 +645,19 @@ pub fn record_pending_publish(event_id: &str, event_json: &str, relays: Vec<Stri
     let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::record_pending_publish(event_id, event_json, &relays, now_ms as i64)));
 }
 
-/// See [`crate::signal_retry::record_publish_ack`]'s own doc. No return
+/// See [`crate::signal_retry::record_publish_result`]'s own doc. No return
 /// value; a panic is a silent no-op.
-#[wasm_bindgen(js_name = recordPublishAck)]
-pub fn record_publish_ack(event_id: &str, relay: &str, success: bool) {
-    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::record_publish_ack(event_id, relay, success)));
+#[wasm_bindgen(js_name = recordPublishResult)]
+pub fn record_publish_result(event_id: &str, relay: &str, accepted: bool, reason: &str, now_ms: f64) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::record_publish_result(event_id, relay, accepted, reason, now_ms as i64)));
+}
+
+/// See [`crate::signal_retry::available_relays`]'s own doc. Falls back to
+/// "no relays" on a panic — every skipped relay is recorded as a miss by the
+/// caller and retried, so nothing is lost.
+#[wasm_bindgen(js_name = availableRelays)]
+pub fn available_relays(candidates: Vec<String>, now_ms: f64) -> Vec<String> {
+    catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::available_relays(&candidates, now_ms as i64))).unwrap_or_default()
 }
 
 /// See [`crate::signal_retry::due_for_retry`]'s own doc. Returns a

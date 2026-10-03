@@ -308,10 +308,10 @@ class NostrSignalingClient(
             // response to an EVENT is OkMessage, delivered here because
             // onIncomingMessage fires for every raw message type a relay
             // sends. A relay that was never connected enough to be sent to
-            // gets no OK at all — enqueuePendingPublish covers that case.
+            // gets no OK at all — publishAndQueueMisses covers that case.
             override fun onIncomingMessage(relay: IRelayClient, msgStr: String, msg: Message) {
                 val ok = msg as? OkMessage ?: return
-                executor.safeExecute { CallCoreBridge.recordPublishAck(ok.eventId, relay.url.url, ok.success) }
+                executor.safeExecute { CallCoreBridge.recordPublishResult(ok.eventId, relay.url.url, ok.success, ok.message, System.currentTimeMillis()) }
             }
         })
         client.connect()
@@ -653,8 +653,7 @@ class NostrSignalingClient(
             try {
                 val wrapJson = CallCoreBridge.buildWrappedEvent(ownPrivateKeyHex, targetPubkeyHex, payloadJson) ?: return@launch
                 val wrapEvent = Event.fromJsonOrNull(wrapJson) ?: return@launch
-                client.publish(wrapEvent, relayUrls)
-                enqueuePendingPublish(wrapEvent, wrapJson)
+                publishAndQueueMisses(wrapEvent, wrapJson)
             } catch (t: Throwable) {
                 Log.e(TAG, "failed to encrypt/publish to $targetPubkeyHex", t)
             }
@@ -662,17 +661,22 @@ class NostrSignalingClient(
     }
 
     /**
-     * Hands call-core's retry queue whichever of [relayUrls] aren't in
-     * [connectedRelays] right now — certain misses, since a disconnected
-     * relay's socket was never sent anything (and so can't send back an
-     * OkMessage either). A connected relay that still rejects the event is
-     * recorded separately, by the onIncomingMessage override. Runs on
-     * [executor] (via [scope]'s own dispatcher), same as every other read of
-     * [connectedRelays].
+     * The one place a first publish happens: sends to the relays call-core
+     * says aren't cooling down from a recent rejection, then hands call-core's
+     * retry queue every relay that missed it — cooling down, or not in
+     * [connectedRelays] right now (a disconnected relay's socket was never
+     * sent anything, so it can't send back an OkMessage either). A connected
+     * relay that still rejects the event is recorded separately, by the
+     * onIncomingMessage override. Runs on [executor] (via [scope]'s own
+     * dispatcher), same as every other read of [connectedRelays].
      */
-    private fun enqueuePendingPublish(event: Event, eventJson: String) {
-        val missing = (relayUrls - connectedRelays).map { it.url }
-        if (missing.isNotEmpty()) CallCoreBridge.recordPendingPublish(event.id, eventJson, missing, System.currentTimeMillis())
+    private fun publishAndQueueMisses(event: Event, eventJson: String) {
+        val now = System.currentTimeMillis()
+        val available = CallCoreBridge.availableRelays(relayUrls.map { it.url }, now).toSet()
+        val targets = relayUrls.filter { it.url in available }.toSet()
+        if (targets.isNotEmpty()) client.publish(event, targets)
+        val missed = relayUrls.filter { it !in targets || it !in connectedRelays }.map { it.url }
+        if (missed.isNotEmpty()) CallCoreBridge.recordPendingPublish(event.id, eventJson, missed, now)
     }
 
     /** Republishes whatever call-core says is still outstanding — called
@@ -697,8 +701,7 @@ class NostrSignalingClient(
             try {
                 val eventJson = CallCoreBridge.buildBootstrapEvent(ownPrivateKeyHex, rendezvousTag, targetPubkeyHex, payload.toString()) ?: return@launch
                 val event = Event.fromJsonOrNull(eventJson) ?: return@launch
-                client.publish(event, relayUrls)
-                enqueuePendingPublish(event, eventJson)
+                publishAndQueueMisses(event, eventJson)
             } catch (t: Throwable) {
                 Log.e(TAG, "failed to publish bootstrap message at $rendezvousTag", t)
             }

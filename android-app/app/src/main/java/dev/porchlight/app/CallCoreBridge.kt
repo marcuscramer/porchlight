@@ -225,7 +225,10 @@ object CallCoreBridge {
     private external fun nativeRecordPendingPublish(eventId: String, eventJson: String, relaysJson: String, nowMs: Long)
 
     @JvmStatic
-    private external fun nativeRecordPublishAck(eventId: String, relay: String, success: Boolean)
+    private external fun nativeRecordPublishResult(eventId: String, relay: String, accepted: Boolean, reason: String, nowMs: Long)
+
+    @JvmStatic
+    private external fun nativeAvailableRelays(candidatesJson: String, nowMs: Long): String
 
     @JvmStatic
     private external fun nativeDueForRetry(nowMs: Long): String
@@ -689,9 +692,19 @@ object CallCoreBridge {
     fun recordPendingPublish(eventId: String, eventJson: String, relays: Collection<String>, nowMs: Long) =
         nativeRecordPendingPublish(eventId, eventJson, JSONArray(relays).toString(), nowMs)
 
-    /** See the Rust crate's own `signal_retry::record_publish_ack` doc: one
-     * relay's real outcome for [eventId]. */
-    fun recordPublishAck(eventId: String, relay: String, success: Boolean) = nativeRecordPublishAck(eventId, relay, success)
+    /** See the Rust crate's own `signal_retry::record_publish_result` doc:
+     * one relay's real outcome for [eventId]; [reason] is the relay's own
+     * text for a rejection (empty is fine). */
+    fun recordPublishResult(eventId: String, relay: String, accepted: Boolean, reason: String, nowMs: Long) =
+        nativeRecordPublishResult(eventId, relay, accepted, reason, nowMs)
+
+    /** See the Rust crate's own `signal_retry::available_relays` doc: which
+     * of [candidates] a first publish should go to (the rest are cooling
+     * down from a recent rejection). */
+    fun availableRelays(candidates: Collection<String>, nowMs: Long): List<String> {
+        val arr = JSONArray(nativeAvailableRelays(JSONArray(candidates).toString(), nowMs))
+        return (0 until arr.length()).map { arr.getString(it) }
+    }
 
     /** See the Rust crate's own `signal_retry::due_for_retry` doc: call from
      * the existing periodic tick, then republish each entry to its

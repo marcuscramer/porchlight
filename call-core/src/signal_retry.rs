@@ -20,11 +20,18 @@
 //! platform's real per-relay delivery signal (a genuine NIP-01 `OK` message
 //! on Android, a settled `publish()` promise on web — neither is "the local
 //! socket accepted the write," which carries no information about whether
-//! the relay actually got it) into [`record_publish_ack`], and republishes
+//! the relay actually got it) into [`record_publish_result`], and republishes
 //! whatever [`due_for_retry`] hands back on its own existing periodic tick.
 //! `relays` cross as plain `String`s, not a richer type — each shell has its
 //! own relay-client library's own URL type and translates this plain data
 //! into it, same reasoning as [`crate::nostr_protocol::FilterSpec`].
+//!
+//! A relay that explicitly rejects a publish also gets a cooldown, owned
+//! here too ([`record_publish_result`]/[`available_relays`]/[`due_for_retry`]):
+//! the old `app.js` had one (after a relay demanded proof-of-work and the
+//! queue retried that doomed publish every 10s forever) while the Android
+//! side had nothing, which is exactly the drift moving this into the shared
+//! crate prevents.
 //!
 //! A relay that already has the event just gets a harmless redelivery on
 //! retry — the receiving side's own [`crate::nostr_protocol::mark_seen_or_is_duplicate`]
@@ -32,7 +39,7 @@
 //! arrives.
 
 use serde::Serialize;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Beyond this age, whatever a pending publish was about has almost
 /// certainly moved on — [`due_for_retry`] drops it silently rather than
@@ -43,8 +50,24 @@ const PENDING_PUBLISH_MAX_AGE_MS: i64 = 5 * 60 * 1000;
 /// Matches `app.js`'s own `PENDING_PUBLISH_MAX_ENTRIES` exactly.
 const PENDING_PUBLISH_MAX_ENTRIES: usize = 50;
 
+/// How long a relay that explicitly rejected a publish is left alone —
+/// retrying the identical event on the very next tick essentially never
+/// succeeds before whatever policy triggered the rejection changes on its
+/// own, and for a rate-limit-shaped reason it risks *extending* the
+/// throttle. Every explicit rejection earns a cooldown, not just ones
+/// matching a known reason string (found live 2026-10-01 when `nos.lol`
+/// rejected every publish with "pow: 28 bits needed" and an earlier queue,
+/// which only cooled down reasons it recognized, retried that doomed
+/// publish every 10s forever): a relay can phrase a rejection however it
+/// wants, so [`looks_likely_permanent`] only decides *how long*.
+const REJECTION_COOLDOWN_MS: i64 = 2 * 60 * 1000;
+
+/// Longer cooldown for a rejection whose reason reads like a rate limit, ban,
+/// or proof-of-work demand — extremely unlikely to resolve soon.
+const PERMANENT_REJECTION_COOLDOWN_MS: i64 = 10 * 60 * 1000;
+
 /// One publish still outstanding at one or more relays. `relays` narrows
-/// down in place as acks arrive via [`record_publish_ack`] — the entry is
+/// down in place as results arrive via [`record_publish_result`] — the entry is
 /// dropped the moment it empties, in that function, not left for
 /// [`due_for_retry`] to notice.
 struct PendingPublish {
@@ -61,12 +84,43 @@ struct PendingPublish {
 /// [`crate::nostr_protocol::DedupState`]'s own `order` field.
 pub(crate) struct SignalRetryState {
     pending: VecDeque<PendingPublish>,
+    /// Relay URL -> when its rejection cooldown ends. At most one entry per
+    /// configured relay, so never pruned.
+    cooldown_until_ms: HashMap<String, i64>,
 }
 
 impl SignalRetryState {
     pub(crate) fn new() -> Self {
-        SignalRetryState { pending: VecDeque::new() }
+        SignalRetryState { pending: VecDeque::new(), cooldown_until_ms: HashMap::new() }
     }
+
+    fn is_cooling_down(&self, relay: &str, now_ms: i64) -> bool {
+        self.cooldown_until_ms.get(relay).is_some_and(|&until| until > now_ms)
+    }
+}
+
+/// Mirrors the old `app.js` `/rate.?limit|banned|too many|pow:|proof.?of.?work|difficulty/i`
+/// exactly, without a regex dependency: `.?` is "optionally one character".
+fn looks_likely_permanent(reason: &str) -> bool {
+    let reason: Vec<char> = reason.to_lowercase().chars().collect();
+    let contains = |needle: &str| {
+        let n: Vec<char> = needle.chars().collect();
+        reason.windows(n.len()).any(|w| w == n.as_slice())
+    };
+    contains("banned") || contains("too many") || contains("pow:") || contains("difficulty") || matches_gapped(&reason, &["rate", "limit"]) || matches_gapped(&reason, &["proof", "of", "work"])
+}
+
+/// Whether `segs` appear in order in `hay`, each pair separated by zero or
+/// one arbitrary character.
+fn matches_gapped(hay: &[char], segs: &[&str]) -> bool {
+    let first: Vec<char> = segs[0].chars().collect();
+    (0..hay.len()).any(|start| hay[start..].starts_with(&first) && rest_matches(&hay[start + first.len()..], &segs[1..]))
+}
+
+fn rest_matches(hay: &[char], segs: &[&str]) -> bool {
+    let Some(seg) = segs.first() else { return true };
+    let seg: Vec<char> = seg.chars().collect();
+    [0usize, 1].iter().any(|&gap| hay.len() >= gap && hay[gap..].starts_with(&seg) && rest_matches(&hay[gap + seg.len()..], &segs[1..]))
 }
 
 /// What [`due_for_retry`] hands back for the shell to actually republish —
@@ -85,7 +139,7 @@ pub struct PendingRetry {
 /// after the shell's own publish attempt, passing only whichever targets
 /// it already knows missed (e.g. weren't connected at send time; a relay
 /// that *was* sent to but still rejects it is narrowed back in separately,
-/// via [`record_publish_ack`]). A no-op for an empty `relays`. Evicts the
+/// via [`record_publish_result`]). A no-op for an empty `relays`. Evicts the
 /// single oldest entry once the queue exceeds [`PENDING_PUBLISH_MAX_ENTRIES`],
 /// same shape as [`crate::nostr_protocol::mark_seen_or_is_duplicate`]'s own
 /// bound.
@@ -106,18 +160,25 @@ pub fn record_pending_publish(event_id: &str, event_json: &str, relays: &[String
     });
 }
 
-/// Narrows an existing pending entry for `event_id` by one relay's own
-/// outcome: `success` drops `relay` from its still-outstanding set
-/// (dropping the whole entry once empty); a failure adds `relay` back in
-/// (a no-op if it was already there — e.g. a relay that was both missing
-/// at send time and then also explicitly rejected). A no-op if `event_id`
-/// isn't currently pending at all — already resolved, already pruned, or
-/// never queued because every target was reachable at send time.
-pub fn record_publish_ack(event_id: &str, relay: &str, success: bool) {
+/// One relay's real outcome for `event_id` — what the shell's own delivery
+/// signal translates into. `accepted` (or a `duplicate:` rejection, which
+/// means the relay already has the event) drops `relay` from the entry's
+/// still-outstanding set, dropping the whole entry once empty. Anything else
+/// is an explicit rejection: `relay` goes (back) into the entry — a no-op if
+/// it was already there, or if `event_id` isn't pending at all — and starts
+/// a cooldown (see [`REJECTION_COOLDOWN_MS`]) that keeps [`due_for_retry`]
+/// and [`available_relays`] away from it. `reason` is the relay's own text,
+/// or whatever the shell's library surfaces for a rejection; empty is fine.
+pub fn record_publish_result(event_id: &str, relay: &str, accepted: bool, reason: &str, now_ms: i64) {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.signal_retry;
+    let resolved = accepted || reason.to_lowercase().contains("duplicate:");
+    if !resolved {
+        let cooldown = if looks_likely_permanent(reason) { PERMANENT_REJECTION_COOLDOWN_MS } else { REJECTION_COOLDOWN_MS };
+        state.cooldown_until_ms.insert(relay.to_string(), now_ms + cooldown);
+    }
     let Some(entry) = state.pending.iter_mut().find(|p| p.event_id == event_id) else { return };
-    if success {
+    if resolved {
         entry.relays.remove(relay);
         if entry.relays.is_empty() {
             state.pending.retain(|p| p.event_id != event_id);
@@ -127,12 +188,23 @@ pub fn record_publish_ack(event_id: &str, relay: &str, success: bool) {
     }
 }
 
+/// Which of `candidates` are not currently cooling down from a rejection —
+/// what a shell should publish to on its *first* attempt, so a relay that
+/// just rejected something isn't hammered by every new message either. The
+/// ones left out belong in [`record_pending_publish`] like any other miss.
+pub fn available_relays(candidates: &[String], now_ms: i64) -> Vec<String> {
+    let app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    candidates.iter().filter(|r| !app.signal_retry.is_cooling_down(r, now_ms)).cloned().collect()
+}
+
 /// Called from the shell's own existing periodic tick (the same one
 /// `check_online_timeouts`/`check_call_timeout` already run on) — prunes
-/// anything past [`PENDING_PUBLISH_MAX_AGE_MS`] first, then hands back
-/// every remaining entry's own still-outstanding relay set for the shell to
-/// actually republish to. Resending to a relay that already has the event
-/// is harmless (see this module's own doc).
+/// anything past [`PENDING_PUBLISH_MAX_AGE_MS`] first, then hands back every
+/// remaining entry's still-outstanding relays that aren't cooling down from a
+/// rejection, for the shell to actually republish to. An entry whose relays
+/// are all cooling down this tick is simply left out (it stays queued).
+/// Resending to a relay that already has the event is harmless (see this
+/// module's own doc).
 pub fn due_for_retry(now_ms: i64) -> Vec<PendingRetry> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.signal_retry;
@@ -140,7 +212,10 @@ pub fn due_for_retry(now_ms: i64) -> Vec<PendingRetry> {
     state
         .pending
         .iter()
-        .map(|p| PendingRetry { event_json: p.event_json.clone(), relays: p.relays.iter().cloned().collect() })
+        .filter_map(|p| {
+            let relays: Vec<String> = p.relays.iter().filter(|r| !state.is_cooling_down(r, now_ms)).cloned().collect();
+            (!relays.is_empty()).then(|| PendingRetry { event_json: p.event_json.clone(), relays })
+        })
         .collect()
 }
 
@@ -193,25 +268,26 @@ mod tests {
     fn a_successful_ack_narrows_the_relay_set_and_drops_the_entry_once_empty() {
         let _guard = reset_state_for_test();
         record_pending_publish("id1", "{}", &relays(&["wss://a", "wss://b"]), 1_000);
-        record_publish_ack("id1", "wss://a", true);
+        record_publish_result("id1", "wss://a", true, "", 1_001);
         let due = due_for_retry(1_001);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].relays, vec!["wss://b".to_string()]);
 
-        record_publish_ack("id1", "wss://b", true);
+        record_publish_result("id1", "wss://b", true, "", 1_002);
         assert!(due_for_retry(1_002).is_empty(), "entry must be gone once every relay acked");
     }
 
     #[test]
-    fn a_failed_ack_adds_the_relay_back_in_even_if_it_wasnt_originally_missing() {
+    fn a_failed_result_adds_the_relay_back_in_even_if_it_wasnt_originally_missing() {
         let _guard = reset_state_for_test();
         // Only "wss://a" was missing at send time -- "wss://b" was sent to
-        // but (per a later ack) rejected it.
+        // but (per a later result) rejected it.
         record_pending_publish("id1", "{}", &relays(&["wss://a"]), 1_000);
-        record_publish_ack("id1", "wss://b", false);
-        let due = due_for_retry(1_001);
-        assert_eq!(due.len(), 1);
-        let mut got = due[0].relays.clone();
+        record_publish_result("id1", "wss://b", false, "blocked: nope", 1_001);
+        // b is cooling down right now, so only a is due...
+        assert_eq!(due_for_retry(1_001)[0].relays, vec!["wss://a".to_string()]);
+        // ...but b really was added back, and returns once the cooldown ends.
+        let mut got = due_for_retry(1_001 + REJECTION_COOLDOWN_MS)[0].relays.clone();
         got.sort();
         assert_eq!(got, vec!["wss://a".to_string(), "wss://b".to_string()]);
     }
@@ -219,8 +295,8 @@ mod tests {
     #[test]
     fn an_ack_for_an_unknown_event_id_is_a_no_op() {
         let _guard = reset_state_for_test();
-        record_publish_ack("never-queued", "wss://a", true);
-        record_publish_ack("never-queued", "wss://a", false);
+        record_publish_result("never-queued", "wss://a", true, "", 1_000);
+        record_publish_result("never-queued", "wss://a", false, "", 1_000);
         assert!(due_for_retry(1_000).is_empty());
     }
 
@@ -247,7 +323,71 @@ mod tests {
         record_pending_publish("idNew", "{}", &relays(&["wss://a"]), 1_000);
         let due = due_for_retry(1_000);
         assert_eq!(due.len(), PENDING_PUBLISH_MAX_ENTRIES);
-        record_publish_ack("id0", "wss://a", true);
+        record_publish_result("id0", "wss://a", true, "", 1_000);
         assert_eq!(due_for_retry(1_000).len(), PENDING_PUBLISH_MAX_ENTRIES, "id0 was already gone, not emptied just now");
+    }
+
+    #[test]
+    fn a_rejection_cools_the_relay_down_for_retries_and_first_publishes_then_expires() {
+        let _guard = reset_state_for_test();
+        record_pending_publish("id1", "{}", &relays(&["wss://a", "wss://b"]), 1_000);
+        record_publish_result("id1", "wss://a", false, "blocked: spam", 1_000);
+
+        let due = due_for_retry(1_001);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].relays, vec!["wss://b".to_string()], "the rejecting relay is skipped while cooling down");
+        assert_eq!(available_relays(&relays(&["wss://a", "wss://b"]), 1_001), vec!["wss://b".to_string()]);
+
+        // Still pending, just cooling down: back once the cooldown ends.
+        let after = 1_000 + REJECTION_COOLDOWN_MS;
+        let mut got = due_for_retry(after)[0].relays.clone();
+        got.sort();
+        assert_eq!(got, vec!["wss://a".to_string(), "wss://b".to_string()]);
+        assert_eq!(available_relays(&relays(&["wss://a"]), after), vec!["wss://a".to_string()]);
+    }
+
+    #[test]
+    fn a_rejection_for_an_unqueued_event_still_cools_the_relay_down() {
+        let _guard = reset_state_for_test();
+        record_publish_result("never-queued", "wss://a", false, "", 1_000);
+        assert!(available_relays(&relays(&["wss://a"]), 1_001).is_empty());
+    }
+
+    #[test]
+    fn an_entry_whose_relays_are_all_cooling_down_is_left_out_but_stays_queued() {
+        let _guard = reset_state_for_test();
+        record_pending_publish("id1", "{}", &relays(&["wss://a"]), 1_000);
+        record_publish_result("id1", "wss://a", false, "", 1_000);
+        assert!(due_for_retry(1_001).is_empty());
+        assert_eq!(due_for_retry(1_000 + REJECTION_COOLDOWN_MS).len(), 1);
+    }
+
+    #[test]
+    fn a_permanent_looking_reason_gets_the_longer_cooldown() {
+        let _guard = reset_state_for_test();
+        record_publish_result("x", "wss://a", false, "pow: 28 bits needed", 1_000);
+        record_publish_result("x", "wss://b", false, "blocked", 1_000);
+        let just_after_short = 1_000 + REJECTION_COOLDOWN_MS;
+        assert_eq!(available_relays(&relays(&["wss://a", "wss://b"]), just_after_short), vec!["wss://b".to_string()]);
+        assert_eq!(available_relays(&relays(&["wss://a"]), 1_000 + PERMANENT_REJECTION_COOLDOWN_MS).len(), 1);
+    }
+
+    #[test]
+    fn a_duplicate_rejection_counts_as_delivered_and_does_not_cool_the_relay_down() {
+        let _guard = reset_state_for_test();
+        record_pending_publish("id1", "{}", &relays(&["wss://a"]), 1_000);
+        record_publish_result("id1", "wss://a", false, "duplicate: already have this event", 1_001);
+        assert!(due_for_retry(1_002).is_empty(), "entry resolved");
+        assert_eq!(available_relays(&relays(&["wss://a"]), 1_002).len(), 1);
+    }
+
+    #[test]
+    fn looks_likely_permanent_matches_the_old_regex() {
+        for yes in ["Rate limit exceeded", "rate-limited", "RATELIMIT", "you are banned", "too many requests", "pow: 28 bits needed", "proof of work required", "proof-of-work", "difficulty too low"] {
+            assert!(looks_likely_permanent(yes), "{yes}");
+        }
+        for no in ["", "blocked: spam", "restricted: not on the allow list", "rate", "proof work", "unrelated"] {
+            assert!(!looks_likely_permanent(no), "{no}");
+        }
     }
 }

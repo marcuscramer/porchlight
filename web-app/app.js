@@ -506,79 +506,47 @@ function monitorOnlineTimeouts() {
 // relay that's a single ensureRelay()+publish() attempt and nothing more --
 // no retry, no resend when a relay that was briefly down comes back. The
 // queue bookkeeping (what's still outstanding, what's too old, the size
-// bound) lives in call-core's signal_retry module, shared with android-app,
+// bound, and the per-relay rejection cooldown) lives in call-core's
+// signal_retry module, shared with android-app,
 // whose quartz NostrClient has the identical gap; this file supplies only
 // what's genuinely web-native: the real publish() calls, and translating
-// each settled promise into callCore.recordPublishAck. Resending the same
+// each settled promise into callCore.recordPublishResult. Resending the same
 // already-signed event is safe either way -- a relay that already has it just
 // gets a harmless redelivery, and the receiving side's own callCore.
 // markSeenOrIsDuplicate already guards against acting on it twice.
 // ---------------------------------------------------------------------------
 
-// A relay that actively rejects a publish (an explicit NIP-01 `OK false
-// <reason>`, not a dropped connection) is telling us, for whatever reason,
-// that it won't accept this right now — retrying the identical event on the
-// very next 10s tick regardless (this queue's default behavior for an
-// ordinary transient failure) is essentially never going to succeed before
-// whatever policy triggered the rejection changes on its own, and for a
-// rate-limit-shaped reason specifically, it risks *extending* the throttle
-// instead of riding it out. relayCooldownUntil tracks a per-relay "don't
-// publish here again until" timestamp.
-//
-// Every explicit rejection sets a cooldown, not just ones matching a known
-// reason string — found live 2026-10-01 when `nos.lol` started rejecting
-// every publish with "pow: 28 bits needed" (a NIP-13 proof-of-work demand
-// Porchlight doesn't implement) and the queue, which at the time only
-// cooled down reasons matching a rate-limit/ban pattern, retried that
-// permanently-doomed publish every 10s forever. A relay can phrase a
-// rejection however it wants and can change its policy without notice, so
-// pattern-matching specific known reasons can only ever protect against
-// reasons already seen; defaulting every rejection to a cooldown closes
-// that gap for any future reason too. looksLikelyPermanent only decides
-// *how long* the cooldown lasts — recognized rate-limit/ban/PoW-demand
-// reasons are extremely unlikely to resolve soon, so they get a longer one
-// than an unrecognized reason, which might be a shorter-lived condition.
-const RATE_LIMIT_COOLDOWN_MS = 2 * 60 * 1000;
-const PERMANENT_REJECTION_COOLDOWN_MS = 10 * 60 * 1000;
-const relayCooldownUntil = new Map();
-function looksLikelyPermanent(reason) {
-  return /rate.?limit|banned|too many|pow:|proof.?of.?work|difficulty/i.test(String(reason));
-}
-function cooldownDurationFor(reason) {
-  return looksLikelyPermanent(reason) ? PERMANENT_REJECTION_COOLDOWN_MS : RATE_LIMIT_COOLDOWN_MS;
-}
-
-/** Publishes `event` to every relay not currently in a rejection cooldown,
- * handing call-core's retry queue whichever ones reject it (or are skipped
- * for being in cooldown) instead of just discarding the failure. */
+/** Publishes `event` to every relay call-core says isn't cooling down from a
+ * recent rejection, handing its retry queue whichever ones reject it (or were
+ * skipped for cooling down) instead of just discarding the failure. */
 async function publishToRelays(event) {
   const now = Date.now();
-  const targets = RELAYS.filter(url => !relayCooldownUntil.has(url) || relayCooldownUntil.get(url) <= now);
+  const targets = callCore.availableRelays(RELAYS, now);
   const failedRelays = RELAYS.filter(url => !targets.includes(url));
   const settled = await Promise.allSettled(pool.publish(targets, event));
+  const rejections = [];
   settled.forEach((result, i) => {
     if (result.status === 'rejected') {
       failedRelays.push(targets[i]);
+      rejections.push([targets[i], String(result.reason)]);
       console.warn('publish failed, will retry:', targets[i], result.reason);
-      relayCooldownUntil.set(targets[i], now + cooldownDurationFor(result.reason));
     }
   });
-  if (failedRelays.length > 0) callCore.recordPendingPublish(event.id, JSON.stringify(event), failedRelays, now);
+  if (failedRelays.length === 0) return;
+  callCore.recordPendingPublish(event.id, JSON.stringify(event), failedRelays, now);
+  for (const [relay, reason] of rejections) callCore.recordPublishResult(event.id, relay, false, reason, now);
 }
 
-/** Republishes whatever call-core says is still outstanding, skipping any
- * relay currently in a rejection cooldown (that filter stays here: the
- * cooldown map is web-only state). */
+/** Republishes whatever call-core says is still outstanding (it already
+ * leaves out relays cooling down from a rejection). */
 async function retryPendingPublishes() {
   const now = Date.now();
   for (const entry of JSON.parse(callCore.dueForRetry(now))) {
-    const relays = entry.relays.filter(url => !relayCooldownUntil.has(url) || relayCooldownUntil.get(url) <= now);
-    if (relays.length === 0) continue;
     const event = JSON.parse(entry.event_json);
-    const settled = await Promise.allSettled(pool.publish(relays, event));
+    const settled = await Promise.allSettled(pool.publish(entry.relays, event));
     settled.forEach((result, i) => {
-      if (result.status === 'fulfilled') callCore.recordPublishAck(event.id, relays[i], true);
-      else relayCooldownUntil.set(relays[i], now + cooldownDurationFor(result.reason));
+      if (result.status === 'fulfilled') callCore.recordPublishResult(event.id, entry.relays[i], true, '', now);
+      else callCore.recordPublishResult(event.id, entry.relays[i], false, String(result.reason), now);
     });
   }
 }

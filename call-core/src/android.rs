@@ -980,21 +980,43 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRecordPendin
     });
 }
 
-/// See [`crate::signal_retry::record_publish_ack`]'s own doc. No return
+/// See [`crate::signal_retry::record_publish_result`]'s own doc. No return
 /// value; malformed input or a panic is a silent no-op.
 #[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRecordPublishAck<'local>(
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRecordPublishResult<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     event_id: JString<'local>,
     relay: JString<'local>,
-    success: jni::sys::jboolean,
+    accepted: jni::sys::jboolean,
+    reason: JString<'local>,
+    now_ms: jlong,
 ) {
     run_catching(&mut env, |env| {
         let Some(event_id) = get_string(env, &event_id) else { return };
         let Some(relay) = get_string(env, &relay) else { return };
-        crate::signal_retry::record_publish_ack(&event_id, &relay, success != 0);
+        let reason = get_string(env, &reason).unwrap_or_default();
+        crate::signal_retry::record_publish_result(&event_id, &relay, accepted != 0, &reason, now_ms);
     });
+}
+
+/// See [`crate::signal_retry::available_relays`]'s own doc.
+/// `candidates_json` is a JSON array of relay-URL strings; returns the same
+/// shape. Falls back to `"[]"` on a panic or malformed input — fail-closed
+/// here means "publish to nobody this time", but every skipped relay is
+/// recorded as a miss by the caller and retried, so nothing is lost.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeAvailableRelays<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    candidates_json: JString<'local>,
+    now_ms: jlong,
+) -> jstring {
+    encode_or_fallback(&mut env, empty_pending_retries_json, |env| {
+        let json = get_string(env, &candidates_json)?;
+        let candidates: Vec<String> = serde_json::from_str(&json).ok()?;
+        Some(crate::signal_retry::available_relays(&candidates, now_ms))
+    })
 }
 
 /// See [`crate::signal_retry::due_for_retry`]'s own doc. Returns a
