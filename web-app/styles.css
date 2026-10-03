@@ -171,11 +171,21 @@ html, body {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.tv-button:hover,
+/* Hover styling only on devices that can really hover: on touch (iOS
+   especially) a tap leaves the element "hovered" until something else is
+   tapped, which looked like it had stuck focused. Keyboard focus always
+   applies. The same split is used for every hover rule below. */
 .tv-button:focus-visible {
   outline: none;
   background: color-mix(in srgb, var(--btn-hue) calc(var(--btn-container-op-focused) * 100%), transparent);
   border-color: color-mix(in srgb, var(--btn-hue) calc(var(--btn-border-op-focused) * 100%), transparent);
+}
+@media (hover: hover) {
+  .tv-button:hover {
+    outline: none;
+    background: color-mix(in srgb, var(--btn-hue) calc(var(--btn-container-op-focused) * 100%), transparent);
+    border-color: color-mix(in srgb, var(--btn-hue) calc(var(--btn-border-op-focused) * 100%), transparent);
+  }
 }
 
 /* Call and Add contact carry an icon instead of a label — sized and tinted
@@ -255,10 +265,12 @@ html, body {
   fill: currentColor;
 }
 
-.settings-fab:hover,
 .settings-fab:focus-visible {
   outline: none;
   color: var(--color-text-primary);
+}
+@media (hover: hover) {
+  .settings-fab:hover { color: var(--color-text-primary); }
 }
 
 /* --- Waiting screen (mirrors WaitingScreen + ContactRow) --------------- */
@@ -442,10 +454,12 @@ html, body {
   fill: currentColor;
 }
 
-.delete-icon-btn:hover,
 .delete-icon-btn:focus-visible {
   outline: none;
   color: var(--color-text-primary);
+}
+@media (hover: hover) {
+  .delete-icon-btn:hover { color: var(--color-text-primary); }
 }
 
 /* Always rendered (even when a contact isn't currently callable) so
@@ -716,9 +730,11 @@ video {
    label), as Android's CallToggle does. The whole group is one <label>
    wrapping the switch, so clicking anywhere on it, the text, the gap or the
    switch itself, toggles it. */
-.call-toggle:hover .call-toggle-label,
 .call-toggle:has(.toggle-switch:focus-visible) .call-toggle-label {
   color: var(--color-text-primary);
+}
+@media (hover: hover) {
+  .call-toggle:hover .call-toggle-label { color: var(--color-text-primary); }
 }
 
 /* A plain checkbox-shaped switch, no native styling to fight — track tints
@@ -738,11 +754,16 @@ video {
   flex-shrink: 0;
   transition: background 0.15s ease;
 }
-.toggle-switch:hover,
-.call-toggle:hover .toggle-switch,
 .toggle-switch:focus-visible {
   outline: none;
   background: color-mix(in srgb, white calc(var(--button-tint-neutral-container-focused) * 100%), transparent);
+}
+@media (hover: hover) {
+  .toggle-switch:hover,
+  .call-toggle:hover .toggle-switch {
+    outline: none;
+    background: color-mix(in srgb, white calc(var(--button-tint-neutral-container-focused) * 100%), transparent);
+  }
 }
 /* Same proportions as Android's FocusableSwitch (knob = half the track
    height, inset = a quarter of it, same size on and off), at this page's
@@ -760,10 +781,14 @@ video {
 .toggle-switch.checked {
   background: color-mix(in srgb, var(--color-status-ok) calc(var(--button-tint-accent-container-focused) * 100%), transparent);
 }
-.toggle-switch.checked:hover,
-.call-toggle:hover .toggle-switch.checked,
 .toggle-switch.checked:focus-visible {
   background: color-mix(in srgb, var(--color-status-ok) calc(var(--button-tint-accent-border-focused) * 100%), transparent);
+}
+@media (hover: hover) {
+  .toggle-switch.checked:hover,
+  .call-toggle:hover .toggle-switch.checked {
+    background: color-mix(in srgb, var(--color-status-ok) calc(var(--button-tint-accent-border-focused) * 100%), transparent);
+  }
 }
 .toggle-switch.checked .toggle-thumb {
   background: var(--color-text-primary);
