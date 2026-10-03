@@ -489,9 +489,6 @@ class WebRtcEngine(
          * Fetch fresh credentials at startup rather than hardcoding them if
          * the provider issues time-limited ones.
          */
-        fun defaultIceServers(): List<IceServer> = listOf(
-            IceServer("stun:stun.l.google.com:19302"),
-            IceServer("stun:stun1.l.google.com:19302"),
-        )
+        fun defaultIceServers(): List<IceServer> = GeneratedSharedConfig.STUN_SERVERS.map { IceServer(it) }
     }
 }

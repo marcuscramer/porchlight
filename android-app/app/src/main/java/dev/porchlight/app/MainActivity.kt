@@ -478,7 +478,7 @@ internal fun FocusableStepSlider(
  * (delete-confirmation, the pairing name-confirm tap) — those stay up until
  * the person acts or backs out.
  */
-internal const val AUTO_DISMISS_DELAY_MS = 20_000L
+internal const val AUTO_DISMISS_DELAY_MS = GeneratedSharedConfig.AUTO_DISMISS_DELAY_MS
 
 /** How long the ring-volume setting must sit unchanged before the chime
  * previews it — long enough that cycling through the levels stays silent. */

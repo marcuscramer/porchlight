@@ -285,6 +285,18 @@ export function buildWrappedEvent(own_private_key_hex, target_pubkey_hex, payloa
 }
 
 /**
+ * See [`crate::call_arbitration::can_place_call`]'s own doc. `false` (no
+ * Call button) on a panic — the fail-closed choice.
+ * @param {boolean} is_paired
+ * @param {boolean} connected
+ * @returns {boolean}
+ */
+export function canPlaceCall(is_paired, connected) {
+    const ret = wasm.canPlaceCall(is_paired, connected);
+    return ret !== 0;
+}
+
+/**
  * See [`crate::cancel_attempt`]'s own doc. No return value — a panic here
  * is swallowed the same way `nativeCancelAttempt` swallows one.
  * @param {string} pairing_id

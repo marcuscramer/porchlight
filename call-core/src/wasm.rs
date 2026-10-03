@@ -672,6 +672,13 @@ pub fn due_for_retry(now_ms: f64) -> String {
 // closed to "can't tell" (`undefined`).
 // ---------------------------------------------------------------------------
 
+/// See [`crate::call_arbitration::can_place_call`]'s own doc. `false` (no
+/// Call button) on a panic — the fail-closed choice.
+#[wasm_bindgen(js_name = canPlaceCall)]
+pub fn can_place_call(is_paired: bool, connected: bool) -> bool {
+    catch_unwind(|| crate::call_arbitration::can_place_call(is_paired, connected)).unwrap_or(false)
+}
+
 /// See [`crate::ice_evidence::reset`]'s own doc.
 #[wasm_bindgen(js_name = iceReset)]
 pub fn ice_reset() {

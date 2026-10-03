@@ -1024,6 +1024,18 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeDueForRetry<
 // `sdpMid`.
 // ---------------------------------------------------------------------------
 
+/// See [`crate::call_arbitration::can_place_call`]'s own doc. `false` (no
+/// Call button) on a panic — the fail-closed choice.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCanPlaceCall<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    is_paired: jni::sys::jboolean,
+    connected: jni::sys::jboolean,
+) -> jni::sys::jboolean {
+    encode_bool(&mut env, false, |_env| Some(crate::call_arbitration::can_place_call(is_paired != 0, connected != 0)))
+}
+
 /// See [`crate::ice_evidence::reset`]'s own doc.
 #[no_mangle]
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIceReset<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) {

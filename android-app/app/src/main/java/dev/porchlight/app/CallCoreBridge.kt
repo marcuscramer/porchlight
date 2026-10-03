@@ -222,6 +222,9 @@ object CallCoreBridge {
     private external fun nativeProtocolConstants(): String?
 
     @JvmStatic
+    private external fun nativeCanPlaceCall(isPaired: Boolean, connected: Boolean): Boolean
+
+    @JvmStatic
     private external fun nativeIceReset()
 
     @JvmStatic
@@ -704,6 +707,10 @@ object CallCoreBridge {
      * it silently). Falls back to `true` on a panic — see that function's
      * own doc for why this one deliberately fails *open*. */
     fun markSeenOrIsDuplicate(eventId: String): Boolean = nativeMarkSeenOrIsDuplicate(eventId)
+
+    /** See the Rust crate's own `call_arbitration::can_place_call` doc —
+     * whether a contact's Call button is offered. */
+    fun canPlaceCall(isPaired: Boolean, connected: Boolean): Boolean = nativeCanPlaceCall(isPaired, connected)
 
     // --- ICE evidence / call-failure diagnosis (Rust `ice_evidence`) -----------
 

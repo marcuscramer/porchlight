@@ -881,23 +881,13 @@ private fun WaitingScreen(
                 // top fade from showing when there's nothing above to
                 // scroll to.
                 Spacer(modifier = Modifier.height(Dimens.listFadeHeightTop))
-                // Read once for the whole list, not once per contact — it
-                // can't change between one row and the next within the same
-                // composition.
-                val anyCallActive = CallCoreBridge.isCallActive()
                 for (contact in contacts) {
                     ContactRow(
                         name = contact.name,
-                        // Call is always offered for a paired,
-                        // not-currently-connected contact — see this
-                        // screen's doc for why. !anyCallActive is
-                        // belt-and-suspenders: tapping Call on a different
-                        // contact while already on/dialing a call is a
-                        // silent no-op at the call_arbitration layer,
-                        // currently unreachable only because this screen
-                        // doesn't render while a call is active, not
-                        // because anything enforces it.
-                        canCall = contact.isPaired && !contact.connected && !anyCallActive,
+                        // The rule (a paired, not-yet-connected contact while
+                        // no call is active) lives in call-core, shared with
+                        // web — see call_arbitration::can_place_call.
+                        canCall = CallCoreBridge.canPlaceCall(contact.isPaired, contact.connected),
                         status = contact.status,
                         onCall = { onCall(contact.id) },
                         autoAnswer = contact.autoAnswer,

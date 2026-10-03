@@ -214,7 +214,7 @@ class NostrSignalingClient(
     private val scope = CoroutineScope(executor.asCoroutineDispatcher() + SupervisorJob())
 
     private val relayUrls: Set<NormalizedRelayUrl> =
-        RELAYS.mapNotNull { it.normalizeRelayUrlOrNull() }.toSet()
+        GeneratedSharedConfig.RELAYS.mapNotNull { it.normalizeRelayUrlOrNull() }.toSet()
 
     // pingInterval: without it OkHttp never notices a relay socket that died
     // silently (NAT mapping expired, Wi-Fi roam, relay restart with no FIN) —
@@ -810,21 +810,5 @@ class NostrSignalingClient(
         // CLOSED for a persistent reason (PoW/auth it'll never satisfy)
         // would otherwise get re-subscribed in a tight loop forever.
         private const val SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS = 10_000L
-
-        // Five relays, not three — found live 2026-10-01 that relay.damus.io
-        // and nos.lol can both go unreachable at once (an internal error on
-        // one, a PoW requirement on the other), losing signaling entirely
-        // since publishes/subscriptions fan out to every relay in this list
-        // in parallel rather than falling back sequentially. Keep this in
-        // sync with web-app/app.js's RELAYS — the two added (snort.social,
-        // offchain.pub) were checked for a real NIP-11 info document with no
-        // PoW/auth requirement before adding.
-        val RELAYS = listOf(
-            "wss://relay.damus.io",
-            "wss://nos.lol",
-            "wss://relay.primal.net",
-            "wss://relay.snort.social",
-            "wss://offchain.pub",
-        )
     }
 }

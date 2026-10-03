@@ -9,12 +9,20 @@ import org.json.JSONObject
  * [INVISIBLE] hides the preview widget only — it has no effect on the
  * outgoing video track itself (see AgentState.videoEnabled for the real
  * mute). Persisted so it sticks across restarts. Declaration order is
- * cycle order (see next()) — mirrors web's identical PREVIEW_POSITIONS
- * (app.js) control-for-control. */
+ * cycle order is NOT this declaration order: it comes from the shared
+ * config (GeneratedSharedConfig.PREVIEW_POSITIONS, the same list web's
+ * app.js cycles through), looked up by each entry's [wireName]. Persisted by
+ * [name], unchanged. */
 enum class PreviewCorner {
     BOTTOM_START, TOP_START, TOP_END, BOTTOM_END, INVISIBLE;
 
-    fun next(): PreviewCorner = entries[(ordinal + 1) % entries.size]
+    val wireName: String get() = name.lowercase().replace('_', '-')
+
+    fun next(): PreviewCorner {
+        val order = GeneratedSharedConfig.PREVIEW_POSITIONS
+        val nextWire = order[(order.indexOf(wireName) + 1) % order.size]
+        return entries.first { it.wireName == nextWire }
+    }
 }
 
 /**

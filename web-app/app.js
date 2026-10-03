@@ -33,6 +33,7 @@ import init, * as callCore from './wasm/call_core.js';
 // already falls back correctly once a second locale file exists, no code
 // here needs to change when one does.
 import { t as translate, resolveLocale } from './strings.js';
+import { RELAYS, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS } from './shared-config.js';
 
 // call-core's WASM module — a top-level await (legal since this file is
 // loaded as type="module"), so nothing below can run a pairing attempt
@@ -83,20 +84,10 @@ const ONLINE_CHECK_INTERVAL_MS = 10000;
 // "At least 120 seconds" per the pairing design doc.
 const PAKE_LIVE_WINDOW_MS = PROTOCOL_CONSTANTS.pake_live_window_ms;
 // Sanity bounds on untrusted network input are enforced inside
-// callCore.parseSignalPayload now, not here. Five relays, not three — found
-// live 2026-10-01 that relay.damus.io and nos.lol can both go unreachable
-// at once (an internal error on one, a PoW requirement on the other),
-// losing signaling entirely since publishes/subscriptions fan out to every
-// relay in this list in parallel rather than falling back sequentially.
-// The two added (snort.social, offchain.pub) were checked for a real NIP-11
-// info document with no PoW/auth requirement before adding.
-const RELAYS = [
-  'wss://relay.damus.io',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-  'wss://relay.snort.social',
-  'wss://offchain.pub',
-];
+// callCore.parseSignalPayload now, not here. The relay list (and the STUN
+// servers, auto-dismiss delay and self-view position cycle) come from
+// shared-config.js, generated from tokens/shared/shared-config.json — the one
+// source both clients read.
 
 const DEVICE_NAME_STORAGE_KEY = 'porchlight-device-name';
 const PAIRINGS_STORAGE_KEY = 'porchlight-pairings';
@@ -697,12 +688,10 @@ const confirmedCandidate = new Map(); // pairingId -> { pubkeyHex, name }
 const pairingCollision = new Set();
 const pairingTimedOut = new Set();
 
-// Own copy of the same value Android's HomeScreens.kt/PassphrasePairingScreens.kt
-// use — no shared source between a JS const and a Kotlin one across
-// platforms. Only for pairing-progress' collision/timeout screens and
-// call-outcome — never confirm-delete or the name-confirm ("Pair with
-// [name]?") screen, both real decisions, not passive outcomes.
-const AUTO_DISMISS_DELAY_MS = 20_000;
+// AUTO_DISMISS_DELAY_MS (imported above) applies only to pairing-progress'
+// collision/timeout screens and call-outcome — never confirm-delete or the
+// name-confirm ("Pair with [name]?") screen, both real decisions, not passive
+// outcomes.
 let pairingProgressAutoDismissHandle = null;
 
 /** Starts a passphrase pairing attempt for a brand-new contact — mirrors
@@ -1169,7 +1158,7 @@ async function ensurePeerConnection(pairingId, callId) {
   pcPairingId = pairingId;
   pcCallId = callId;
   pc = new RTCPeerConnection({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }],
+    iceServers: STUN_SERVERS.map((urls) => ({ urls })),
   });
   if (localStream) for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
   pc.ontrack = (event) => {
@@ -1366,7 +1355,6 @@ const callingLocalVideoEl = el('callingLocalVideo');
  * the four corners. Index 0 is the CSS default (bottom-start) — every new
  * call starts there (see resetCallControls).
  */
-const PREVIEW_POSITIONS = ['bottom-start', 'top-start', 'top-end', 'bottom-end', 'invisible'];
 let previewPositionIndex = 0;
 
 /** Each corner square's own size, in the position button's own 24x24
@@ -1649,12 +1637,9 @@ function renderWaitingScreen() {
     // out of the grid, so column 2 keeps the same width on every row.
     // `disabled` also takes it out of tab order.
     //
-    // !callCore.isCallActive() is belt-and-suspenders: tapping Call on a
-    // different contact while already on/dialing a call is a silent no-op
-    // at the call_arbitration layer, currently unreachable only because
-    // this screen doesn't render while a call is active, not because
-    // anything enforces it.
-    const canCall = isConfirmed(pairing) && !state.connected && !callCore.isCallActive();
+    // The rule itself lives in call-core (call_arbitration::can_place_call),
+    // shared with Android.
+    const canCall = callCore.canPlaceCall(isConfirmed(pairing), state.connected);
     const btn = document.createElement('button');
     btn.className = 'tv-button call';
     // A phone-handset icon, not the word "Call" — same Material glyph path
