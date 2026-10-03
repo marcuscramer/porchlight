@@ -59,7 +59,7 @@ jobs:
         run: echo "sdk.dir=$ANDROID_HOME" > android-app/local.properties
       - name: Grant execute permission for gradlew
         run: chmod +x android-app/gradlew
-      - name: ./gradlew assembleDebug
+      - name: ./gradlew assembleDebug testDebugUnitTest
         working-directory: android-app
         env:
           # cc-rs (secp256k1-sys's C build) and cargo's own linker choice
@@ -78,4 +78,4 @@ jobs:
           CC_x86_64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android28-clang
           AR_x86_64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar
           CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER: ${{ env.ANDROID_HOME }}/ndk/27.3.13750724/toolchains/llvm/prebuilt/darwin-x86_64/bin/x86_64-linux-android28-clang
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug testDebugUnitTest --stacktrace

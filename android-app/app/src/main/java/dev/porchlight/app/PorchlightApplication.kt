@@ -11,7 +11,8 @@ import org.webrtc.PeerConnectionFactory
 
 /**
  * Nobody debugging a frozen TV — an uncaught exception anywhere in the app
- * schedules a relaunch a second out, then kills the crashing process
+ * schedules a relaunch (a second out for a one-off crash, backing off if it
+ * keeps happening — see [CrashRestartPolicy]), then kills the crashing process
  * cleanly so Android never shows an "app has stopped" dialog that would
  * just sit there forever waiting for someone to dismiss it.
  */
@@ -42,9 +43,10 @@ class PorchlightApplication : Application() {
                     this, 0, restart, PendingIntent.FLAG_IMMUTABLE,
                 )
                 val alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000, pendingIntent,
-                )
+                val now = System.currentTimeMillis()
+                val delayMs = CrashRestartPolicy.recordCrashAndDelay(this, now)
+                Log.e(TAG, "relaunching in ${delayMs}ms")
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, now + delayMs, pendingIntent)
             } catch (t: Throwable) {
                 Log.e(TAG, "failed to schedule restart", t)
             }

@@ -721,9 +721,14 @@ private fun AppRoot(
         return fresh
     }
 
-    val screen = adminScreen
+    // A call always comes first — ringing, connected, or just ended — over
+    // Settings, Rename, phrase entry and a pairing attempt alike. Their own
+    // state is left alone, so once the call is over the person lands back
+    // where they were (apart from text typed so far).
+    val callTakesOver = state.activePairingId != null || state.pendingCallOutcome != null
+    val screen = if (callTakesOver) null else adminScreen
     when {
-        showAdminChoice -> {
+        showAdminChoice && !callTakesOver -> {
             AdminChoiceScreen(
                 launchOnBoot = config.launchOnBoot,
                 onToggleLaunchOnBoot = { enabled ->
