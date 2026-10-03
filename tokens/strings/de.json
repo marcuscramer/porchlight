@@ -28,7 +28,7 @@
     },
     "callWakeUp": {
       "title": "Aufwecken bei Anruf",
-      "subtitle": "Ein Anruf schaltet den Fernseher auf das Portal um und erscheint über dem Bildschirmschoner",
+      "subtitle": "Ein Anruf schaltet den Fernseher ein, wechselt auf das Portal und erscheint über dem Bildschirmschoner",
       "needsSetup": "Aufwecken bei Anruf braucht einen einmaligen Einrichtungsschritt, siehe README"
     },
     "update": {
@@ -106,7 +106,7 @@
     "statusOffline": "Offline"
   },
   "accessibility": {
-    "serviceDescription": "Erlaubt Porchlight, bei einem eingehenden Anruf die Home-Taste zu drücken, damit Ihr Fernseher auf dieses Gerät umschaltet. Es kann nichts auf dem Bildschirm sehen oder lesen."
+    "serviceDescription": "Erlaubt Porchlight, bei einem eingehenden Anruf die Home-Taste zu drücken, damit sich Ihr Fernseher einschaltet, falls er aus ist, und auf dieses Gerät umschaltet. Es kann nichts auf dem Bildschirm sehen oder lesen."
   },
   "notifications": {
     "callStatusChannelName": "Anrufstatus",

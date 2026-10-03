@@ -5,7 +5,8 @@ import android.content.Context
 import android.content.Intent
 
 /**
- * Two separate things after a reboot, not one:
+ * Two separate things after a reboot, not one (and only the first after an
+ * app update, which kills the service just as a reboot does):
  *
  * The background call-answering service always restarts, unconditionally
  * — silent, nothing shows on screen, and losing the ability to receive
@@ -23,9 +24,12 @@ import android.content.Intent
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        val booted = intent.action == Intent.ACTION_BOOT_COMPLETED
+        if (!booted && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         CameraAgentService.start(context)
-        if (Config.load(context).launchOnBoot) {
+        // Boot only: an update shouldn't pull the UI up on top of whatever
+        // is showing, launchOnBoot or not.
+        if (booted && Config.load(context).launchOnBoot) {
             context.startActivity(
                 Intent(context, MainActivity::class.java).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )

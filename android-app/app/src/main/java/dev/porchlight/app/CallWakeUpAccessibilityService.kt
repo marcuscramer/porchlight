@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Presses the Home key on request, and does nothing else. A short press of
  * Home makes the Portal send HDMI-CEC `<Text View On>` and `<Active Source>`,
- * which switches the TV to the Portal's input; no other app-reachable action
+ * which turns the TV on if needed and switches it to the Portal's input; no other app-reachable action
  * does (see the HDMI experiment notes). The `HDMI_CEC` permission needed to
  * send those messages directly is signature-level, so the app can't, but the
  * system's own key handling can.

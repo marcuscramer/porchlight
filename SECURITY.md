@@ -141,8 +141,9 @@ number.
   "Convenience" section has two parts, both skippable. To let the app update
   itself, you turn off Meta's install verifier and Android's package
   verification as a whole, so the device stops checking any sideloaded
-  install. To let an incoming call show over the screensaver and switch the
-  TV to the Portal (the call wake-up, which is optional as a whole), you run
+  install. To let an incoming call show over the screensaver, turn the TV
+  on and switch it to the Portal (the call wake-up, which is optional as a
+  whole), you run
   two `adb` commands. The first switches on Porchlight's accessibility
   service, which is declared with no access to screen content and no events;
   the app only uses it to press the Home key when a call rings. Android's

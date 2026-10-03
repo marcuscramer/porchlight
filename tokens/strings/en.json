@@ -28,7 +28,7 @@
     },
     "callWakeUp": {
       "title": "Call wake-up",
-      "subtitle": "A call switches the TV to the Portal and shows over the screensaver",
+      "subtitle": "A call turns the TV on, switches it to the Portal and shows over the screensaver",
       "needsSetup": "Call wake-up needs a one-time setup step, see the README"
     },
     "update": {
@@ -106,7 +106,7 @@
     "statusOffline": "Offline"
   },
   "accessibility": {
-    "serviceDescription": "Lets Porchlight press the Home key when a call comes in, so your TV switches to this device. It can't see or read anything on the screen."
+    "serviceDescription": "Lets Porchlight press the Home key when a call comes in, so your TV turns on if it is off and switches to this device. It can't see or read anything on the screen."
   },
   "notifications": {
     "callStatusChannelName": "Call status",

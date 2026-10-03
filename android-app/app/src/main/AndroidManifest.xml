@@ -107,6 +107,12 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- An update (adb install -r, or the in-app installer)
+                     kills the process and nothing else restarts the
+                     call-answering service, so without this the device
+                     can't receive calls until its next reboot or someone
+                     opens the app. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
@@ -121,7 +127,7 @@
 
 
         <!-- Optional: lets an incoming call press the Home key, which makes the
-             Portal switch the TV to its input. Off until the person enables it
+             Portal turn the TV on and switch it to its input. Off until the person enables it
              in Settings > Accessibility; minimal by design (see
              res/xml/call_wake_up_accessibility_service.xml). exported="true" is
              required for the system to bind it; the BIND_ACCESSIBILITY_SERVICE

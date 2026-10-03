@@ -110,14 +110,15 @@ you don't need to do this manually — its provisioning kit disables the
 same verifier automatically as part of setup, for the same reason (it
 needs to install and update apps on-device too).
 
-#### 2. Waking the Portal and switching the TV for incoming calls
+#### 2. Waking the Portal and turning on the TV for incoming calls
 
 This one is optional as a whole: skip it and calls still ring, but if the
 Portal is asleep when one arrives its screensaver can take over the screen so
-the call is there but never visible, and the TV stays on whatever HDMI input
-it was showing. With it, when a call rings Porchlight presses the Portal's
-Home key, which ends the screensaver and makes the Portal switch the TV to its
-input. It's two commands, and you want both.
+the call is there but never visible, and the TV stays off, or on whatever HDMI
+input it was showing. With it, when a call rings Porchlight presses the
+Portal's Home key, which ends the screensaver and makes the Portal turn the TV
+on if it's off and switch it to its input. It's two commands, and you want
+both.
 
 First, Porchlight needs its accessibility service switched on. The Portal's
 own Settings has no screen for this:
@@ -194,16 +195,17 @@ end.
   (not the web version), auto-answer can be turned on for a contact — a
   toggle right on their row in the contact list — so a call from them
   connects automatically after a short countdown instead.
-- **TV on a different HDMI input**: if your Portal TV is plugged into a TV
-  that's showing something else when a call comes in, the call still rings
-  and connects, but whether the TV switches to the Portal depends on the
-  call wake-up setup above. With it, Porchlight presses the Portal's Home
-  key as the call rings, and the Portal then asks the TV (over HDMI-CEC) to
-  switch to its input — so the call just appears. Without it, you'll need to
-  switch the input yourself to see the call. (A sideloaded app can't send
-  that HDMI-CEC request itself — the permission is restricted to apps signed
-  with Meta's own key — which is why this goes through the Home key.) It
-  needs a TV with HDMI-CEC turned on.
+- **TV off, or on a different HDMI input**: if your Portal TV is plugged into
+  a TV that's off or showing something else when a call comes in, the call
+  still rings and connects, but whether the TV follows depends on the call
+  wake-up setup above. With it, Porchlight presses the Portal's Home key as
+  the call rings, and the Portal then asks the TV (over HDMI-CEC) to turn on
+  if it's off and to switch to its input — so the call just appears (a TV
+  that was off can take several seconds to come up). Without it, you'll need
+  to turn the TV on and switch the input yourself to see the call. (A
+  sideloaded app can't send that HDMI-CEC request itself — the permission is
+  restricted to apps signed with Meta's own key — which is why this goes
+  through the Home key.) It needs a TV with HDMI-CEC turned on.
 - **Status dots** next to each contact are purely informational — green
   means they're currently reachable, orange means they're on another call
   right now, red means they're not currently reachable, and none of this
@@ -222,7 +224,7 @@ phone call with them so you can agree the pairing phrase.
    [convenience setup](#convenience-highly-recommended) — both parts. Updating
    from inside the app means you can push fixes later without a visit, and
    call wake-up means a call appears even if the Portal is asleep and the TV
-   is on another input.
+   is off or on another input.
 2. Pair it with your own phone or browser (see [Pairing two devices](#pairing-two-devices)).
 3. In Porchlight's Settings on their Portal, turn on **Kiosk mode** so Porchlight
    comes back up by itself after a restart and when the screensaver ends. Set
@@ -230,11 +232,12 @@ phone call with them so you can agree the pairing phrase.
 4. On their contact list, switch **Auto-answer** on for your contact — and for
    anyone else they'd want connected without a tap.
 
-From then on, when you call, their Portal wakes, the TV switches over and a
-short countdown ("… will automatically connect in 5 seconds") runs before the
-call connects on its own. Pressing Back during the countdown declines the call,
-so nobody is ever surprised without a way out. The green dot next to their name
-on your device tells you the Portal is reachable before you call.
+From then on, when you call, their Portal wakes, the TV turns on and switches
+over, and a short countdown ("… will automatically connect in 5 seconds") runs
+before the call connects on its own. Pressing Back during the countdown
+declines the call, so nobody is ever surprised without a way out. The green dot
+next to their name on your device tells you the Portal is reachable before you
+call.
 
 Worth knowing:
 
