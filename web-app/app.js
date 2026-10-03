@@ -698,7 +698,9 @@ document.addEventListener('visibilitychange', () => {
   kickHeartbeat();
   // iOS pauses a playing video when the page is backgrounded; resume it
   // rather than leaving a paused frame for Safari to decorate.
-  if (remoteVideoEl.srcObject && remoteVideoEl.paused) keepPlaying(remoteVideoEl);
+  for (const video of document.querySelectorAll('video')) {
+    if (video.srcObject && video.paused) keepPlaying(video);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -931,7 +933,12 @@ let acquireLocalStreamPromise = null;
  * identical stream, which visibly blanks/flickers the video — and render()
  * (called on every presence/heartbeat update) re-applies it constantly. */
 function setVideoSource(video, stream) {
-  if (video.srcObject !== stream) video.srcObject = stream;
+  if (video.srcObject === stream) return;
+  video.srcObject = stream;
+  // Not left to the `autoplay` attribute: iOS Safari refuses that outright
+  // in Low Power Mode (even for a muted video), and then puts its own big
+  // play button over the video.
+  keepPlaying(video);
 }
 
 /** Starts [video], and if the browser refuses (Safari, for an unmuted stream
