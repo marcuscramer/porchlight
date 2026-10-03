@@ -69,6 +69,12 @@ pub mod nostr_protocol;
 /// own.
 pub mod signal_retry;
 
+/// The ICE-candidate evidence collected while a `PeerConnection` negotiates
+/// and the "why did this call never connect?" diagnosis drawn from it
+/// (`WebRtcEngine.kt`/`app.js`'s two hand-written copies). Independent of
+/// every other module here. See its own doc for the full design.
+pub mod ice_evidence;
+
 /// A peer's self-reported, untrusted display name is capped and stripped
 /// of bidi-override/zero-width characters before ever being stored — it's
 /// exactly what a human reads on the "Pair with [name]?" screen to confirm
@@ -182,6 +188,7 @@ struct AppState {
     call: call_arbitration::CallState,
     dedup: nostr_protocol::DedupState,
     signal_retry: signal_retry::SignalRetryState,
+    ice: ice_evidence::IceState,
 }
 
 impl AppState {
@@ -192,6 +199,7 @@ impl AppState {
             call: call_arbitration::CallState::new(),
             dedup: nostr_protocol::DedupState::new(),
             signal_retry: signal_retry::SignalRetryState::new(),
+            ice: ice_evidence::IceState::new(),
         }
     }
 }

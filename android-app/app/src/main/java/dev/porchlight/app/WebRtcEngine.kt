@@ -273,50 +273,22 @@ class WebRtcEngine(
         remoteViewSink = null
     }
 
-    /** Why a call that never connected most likely failed at the network
-     * level — see [iceDiagnosis]. */
-    enum class IceDiagnosis { NO_DIRECT_PATH, UDP_BLOCKED }
-
-    // ICE candidate *types* only (host/srflx/relay/prflx), per peer
-    // connection, for [iceDiagnosis]. Touched on [executor] only.
-    private val localCandidateTypes = mutableSetOf<String>()
-    private val remoteCandidateTypes = mutableSetOf<String>()
-    private var everConnected = false
-
-    /** Set when a peer connection is torn down, so the outcome screen can
-     * still ask after `pc` itself is gone. */
-    @Volatile private var lastIceDiagnosis: IceDiagnosis? = null
-
-    private fun candidateType(sdp: String): String? = Regex(" typ (\\w+)").find(sdp)?.groupValues?.get(1)
-
     /**
-     * Best-effort answer to "would a TURN relay have saved this call?". Only
-     * meaningful once both sides exchanged candidates and ICE still never
-     * connected: no server-reflexive candidate at all means this network
-     * blocks UDP/STUN; otherwise both sides tried real addresses and no
-     * direct path worked — the case TURN exists for. Null means "can't tell"
-     * (never got that far, so not a NAT problem as far as we can see).
-     * Reads the live connection if there is one, else the last teardown's.
+     * Best-effort answer to "would a TURN relay have saved this call?" — the
+     * evidence collection and the decision live in `call-core`
+     * (`ice_evidence`); this only reports the connection's own events and
+     * its current state. Null means "can't tell". Reads the live connection
+     * if there is one, else what the last teardown concluded.
      */
-    fun iceDiagnosis(): IceDiagnosis? = pc?.let { diagnose(it) } ?: lastIceDiagnosis
-
-    private fun diagnose(connection: PeerConnection): IceDiagnosis? {
-        if (everConnected || remoteCandidateTypes.isEmpty()) return null
-        val state = connection.iceConnectionState()
-        if (state != PeerConnection.IceConnectionState.CHECKING &&
-            state != PeerConnection.IceConnectionState.FAILED &&
-            state != PeerConnection.IceConnectionState.DISCONNECTED) return null
-        if ("srflx" !in localCandidateTypes && "relay" !in localCandidateTypes) return IceDiagnosis.UDP_BLOCKED
-        return IceDiagnosis.NO_DIRECT_PATH
+    fun iceDiagnosis(): CallCoreBridge.IceDiagnosis? {
+        pc?.let { CallCoreBridge.iceRememberDiagnosis(it.iceConnectionState().name) }
+        return CallCoreBridge.iceLastDiagnosis()
     }
 
     private fun newPeerConnection(pairingId: String, callId: String): PeerConnection? {
         pc?.close()
         acquireMedia()
-        localCandidateTypes.clear()
-        remoteCandidateTypes.clear()
-        everConnected = false
-        lastIceDiagnosis = null
+        CallCoreBridge.iceReset()
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -397,7 +369,7 @@ class WebRtcEngine(
     }
 
     fun addRemoteIce(sdpMid: String?, sdpMLineIndex: Int, candidate: String) {
-        candidateType(candidate)?.let { remoteCandidateTypes.add(it) }
+        CallCoreBridge.iceNoteRemoteCandidate(candidate)
         pc?.addIceCandidate(IceCandidate(sdpMid, sdpMLineIndex, candidate))
     }
 
@@ -415,7 +387,7 @@ class WebRtcEngine(
         val closing = pc
         val closingPairingId = pcPairingId
         val closingCallId = pcCallId
-        if (closing != null) lastIceDiagnosis = diagnose(closing)
+        if (closing != null) CallCoreBridge.iceRememberDiagnosis(closing.iceConnectionState().name)
         remoteViewSink?.let { remoteVideoTrack?.removeSink(it) }
         remoteVideoTrack = null
         pc = null
@@ -452,7 +424,7 @@ class WebRtcEngine(
     // ExecutorExt.kt's doc).
     private fun peerObserver() = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate) = executor.safeExecute {
-            candidateType(candidate.sdp)?.let { localCandidateTypes.add(it) }
+            CallCoreBridge.iceNoteLocalCandidate(candidate.sdp)
             val id = pcPairingId
             val callId = pcCallId
             if (id != null && callId != null) listener.onLocalIce(id, callId, candidate)
@@ -461,7 +433,7 @@ class WebRtcEngine(
             Log.d(TAG, "peer connection: $newState")
             when (newState) {
                 PeerConnection.PeerConnectionState.CONNECTED -> {
-                    everConnected = true
+                    CallCoreBridge.iceNoteConnected()
                     listener.onPeerConnected(pcPairingId, pcCallId, true)
                 }
                 PeerConnection.PeerConnectionState.FAILED,

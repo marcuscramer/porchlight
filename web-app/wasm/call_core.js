@@ -679,6 +679,71 @@ export function hangUp() {
 }
 
 /**
+ * See [`crate::ice_evidence::last_diagnosis`]'s own doc. Returns the
+ * diagnosis's `snake_case` name (`"no_direct_path"`/`"udp_blocked"`), or
+ * `undefined` for "can't tell" (including on a panic).
+ * @returns {string | undefined}
+ */
+export function iceLastDiagnosis() {
+    const ret = wasm.iceLastDiagnosis();
+    let v1;
+    if (ret[0] !== 0) {
+        v1 = getStringFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v1;
+}
+
+/**
+ * See [`crate::ice_evidence::note_connected`]'s own doc.
+ */
+export function iceNoteConnected() {
+    wasm.iceNoteConnected();
+}
+
+/**
+ * See [`crate::ice_evidence::note_local_candidate`]'s own doc.
+ * `declared_type` is the browser's own `RTCIceCandidate.type` (`null`/
+ * `undefined` when absent).
+ * @param {string} candidate_line
+ * @param {string | null} [declared_type]
+ */
+export function iceNoteLocalCandidate(candidate_line, declared_type) {
+    const ptr0 = passStringToWasm0(candidate_line, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    var ptr1 = isLikeNone(declared_type) ? 0 : passStringToWasm0(declared_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len1 = WASM_VECTOR_LEN;
+    wasm.iceNoteLocalCandidate(ptr0, len0, ptr1, len1);
+}
+
+/**
+ * See [`crate::ice_evidence::note_remote_candidate`]'s own doc.
+ * @param {string} candidate_line
+ */
+export function iceNoteRemoteCandidate(candidate_line) {
+    const ptr0 = passStringToWasm0(candidate_line, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.iceNoteRemoteCandidate(ptr0, len0);
+}
+
+/**
+ * See [`crate::ice_evidence::remember_diagnosis`]'s own doc.
+ * @param {string} ice_connection_state
+ */
+export function iceRememberDiagnosis(ice_connection_state) {
+    const ptr0 = passStringToWasm0(ice_connection_state, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.iceRememberDiagnosis(ptr0, len0);
+}
+
+/**
+ * See [`crate::ice_evidence::reset`]'s own doc.
+ */
+export function iceReset() {
+    wasm.iceReset();
+}
+
+/**
  * See [`crate::call_arbitration::is_call_active`]'s own doc. Returns
  * `true` (fail toward *not* claiming to be free) on a panic — the shell
  * uses this to fill in its own outgoing heartbeat's busy field, and

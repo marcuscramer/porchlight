@@ -665,3 +665,54 @@ pub fn due_for_retry(now_ms: f64) -> String {
         .flatten()
         .unwrap_or_else(|| "[]".to_string())
 }
+
+// ---------------------------------------------------------------------------
+// ICE evidence / call-failure diagnosis — see `crate::ice_evidence`'s own doc.
+// Pure bookkeeping: a panic is a silent no-op, and `iceLastDiagnosis` fails
+// closed to "can't tell" (`undefined`).
+// ---------------------------------------------------------------------------
+
+/// See [`crate::ice_evidence::reset`]'s own doc.
+#[wasm_bindgen(js_name = iceReset)]
+pub fn ice_reset() {
+    let _ = catch_unwind(crate::ice_evidence::reset);
+}
+
+/// See [`crate::ice_evidence::note_local_candidate`]'s own doc.
+/// `declared_type` is the browser's own `RTCIceCandidate.type` (`null`/
+/// `undefined` when absent).
+#[wasm_bindgen(js_name = iceNoteLocalCandidate)]
+pub fn ice_note_local_candidate(candidate_line: &str, declared_type: Option<String>) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::ice_evidence::note_local_candidate(candidate_line, declared_type.as_deref())));
+}
+
+/// See [`crate::ice_evidence::note_remote_candidate`]'s own doc.
+#[wasm_bindgen(js_name = iceNoteRemoteCandidate)]
+pub fn ice_note_remote_candidate(candidate_line: &str) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::ice_evidence::note_remote_candidate(candidate_line)));
+}
+
+/// See [`crate::ice_evidence::note_connected`]'s own doc.
+#[wasm_bindgen(js_name = iceNoteConnected)]
+pub fn ice_note_connected() {
+    let _ = catch_unwind(crate::ice_evidence::note_connected);
+}
+
+/// See [`crate::ice_evidence::remember_diagnosis`]'s own doc.
+#[wasm_bindgen(js_name = iceRememberDiagnosis)]
+pub fn ice_remember_diagnosis(ice_connection_state: &str) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::ice_evidence::remember_diagnosis(ice_connection_state)));
+}
+
+/// See [`crate::ice_evidence::last_diagnosis`]'s own doc. Returns the
+/// diagnosis's `snake_case` name (`"no_direct_path"`/`"udp_blocked"`), or
+/// `undefined` for "can't tell" (including on a panic).
+#[wasm_bindgen(js_name = iceLastDiagnosis)]
+pub fn ice_last_diagnosis() -> Option<String> {
+    catch_unwind(|| {
+        let diagnosis = crate::ice_evidence::last_diagnosis()?;
+        serde_json::to_value(diagnosis).ok()?.as_str().map(str::to_string)
+    })
+    .ok()
+    .flatten()
+}

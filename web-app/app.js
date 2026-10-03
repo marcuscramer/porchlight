@@ -1137,31 +1137,13 @@ function onPeerHangup(pairingId, callId) {
   applyCallEffects(callCore.handlePeerHangup(pairingId, callId));
 }
 
-/** ICE evidence for the current PeerConnection, used only to explain a failed
- * call (see diagnoseIce). Candidate *types* only — host/srflx/relay/prflx. */
-let iceEvidence = { local: new Set(), remote: new Set(), everConnected: false };
-/** 'no_direct_path' | 'udp_blocked' | null — set when a PeerConnection is torn
- * down, read by renderCallOutcomeScreen for a never_connected outcome. */
-let lastIceDiagnosis = null;
-
-function iceCandidateType(candidateLine, declaredType) {
-  if (declaredType) return declaredType;
-  const m = / typ (\w+)/.exec(candidateLine || '');
-  return m ? m[1] : null;
-}
-
-/** Best-effort answer to "would a TURN relay have saved this call?". Only
- * meaningful once both sides exchanged candidates and ICE still never
- * connected: if we got no server-reflexive candidate at all, our network
- * blocks UDP/STUN; otherwise both sides tried real addresses and no direct
- * path worked — the case TURN exists for. Null means "can't tell" (never
- * got that far, so not a NAT problem as far as we can see). */
-function diagnoseIce() {
-  if (!pc || iceEvidence.everConnected || iceEvidence.remote.size === 0) return null;
-  if (!['checking', 'failed', 'disconnected'].includes(pc.iceConnectionState)) return null;
-  if (!iceEvidence.local.has('srflx') && !iceEvidence.local.has('relay')) return 'udp_blocked';
-  return 'no_direct_path';
-}
+// ICE-candidate evidence for the current PeerConnection, and the "why did this
+// call never connect?" diagnosis ('no_direct_path' | 'udp_blocked' | undefined)
+// drawn from it, live in call-core's ice_evidence module (shared with Android's
+// WebRtcEngine) — this file only reports the PeerConnection's own events
+// (iceReset/iceNoteLocalCandidate/iceNoteRemoteCandidate/iceNoteConnected) and
+// its current state at teardown (iceRememberDiagnosis). renderCallOutcomeScreen
+// reads callCore.iceLastDiagnosis().
 
 /** [pairingId]/[callId] come from whichever CallEffect triggered this
  * (CreateOffer, ApplyRemoteOffer, or the accept flow) — captured into
@@ -1183,8 +1165,7 @@ async function ensurePeerConnection(pairingId, callId) {
   // can fire more than once per call if the connection blips and
   // recovers) — see resetCallControls' own doc.
   resetCallControls();
-  iceEvidence = { local: new Set(), remote: new Set(), everConnected: false };
-  lastIceDiagnosis = null;
+  callCore.iceReset();
   pcPairingId = pairingId;
   pcCallId = callId;
   pc = new RTCPeerConnection({
@@ -1200,7 +1181,7 @@ async function ensurePeerConnection(pairingId, callId) {
   };
   pc.onconnectionstatechange = () => {
     callActive = pc.connectionState === 'connected';
-    if (callActive) iceEvidence.everConnected = true;
+    if (callActive) callCore.iceNoteConnected();
     // contactUiState's own `connected` flag mirrors Android's
     // WebRtcEngine.onPeerConnected, which sets it on the same
     // connectionState transition — without it the "Call" button never
@@ -1216,8 +1197,7 @@ async function ensurePeerConnection(pairingId, callId) {
   };
   pc.onicecandidate = (event) => {
     if (event.candidate) {
-      const type = iceCandidateType(event.candidate.candidate, event.candidate.type);
-      if (type) iceEvidence.local.add(type);
+      callCore.iceNoteLocalCandidate(event.candidate.candidate, event.candidate.type);
     }
     if (event.candidate && pcPairingId) {
       sendConfirmedOrPending(pcPairingId, () =>
@@ -1280,8 +1260,7 @@ function applyIceCandidate(sdpMid, sdpMLineIndex, candidate) {
   // setRemoteDescription still in flight) — .catch(), not try/catch, which
   // only ever catches a synchronous throw.
   if (!pc) return;
-  const type = iceCandidateType(candidate, null);
-  if (type) iceEvidence.remote.add(type);
+  callCore.iceNoteRemoteCandidate(candidate);
   pc.addIceCandidate({ candidate, sdpMid, sdpMLineIndex }).catch((err) => console.warn('bad ice payload or candidate arrived before remote description', err));
 }
 
@@ -1329,7 +1308,7 @@ function failCallAttempt(label, err) {
  */
 function closePeerConnection() {
   clearIncomingCall();
-  if (pc) { lastIceDiagnosis = diagnoseIce(); pc.close(); pc = null; }
+  if (pc) { callCore.iceRememberDiagnosis(pc.iceConnectionState); pc.close(); pc = null; }
   // Explicit, not just left to onconnectionstatechange's own final event —
   // same belt-and-suspenders reasoning as Android's WebRtcEngine.
   if (pcPairingId) contactUiState.set(pcPairingId, { ...uiState(pcPairingId), connected: false });
@@ -1930,9 +1909,10 @@ function renderCallOutcomeScreen() {
   const name = (pairing && pairing.peerName) || t('common.unnamedContact');
   let [title, message] = CALL_OUTCOME_COPY[pendingCallOutcome.reason](name);
   // Refines the generic "never connected" copy when ICE evidence says why
-  // (see diagnoseIce) — a network problem the user can actually act on.
-  if (pendingCallOutcome.reason === 'never_connected' && lastIceDiagnosis) {
-    const key = lastIceDiagnosis === 'udp_blocked' ? 'call.outcome.udpBlockedMessage' : 'call.outcome.noDirectPathMessage';
+  // (see call-core's ice_evidence) — a network problem the user can actually act on.
+  const iceDiagnosis = callCore.iceLastDiagnosis();
+  if (pendingCallOutcome.reason === 'never_connected' && iceDiagnosis) {
+    const key = iceDiagnosis === 'udp_blocked' ? 'call.outcome.udpBlockedMessage' : 'call.outcome.noDirectPathMessage';
     message = t(key, { name });
   }
   el('callOutcomeTitle').textContent = title;

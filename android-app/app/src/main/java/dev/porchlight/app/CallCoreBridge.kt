@@ -222,6 +222,24 @@ object CallCoreBridge {
     private external fun nativeProtocolConstants(): String?
 
     @JvmStatic
+    private external fun nativeIceReset()
+
+    @JvmStatic
+    private external fun nativeIceNoteLocalCandidate(candidateLine: String, declaredType: String)
+
+    @JvmStatic
+    private external fun nativeIceNoteRemoteCandidate(candidateLine: String)
+
+    @JvmStatic
+    private external fun nativeIceNoteConnected()
+
+    @JvmStatic
+    private external fun nativeIceRememberDiagnosis(iceConnectionState: String)
+
+    @JvmStatic
+    private external fun nativeIceLastDiagnosis(): String?
+
+    @JvmStatic
     private external fun nativeRecordPendingPublish(eventId: String, eventJson: String, payloadJson: String, relaysJson: String, nowMs: Long)
 
     @JvmStatic
@@ -686,6 +704,35 @@ object CallCoreBridge {
      * it silently). Falls back to `true` on a panic — see that function's
      * own doc for why this one deliberately fails *open*. */
     fun markSeenOrIsDuplicate(eventId: String): Boolean = nativeMarkSeenOrIsDuplicate(eventId)
+
+    // --- ICE evidence / call-failure diagnosis (Rust `ice_evidence`) -----------
+
+    /** Why a call that never connected most likely failed at the network
+     * level — see the Rust crate's own `ice_evidence` doc. */
+    enum class IceDiagnosis { NO_DIRECT_PATH, UDP_BLOCKED }
+
+    /** A new `PeerConnection` begins: forget the previous one's evidence. */
+    fun iceReset() = nativeIceReset()
+
+    /** One of this device's own candidates was gathered. */
+    fun iceNoteLocalCandidate(candidateLine: String) = nativeIceNoteLocalCandidate(candidateLine, "")
+
+    /** A candidate arrived from the peer. */
+    fun iceNoteRemoteCandidate(candidateLine: String) = nativeIceNoteRemoteCandidate(candidateLine)
+
+    /** The connection reached CONNECTED at least once. */
+    fun iceNoteConnected() = nativeIceNoteConnected()
+
+    /** Diagnose from the evidence so far (given the connection's current ICE
+     * state name, e.g. `CHECKING`) and keep the result for [iceLastDiagnosis]. */
+    fun iceRememberDiagnosis(iceConnectionState: String) = nativeIceRememberDiagnosis(iceConnectionState)
+
+    /** What [iceRememberDiagnosis] last concluded; `null` means "can't tell". */
+    fun iceLastDiagnosis(): IceDiagnosis? = when (nativeIceLastDiagnosis()) {
+        "no_direct_path" -> IceDiagnosis.NO_DIRECT_PATH
+        "udp_blocked" -> IceDiagnosis.UDP_BLOCKED
+        else -> null
+    }
 
     /** One publish [dueForRetry] says to resend — see the Rust crate's own
      * `signal_retry::PendingRetry` doc. [eventJson] is exactly what was

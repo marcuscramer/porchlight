@@ -135,7 +135,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         val pairingId: String,
         val reason: CallCoreBridge.CallOutcomeReason,
         // Only meaningful for NEVER_CONNECTED — see WebRtcEngine.iceDiagnosis.
-        val iceDiagnosis: WebRtcEngine.IceDiagnosis? = null,
+        val iceDiagnosis: CallCoreBridge.IceDiagnosis? = null,
     )
 
     data class AgentState(

@@ -682,7 +682,7 @@ private fun IncomingCallScreen(
 private fun CallOutcomeScreen(
     contactName: String,
     reason: CallCoreBridge.CallOutcomeReason,
-    iceDiagnosis: WebRtcEngine.IceDiagnosis?,
+    iceDiagnosis: CallCoreBridge.IceDiagnosis?,
     onDismiss: () -> Unit,
 ) {
     val name = contactName.ifBlank { stringResource(R.string.common_unnamedContact) }
@@ -693,8 +693,8 @@ private fun CallOutcomeScreen(
         // network problem the person can actually act on.
         CallCoreBridge.CallOutcomeReason.NEVER_CONNECTED -> stringResource(R.string.call_outcome_neverConnectedTitle) to stringResource(
             when (iceDiagnosis) {
-                WebRtcEngine.IceDiagnosis.UDP_BLOCKED -> R.string.call_outcome_udpBlockedMessage
-                WebRtcEngine.IceDiagnosis.NO_DIRECT_PATH -> R.string.call_outcome_noDirectPathMessage
+                CallCoreBridge.IceDiagnosis.UDP_BLOCKED -> R.string.call_outcome_udpBlockedMessage
+                CallCoreBridge.IceDiagnosis.NO_DIRECT_PATH -> R.string.call_outcome_noDirectPathMessage
                 null -> R.string.call_outcome_neverConnectedMessage
             },
             name,

@@ -1015,3 +1015,77 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeAvailableRel
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeDueForRetry<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, now_ms: jlong) -> jstring {
     encode_or_fallback(&mut env, empty_pending_retries_json, |_env| Some(crate::signal_retry::due_for_retry(now_ms)))
 }
+
+// ---------------------------------------------------------------------------
+// ICE evidence / call-failure diagnosis — see `crate::ice_evidence`'s own doc.
+// Every export is pure bookkeeping: malformed input or a panic is a silent
+// no-op, and [`nativeIceLastDiagnosis`] fails closed to "can't tell" (`null`).
+// A nullable declared type crosses as an empty string, same convention as
+// `sdpMid`.
+// ---------------------------------------------------------------------------
+
+/// See [`crate::ice_evidence::reset`]'s own doc.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIceReset<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) {
+    run_catching(&mut env, |_env| crate::ice_evidence::reset());
+}
+
+/// See [`crate::ice_evidence::note_local_candidate`]'s own doc.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIceNoteLocalCandidate<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    candidate_line: JString<'local>,
+    declared_type: JString<'local>,
+) {
+    run_catching(&mut env, |env| {
+        let Some(line) = get_string(env, &candidate_line) else { return };
+        let declared = get_string(env, &declared_type).unwrap_or_default();
+        crate::ice_evidence::note_local_candidate(&line, Some(declared.as_str()));
+    });
+}
+
+/// See [`crate::ice_evidence::note_remote_candidate`]'s own doc.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIceNoteRemoteCandidate<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    candidate_line: JString<'local>,
+) {
+    run_catching(&mut env, |env| {
+        if let Some(line) = get_string(env, &candidate_line) {
+            crate::ice_evidence::note_remote_candidate(&line);
+        }
+    });
+}
+
+/// See [`crate::ice_evidence::note_connected`]'s own doc.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIceNoteConnected<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) {
+    run_catching(&mut env, |_env| crate::ice_evidence::note_connected());
+}
+
+/// See [`crate::ice_evidence::remember_diagnosis`]'s own doc.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIceRememberDiagnosis<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    ice_connection_state: JString<'local>,
+) {
+    run_catching(&mut env, |env| {
+        if let Some(state) = get_string(env, &ice_connection_state) {
+            crate::ice_evidence::remember_diagnosis(&state);
+        }
+    });
+}
+
+/// See [`crate::ice_evidence::last_diagnosis`]'s own doc. Returns the
+/// diagnosis's `snake_case` name (`"no_direct_path"`/`"udp_blocked"`), or
+/// `null` for "can't tell" (including on a panic).
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIceLastDiagnosis<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) -> jstring {
+    encode_nullable(&mut env, |_env| {
+        let diagnosis = crate::ice_evidence::last_diagnosis()?;
+        serde_json::to_value(diagnosis).ok()?.as_str().map(str::to_string)
+    })
+}
