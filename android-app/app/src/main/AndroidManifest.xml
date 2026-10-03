@@ -25,6 +25,16 @@
          manifest permission can shortcut. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Optional: lets RingScreenGuard cover the screen with a plain panel
+         while it's pressing Home on an incoming call, instead of whatever
+         Home resolves to briefly showing through. "Display over other apps"
+         is a normal special-access permission — not granted by declaring it
+         here, the person turns it on for this app in Settings (or it's
+         granted via `appops set` once over adb; see the README). A no-op
+         without it: the ring/TV-switch still work, the screen just isn't
+         masked during the brief transition. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
 

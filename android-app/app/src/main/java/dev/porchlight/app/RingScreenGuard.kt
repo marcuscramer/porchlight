@@ -6,12 +6,16 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
+import android.view.View
+import android.view.WindowManager
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -33,6 +37,15 @@ import java.util.concurrent.atomic.AtomicInteger
  * the screensaver), and otherwise just asks to come to the front again, for
  * up to [GIVE_UP_MS]. Without the accessibility service enabled it does a
  * plain bring-to-front.
+ *
+ * Pressing Home briefly shows whatever Android resolves Home to (normally
+ * the Portal's own home screen) before this app gets back in front — around
+ * the Portal's own one-touch-play response time, too fast to avoid, just to
+ * see. If the "display over other apps" permission is also granted, a plain
+ * navy panel covers the screen for that moment instead: added right before
+ * the first press, removed once settled (or on give-up, which already shows
+ * the app's content). A timer force-removes it regardless, so a bug here can
+ * never leave the screen covered.
  */
 internal class RingScreenGuard(
     private val context: Context,
@@ -40,6 +53,7 @@ internal class RingScreenGuard(
     private val bringToFront: () -> Unit,
 ) {
     private val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
     // Bumped on every start and cancel; a step scheduled for an older ring
     // sees a different value and does nothing.
@@ -50,6 +64,8 @@ internal class RingScreenGuard(
     @Volatile private var lastPressAt = Long.MIN_VALUE / 2
     private var registered = false
     private var repost: () -> Unit = {}
+    private var maskView: View? = null
+    private val hideMaskAfterTimeout = Runnable { hideMask() }
 
     private val dreamReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -106,6 +122,7 @@ internal class RingScreenGuard(
         handler.post {
             repost = repostCallNotification
             if (CallWakeUpAccessibilityService.isEnabled) {
+                showMask()
                 step(id, presses = 0, startedAt = SystemClock.elapsedRealtime())
             } else {
                 Log.i(TAG, "accessibility service off: plain bring-to-front")
@@ -124,6 +141,7 @@ internal class RingScreenGuard(
     /** The call stopped ringing (answered, declined, missed or cancelled). */
     fun cancel() {
         ringId.incrementAndGet()
+        hideMask()
     }
 
     private fun step(id: Int, presses: Int, startedAt: Long) {
@@ -152,7 +170,10 @@ internal class RingScreenGuard(
         // pressed again when the screensaver really is back, and at most
         // MAX_PRESSES times. Otherwise it just asks to come to the front again.
         when {
-            uiResumed && !dreaming -> Log.i(TAG, "settled after $presses press(es)")
+            uiResumed && !dreaming -> {
+                Log.i(TAG, "settled after $presses press(es)")
+                hideMask()
+            }
             dreaming && presses < MAX_PRESSES -> {
                 lastPressAt = SystemClock.elapsedRealtime()
                 val ok = CallWakeUpAccessibilityService.pressHome()
@@ -164,13 +185,51 @@ internal class RingScreenGuard(
                 bringBack()
                 handler.postDelayed({ step(id, presses, startedAt) }, VERIFY_DELAY_MS)
             }
-            else -> Log.w(TAG, "gave up after ${presses} press(es) (resumed=$uiResumed dreaming=$dreaming)")
+            else -> {
+                Log.w(TAG, "gave up after ${presses} press(es) (resumed=$uiResumed dreaming=$dreaming)")
+                hideMask()
+            }
         }
     }
 
     private fun bringBack() {
         repost()
         bringToFront()
+    }
+
+    /**
+     * A plain opaque panel in the screens' own navy, covering whatever Home
+     * resolves to until this side is confirmed back in front. Only shown if
+     * "display over other apps" is granted (optional, alongside the
+     * accessibility service — see README); a no-op otherwise. Deliberately
+     * doesn't cover the screensaver itself (a different window layer a plain
+     * overlay can't reach) — not needed, since Home while the screensaver is
+     * running ends it directly without ever showing a home screen.
+     */
+    private fun showMask() {
+        if (maskView != null) return
+        if (!Settings.canDrawOverlays(context)) return
+        val view = View(context).apply { setBackgroundColor(MASK_COLOR) }
+        val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+            PixelFormat.OPAQUE,
+        )
+        runCatching {
+            windowManager.addView(view, params)
+            maskView = view
+            handler.postDelayed(hideMaskAfterTimeout, MASK_TIMEOUT_MS)
+        }.onFailure { Log.e(TAG, "showMask failed", it) }
+    }
+
+    private fun hideMask() {
+        handler.removeCallbacks(hideMaskAfterTimeout)
+        val view = maskView ?: return
+        maskView = null
+        runCatching { windowManager.removeView(view) }.onFailure { Log.e(TAG, "hideMask failed", it) }
     }
 
     private companion object {
@@ -182,5 +241,15 @@ internal class RingScreenGuard(
         const val GIVE_UP_MS = 8_000L
         const val OWN_PRESS_WINDOW_MS = 2_500L
         const val MAX_PRESSES = 3
+
+        // The screens' own navy (colorBackgroundWaiting / --color-background-waiting)
+        // — not a GeneratedColor reference, since this runs in a plain Service
+        // with no theme context to resolve one against.
+        const val MASK_COLOR = 0xFF16202B.toInt()
+
+        // Covers the longest realistic give-up window (GIVE_UP_MS) with margin,
+        // so a bug in step()'s own accounting still can't leave the screen
+        // covered indefinitely.
+        const val MASK_TIMEOUT_MS = 10_000L
     }
 }

@@ -147,8 +147,13 @@ number.
   key when a call rings. Android's accessibility mechanism is powerful in
   general, so this still means trusting the app's code and its updates, but it
   is a much narrower grant than a permission to change system settings, which
-  Porchlight does not use. Both are optional, and skipping them costs only
-  convenience.
+  Porchlight does not use. A second, also optional, step ("display over other
+  apps") lets the app cover the screen with a plain panel for the moment it's
+  pressing Home, so the Portal's own home screen never flashes through —
+  the same category of permission a floating-chat-head app would hold, shown
+  only while a call is ringing and removed as soon as the call screen is up,
+  with a timer that force-removes it regardless. All of these steps are
+  optional, and skipping them costs only convenience.
 - **The platform itself is unmaintained.** Meta Portal hardware is
   discontinued and Meta doesn't guarantee further updates, so any weakness in
   the underlying Android build stays unpatched, with or without Porchlight.

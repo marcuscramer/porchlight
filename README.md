@@ -123,13 +123,30 @@ and doesn't replace them (the Portal already runs two of its own), so run it
 only once. The service can't read anything on the screen; all Porchlight does
 with it is press Home when a call rings. Settings in Porchlight shows whether
 it is on. Without it, calls still ring, but from sleep they may be hidden
-behind the screensaver, and the TV doesn't switch. You may see the Portal's
-home screen for a fraction of a second as a call comes in.
+behind the screensaver, and the TV doesn't switch. With it on its own, you
+may briefly see the Portal's own home screen as a call comes in, for well
+under a second, before the call screen takes over.
 
 To turn it off again, read the list with
 `adb shell settings get secure enabled_accessibility_services`, remove the
 `dev.porchlight.app/…` entry and put the rest back with
 `adb shell settings put secure enabled_accessibility_services "<the rest>"`.
+
+A second, optional step removes that brief glimpse entirely: it covers the
+screen with a plain panel for the moment Porchlight is pressing Home, instead
+of letting whatever's briefly behind it show through. It needs Android's
+"display over other apps" access, also one-time:
+
+```
+adb shell appops set dev.porchlight.app SYSTEM_ALERT_WINDOW allow
+```
+
+It's a normal, narrow permission — Android's own name for the toggle is
+"Allow display over other apps" — and the panel is just a plain color, drawn
+while Home is being pressed and removed the moment the call screen is
+confirmed up, with a safety timer so it can never stay covering the screen.
+Without it, the brief glimpse above is all you'd see; with it, nothing but
+the call screen itself ever shows.
 
 ## Using the web version
 
