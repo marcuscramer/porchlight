@@ -124,13 +124,17 @@ First, Porchlight needs its accessibility service switched on. The Portal's
 own Settings has no screen for this:
 
 ```
-adb shell 'cur=$(settings get secure enabled_accessibility_services); [ "$cur" = null ] && cur=""; settings put secure enabled_accessibility_services "${cur:+$cur:}dev.porchlight.app/dev.porchlight.app.CallWakeUpAccessibilityService"; settings put secure accessibility_enabled 1'
+adb shell '
+S=dev.porchlight.app/dev.porchlight.app.CallWakeUpAccessibilityService
+settings put secure enabled_accessibility_services "$(settings get secure enabled_accessibility_services):$S"
+settings put secure accessibility_enabled 1
+'
 ```
 
 It adds Porchlight to the Portal's existing accessibility services and doesn't
-replace them (the Portal already runs two of its own), so run it only once.
-The service can't read anything on the screen; all Porchlight does with it is
-press Home when a call rings.
+replace them (the Portal already runs two of its own). Running it twice is
+harmless. The service can't read anything on the screen; all Porchlight does
+with it is press Home when a call rings.
 
 Second, let Porchlight cover the screen for the moment it's pressing Home.
 Without this you'd see the Portal's own home screen flash for well under a
