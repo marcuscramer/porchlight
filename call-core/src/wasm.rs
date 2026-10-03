@@ -655,6 +655,26 @@ pub fn available_relays(candidates: Vec<String>, now_ms: f64) -> Vec<String> {
     catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::available_relays(&candidates, now_ms as i64))).unwrap_or_default()
 }
 
+/// See [`crate::signal_retry::export_cooldowns`]'s own doc. A JSON object of
+/// relay URL -> cooldown end (ms since epoch); `"{}"` on a panic.
+#[wasm_bindgen(js_name = exportRelayCooldowns)]
+pub fn export_relay_cooldowns(now_ms: f64) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::export_cooldowns(now_ms as i64))).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// See [`crate::signal_retry::import_cooldowns`]'s own doc. No return value;
+/// malformed input or a panic is a silent no-op.
+#[wasm_bindgen(js_name = importRelayCooldowns)]
+pub fn import_relay_cooldowns(json: &str, now_ms: f64) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::import_cooldowns(json, now_ms as i64)));
+}
+
+/// See [`crate::signal_retry::relay_stats_json`]'s own doc. `"{}"` on a panic.
+#[wasm_bindgen(js_name = relayStats)]
+pub fn relay_stats() -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(crate::signal_retry::relay_stats_json)).unwrap_or_else(|_| "{}".to_string())
+}
+
 /// See [`crate::signal_retry::due_for_retry`]'s own doc. Returns a
 /// JSON-encoded `Vec<`[`crate::signal_retry::PendingRetry`]`>`, falling back
 /// to `"[]"` on a panic — fail-closed, nothing to retry this tick.

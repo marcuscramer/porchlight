@@ -1016,6 +1016,37 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeDueForRetry<
     encode_or_fallback(&mut env, empty_pending_retries_json, |_env| Some(crate::signal_retry::due_for_retry(now_ms)))
 }
 
+/// See [`crate::signal_retry::export_cooldowns`]'s own doc. A JSON object of
+/// relay URL -> cooldown end (ms since epoch); `"{}"` on a panic.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeExportRelayCooldowns<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, now_ms: jlong) -> jstring {
+    let json = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::export_cooldowns(now_ms))).unwrap_or_else(|_| "{}".to_string());
+    match env.new_string(json) {
+        Ok(s) => s.into_raw(),
+        Err(_) => null_jstring(),
+    }
+}
+
+/// See [`crate::signal_retry::import_cooldowns`]'s own doc. No return value;
+/// malformed input or a panic is a silent no-op.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeImportRelayCooldowns<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, json: JString<'local>, now_ms: jlong) {
+    run_catching(&mut env, |env| {
+        let Some(json) = get_string(env, &json) else { return };
+        crate::signal_retry::import_cooldowns(&json, now_ms);
+    });
+}
+
+/// See [`crate::signal_retry::relay_stats_json`]'s own doc. `"{}"` on a panic.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRelayStats<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) -> jstring {
+    let json = catch_unwind(std::panic::AssertUnwindSafe(crate::signal_retry::relay_stats_json)).unwrap_or_else(|_| "{}".to_string());
+    match env.new_string(json) {
+        Ok(s) => s.into_raw(),
+        Err(_) => null_jstring(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ICE evidence / call-failure diagnosis — see `crate::ice_evidence`'s own doc.
 // Every export is pure bookkeeping: malformed input or a panic is a silent

@@ -254,6 +254,15 @@ object CallCoreBridge {
     @JvmStatic
     private external fun nativeDueForRetry(nowMs: Long): String
 
+    @JvmStatic
+    private external fun nativeExportRelayCooldowns(nowMs: Long): String
+
+    @JvmStatic
+    private external fun nativeImportRelayCooldowns(json: String, nowMs: Long)
+
+    @JvmStatic
+    private external fun nativeRelayStats(): String
+
     /** What starting a new attempt hands back — see the Rust crate's own
      * `StartResult` doc. [generation] must be passed back verbatim to
      * [handleTimeout] when the live window elapses. */
@@ -779,6 +788,21 @@ object CallCoreBridge {
             val relays = obj.getJSONArray("relays")
             PendingRetry(obj.getString("event_json"), (0 until relays.length()).map { relays.getString(it) })
         }
+    }
+
+    /** See the Rust crate's own `signal_retry::export_cooldowns` doc: the
+     * relay cooldowns still running, as JSON to keep across restarts. */
+    fun exportRelayCooldowns(nowMs: Long): String = nativeExportRelayCooldowns(nowMs)
+
+    /** Restores what [exportRelayCooldowns] returned. */
+    fun importRelayCooldowns(json: String, nowMs: Long) = nativeImportRelayCooldowns(json, nowMs)
+
+    data class RelayStats(val accepted: Int, val rejected: Int)
+
+    /** How many publishes each relay (keyed by URL) has accepted / rejected since start. */
+    fun relayStats(): Map<String, RelayStats> {
+        val obj = JSONObject(nativeRelayStats())
+        return obj.keys().asSequence().associateWith { url -> obj.getJSONObject(url).let { RelayStats(it.getInt("accepted"), it.getInt("rejected")) } }
     }
 
     /** Mirrors `currentFilters`'s exact filter-set construction — see the

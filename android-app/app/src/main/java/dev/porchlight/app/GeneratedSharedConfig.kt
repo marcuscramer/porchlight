@@ -4,11 +4,14 @@ package dev.porchlight.app
 
 object GeneratedSharedConfig {
     val RELAYS: List<String> = listOf(
-        "wss://relay.damus.io",
-        "wss://nos.lol",
         "wss://relay.primal.net",
         "wss://relay.snort.social",
-        "wss://offchain.pub",
+        "wss://nostr-pub.wellorder.net",
+        "wss://nostr.mom",
+        "wss://nostr.oxtr.dev",
+        "wss://nostr.data.haus",
+        "wss://relay.damus.io",
+        "wss://nos.lol",
     )
 
     val STUN_SERVERS: List<String> = listOf(

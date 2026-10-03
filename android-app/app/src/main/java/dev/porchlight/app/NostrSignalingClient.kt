@@ -23,6 +23,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -85,6 +86,7 @@ data class CandidatePeer(val publicKey: String, val name: String)
  * out that timeout.
  */
 class NostrSignalingClient(
+    private val context: android.content.Context,
     private val resolver: PairingResolver,
     private val listener: Listener,
     /**
@@ -255,6 +257,17 @@ class NostrSignalingClient(
     // count silently stale — which had been quietly defeating [monitor]'s
     // own watchdog below.
     private val connectedRelays = mutableSetOf<NormalizedRelayUrl>()
+
+    // What the "Connection info" screen reads from the UI thread: copies and
+    // concurrent maps, written from the callbacks below, so nothing here needs
+    // [executor] (unlike [connectedRelays] itself).
+    @Volatile private var connectedSnapshot: Set<String> = emptySet()
+    private val lastRelayMessageAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    // Why a relay isn't connected (cleared the moment it connects), and why it
+    // last rejected a publish (kept — it explains a pause, and is saved with it).
+    private val lastRelayConnectError = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
+    private val lastRelayReject = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
+    @Volatile private var lastHeartbeatSentAtMs: Long? = null
     private var closed = false
     private var heartbeatFuture: java.util.concurrent.ScheduledFuture<*>? = null
 
@@ -272,7 +285,72 @@ class NostrSignalingClient(
     // own doc.
     private var relaysDegradedSinceMs: Long? = null
 
+    /** One relay as the "Connection info" screen shows it. */
+    data class RelayStatus(
+        val host: String,
+        val connected: Boolean,
+        /** Cooling down after the relay rejected a publish (see call-core's `signal_retry`). */
+        val backingOff: Boolean,
+        val lastMessageAtMs: Long?,
+        val lastError: String?,
+        val lastErrorAtMs: Long?,
+        val accepted: Int,
+        val rejected: Int,
+    )
+
+    data class Snapshot(val relays: List<RelayStatus>, val lastHeartbeatSentAtMs: Long?)
+
+    /** Safe to call from any thread. */
+    fun snapshot(nowMs: Long): Snapshot {
+        val connected = connectedSnapshot
+        val usable = CallCoreBridge.availableRelays(relayUrls.map { it.url }, nowMs).toSet()
+        val stats = CallCoreBridge.relayStats()
+        val relays = relayUrls.map { relay ->
+            // Not connected: why. Connected but paused: the rejection behind the pause.
+            val isConnected = relay.url in connected
+            val error = if (isConnected) lastRelayReject[relay.url] else (lastRelayConnectError[relay.url] ?: lastRelayReject[relay.url])
+            RelayStatus(
+                host = relay.url.removePrefix("wss://").removePrefix("ws://").trimEnd('/'),
+                connected = isConnected,
+                backingOff = relay.url !in usable,
+                lastMessageAtMs = lastRelayMessageAtMs[relay.url],
+                lastError = error?.first,
+                lastErrorAtMs = error?.second,
+                accepted = stats[relay.url]?.accepted ?: 0,
+                rejected = stats[relay.url]?.rejected ?: 0,
+            )
+        }
+        return Snapshot(relays, lastHeartbeatSentAtMs)
+    }
+
+    // The relay cooldowns (see call-core's `signal_retry`) are kept across app
+    // restarts, so a relay that rejected us a minute ago isn't poked again by
+    // every restart.
+    private val cooldownPrefs get() = context.getSharedPreferences("relay_cooldowns", android.content.Context.MODE_PRIVATE)
+
+    /** Keeps the running pauses and, beside them, each relay's last error — a pause without its reason is a mystery after a restart. */
+    private fun saveRelayPauses(now: Long) {
+        val errors = JSONObject()
+        for ((url, error) in lastRelayReject) errors.put(url, JSONArray().put(error.first).put(error.second))
+        cooldownPrefs.edit()
+            .putString("json", CallCoreBridge.exportRelayCooldowns(now))
+            .putString("errors", errors.toString())
+            .apply()
+    }
+
+    private fun restoreRelayPauses(now: Long) {
+        CallCoreBridge.importRelayCooldowns(cooldownPrefs.getString("json", "{}") ?: "{}", now)
+        runCatching {
+            val errors = JSONObject(cooldownPrefs.getString("errors", "{}") ?: "{}")
+            for (url in errors.keys()) {
+                val entry = errors.getJSONArray(url)
+                lastRelayReject.putIfAbsent(url, entry.getString(0) to entry.getLong(1))
+            }
+        }
+    }
+
     fun connect() {
+        restoreRelayPauses(System.currentTimeMillis())
         // NostrClient/OkHttp invoke these on their own connection/socket
         // threads, not [executor] — marshaled here so connectedRelays
         // is never touched from more than one thread.
@@ -281,9 +359,11 @@ class NostrSignalingClient(
             // close()/teardown fires these from OkHttp's own thread for
             // every relay, which can race callExecutor's own shutdown().
             override fun onConnected(relay: IRelayClient, pingMillis: Int, compressed: Boolean) {
+                lastRelayConnectError.remove(relay.url.url)
                 executor.safeExecute {
                     val wasEmpty = connectedRelays.isEmpty()
                     connectedRelays.add(relay.url)
+                    connectedSnapshot = connectedRelays.mapTo(HashSet()) { it.url }
                     if (wasEmpty && connectedRelays.isNotEmpty()) {
                         listener.onSignalingConnected()
                         // Signaling just came back (or came up for the first
@@ -300,11 +380,13 @@ class NostrSignalingClient(
             override fun onDisconnected(relay: IRelayClient) {
                 executor.safeExecute {
                     connectedRelays.remove(relay.url)
+                    connectedSnapshot = connectedRelays.mapTo(HashSet()) { it.url }
                     if (connectedRelays.isEmpty()) listener.onSignalingDisconnected()
                 }
             }
             override fun onCannotConnect(relay: IRelayClient, errorMessage: String) {
                 Log.w(TAG, "cannot connect to ${relay.url}: $errorMessage")
+                lastRelayConnectError[relay.url.url] = errorMessage to System.currentTimeMillis()
                 // This relay is, by definition, not connected right now —
                 // fold it into the same tracking onDisconnected uses so a
                 // relay stuck failing to reconnect doesn't leave
@@ -312,6 +394,7 @@ class NostrSignalingClient(
                 // See this property's own doc for why a set, not a counter.
                 executor.safeExecute {
                     connectedRelays.remove(relay.url)
+                    connectedSnapshot = connectedRelays.mapTo(HashSet()) { it.url }
                     if (connectedRelays.isEmpty()) listener.onSignalingDisconnected()
                 }
             }
@@ -326,8 +409,14 @@ class NostrSignalingClient(
             // sends. A relay that was never connected enough to be sent to
             // gets no OK at all — publishAndQueueMisses covers that case.
             override fun onIncomingMessage(relay: IRelayClient, msgStr: String, msg: Message) {
+                lastRelayMessageAtMs[relay.url.url] = System.currentTimeMillis()
                 val ok = msg as? OkMessage ?: return
-                executor.safeExecute { CallCoreBridge.recordPublishResult(ok.eventId, relay.url.url, ok.success, ok.message, System.currentTimeMillis()) }
+                if (!ok.success) lastRelayReject[relay.url.url] = ok.message to System.currentTimeMillis()
+                executor.safeExecute {
+                    val now = System.currentTimeMillis()
+                    CallCoreBridge.recordPublishResult(ok.eventId, relay.url.url, ok.success, ok.message, now)
+                    if (!ok.success) saveRelayPauses(now)
+                }
             }
         })
         client.connect()
@@ -508,7 +597,17 @@ class NostrSignalingClient(
         // carries `hello` is consumed by the build itself (see
         // `presence::take_hello`), so one payload has to serve every peer.
         val heartbeat = CallCoreBridge.buildHeartbeatPayload(resolver.deviceName(), busy)
-        if (heartbeat != null) for (peer in resolver.confirmedPeers()) sendToConfirmedPeer(peer) { heartbeat }
+        if (heartbeat != null) {
+            lastHeartbeatSentAtMs = System.currentTimeMillis()
+            // One event per contact, spread out rather than all in the same
+            // instant: relays throttle bursts ("rate-limited: slow down"), and
+            // a rejection that arrives before the next send pauses that relay
+            // for the rest of them.
+            for ((i, peer) in resolver.confirmedPeers().withIndex()) {
+                if (i == 0) sendToConfirmedPeer(peer) { heartbeat }
+                else executor.safeSchedule(i * HEARTBEAT_SPREAD_MS, TimeUnit.MILLISECONDS) { sendToConfirmedPeer(peer) { heartbeat } }
+            }
+        }
         for (pending in resolver.pendingPairings()) {
             val tag = pending.rendezvousTag ?: continue
             for (payload in pending.bootstrapPayloads) publishBootstrap(pending.ownPrivateKeyHex, tag, pending.bootstrapTarget, payload)
@@ -805,6 +904,7 @@ class NostrSignalingClient(
         // instead of (as a prior 150s threshold did) always losing that
         // race.
         private const val FORCE_RECONNECT_AFTER_DEGRADED_MS = 45_000L
+        private const val HEARTBEAT_SPREAD_MS = 400L
 
         // See resubscribe()'s onClosed override: a relay sending NIP-01
         // CLOSED for a persistent reason (PoW/auth it'll never satisfy)

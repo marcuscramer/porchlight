@@ -22,6 +22,7 @@
   "settings": {
     "title": "Settings",
     "renameRow": "Rename this device",
+    "connectionInfoRow": "Connection info",
     "kioskMode": {
       "title": "Kiosk mode",
       "subtitle": "Bring Porchlight up automatically after (re)boot and when the screensaver ends"
@@ -44,6 +45,36 @@
     "ringVolume": {
       "title": "Ringtone volume"
     }
+  },
+  "connectionInfo": {
+    "title": "Connection info",
+    "network": "Internet",
+    "networkWifi": "Connected via Wi-Fi",
+    "networkEthernet": "Connected via Ethernet",
+    "networkCellular": "Connected via mobile data",
+    "networkOther": "Connected",
+    "networkLimited": "Connected, but no internet access detected",
+    "networkOffline": "Not connected",
+    "relays": "Relays",
+    "relaysSummary": "{up} of {total} connected",
+    "relayConnected": "Connected",
+    "relayNotConnected": "Not connected",
+    "relayCounts": "{accepted} ok, {rejected} rejected",
+    "lastHeartbeat": "Last heartbeat sent",
+    "contactsOnline": "Contacts online",
+    "contactsOnlineValue": "{online} of {total}",
+    "wakeUpService": "Call wake-up service",
+    "overlay": "Display over other apps",
+    "installVerifier": "Install verifier",
+    "on": "On",
+    "off": "Off",
+    "allowed": "Allowed",
+    "notAllowed": "Not allowed",
+    "verifierBlocking": "On (self-updates blocked)",
+    "never": "never",
+    "agoSeconds": "{seconds} s ago",
+    "agoMinutes": "{minutes} min ago",
+    "agoHours": "{hours} h ago"
   },
   "pairing": {
     "addContactTitle": "Add contact",

@@ -1051,10 +1051,10 @@ private fun ContactRow(
  * web's identical .contact-status-dot (styles.css).
  */
 @Composable
-private fun StatusDot(hue: Color, contentDescription: String, modifier: Modifier = Modifier) {
+internal fun StatusDot(hue: Color, contentDescription: String, modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = Dimens.dimension10) {
     Box(
         modifier = modifier
-            .size(Dimens.dimension10)
+            .size(size)
             .background(hue, CircleShape)
             .semantics { this.contentDescription = contentDescription },
     )

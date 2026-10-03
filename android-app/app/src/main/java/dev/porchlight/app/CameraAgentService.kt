@@ -179,7 +179,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     val state: StateFlow<AgentState> = _state
 
     private var engine: WebRtcEngine? = null
-    private var signaling: NostrSignalingClient? = null
+    @Volatile private var signaling: NostrSignalingClient? = null
 
     // Found live on real (stock, non-Immortal) Portal TV hardware:
     // dismissing the screensaver sometimes lands on the Portal's own stock
@@ -726,6 +726,9 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         }
     }
 
+    /** For the "Connection info" screen; null while the agent isn't running. Any thread. */
+    fun signalingSnapshot(): NostrSignalingClient.Snapshot? = signaling?.snapshot(System.currentTimeMillis())
+
     /** Dismisses the full-screen call-outcome prompt — Back or "Call again" tap. */
     fun dismissCallOutcome() = callExecutor?.execute {
         updateState { it.copy(pendingCallOutcome = null) }
@@ -831,7 +834,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         val executor = Executors.newSingleThreadScheduledExecutor()
         callExecutor = executor
         engine = WebRtcEngine(context = this, listener = this, executor = executor).also { it.start() }
-        signaling = NostrSignalingClient(resolver = PairingResolverImpl(), listener = this, executor = executor).also { it.connect() }
+        signaling = NostrSignalingClient(context = this, resolver = PairingResolverImpl(), listener = this, executor = executor).also { it.connect() }
         for (pairing in config.pairings) addPairingState(pairing)
 
         // See startPairing()/pendingFirstAttempt's doc — the very first

@@ -126,6 +126,33 @@ html, body {
   color: var(--color-text-primary);
 }
 
+/* Connection info rows (#connectionRows): label left, value right, one line each. */
+.info-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: var(--typography-body-font-size);
+}
+/* The status dot hugs the top-left of the name, as in the contact list. */
+.info-row .label { color: var(--color-text-dim); display: flex; align-items: flex-start; flex-shrink: 0; }
+.info-row .contact-status-dot { width: 6px; height: 6px; }
+.info-row .value { color: var(--color-text-primary); text-align: right; }
+.info-row .value.dim { color: var(--color-text-dim); }
+/* A relay's detail is one line, ellipsized; tapping it (or hovering, via its
+   title) shows the whole message. */
+.info-row .value.relay { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+.info-row .value.relay em { font-style: italic; }
+.info-row .value.relay.expanded { white-space: normal; overflow: visible; }
+.info-row .value.ok { color: var(--color-status-ok); }
+.info-row .value.warn { color: var(--color-status-busy); }
+.info-row .value.bad { color: var(--color-status-danger); }
+
 .muted {
   color: var(--color-text-dim);
   font-size: var(--typography-body-font-size);

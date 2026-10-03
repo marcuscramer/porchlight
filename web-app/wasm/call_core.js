@@ -388,6 +388,25 @@ export function dueForRetry(now_ms) {
 }
 
 /**
+ * See [`crate::signal_retry::export_cooldowns`]'s own doc. A JSON object of
+ * relay URL -> cooldown end (ms since epoch); `"{}"` on a panic.
+ * @param {number} now_ms
+ * @returns {string}
+ */
+export function exportRelayCooldowns(now_ms) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.exportRelayCooldowns(now_ms);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * See [`crate::call_arbitration::forget_pairing`]'s own doc. Same
  * always-a-JSON-array contract as the other effect-returning functions
  * above.
@@ -756,6 +775,18 @@ export function iceReset() {
 }
 
 /**
+ * See [`crate::signal_retry::import_cooldowns`]'s own doc. No return value;
+ * malformed input or a panic is a silent no-op.
+ * @param {string} json
+ * @param {number} now_ms
+ */
+export function importRelayCooldowns(json, now_ms) {
+    const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.importRelayCooldowns(ptr0, len0, now_ms);
+}
+
+/**
  * See [`crate::call_arbitration::is_call_active`]'s own doc. Returns
  * `true` (fail toward *not* claiming to be free) on a panic — the shell
  * uses this to fill in its own outgoing heartbeat's busy field, and
@@ -977,6 +1008,23 @@ export function recordPublishResult(event_id, relay, accepted, reason, now_ms) {
     const ptr2 = passStringToWasm0(reason, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len2 = WASM_VECTOR_LEN;
     wasm.recordPublishResult(ptr0, len0, ptr1, len1, accepted, ptr2, len2, now_ms);
+}
+
+/**
+ * See [`crate::signal_retry::relay_stats_json`]'s own doc. `"{}"` on a panic.
+ * @returns {string}
+ */
+export function relayStats() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.relayStats();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
 }
 
 /**

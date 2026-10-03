@@ -22,6 +22,7 @@
   "settings": {
     "title": "Einstellungen",
     "renameRow": "Dieses Gerät umbenennen",
+    "connectionInfoRow": "Verbindungsinfo",
     "kioskMode": {
       "title": "Kiosk-Modus",
       "subtitle": "Startet Porchlight automatisch nach dem (Neu-)Start und wenn der Bildschirmschoner endet"
@@ -44,6 +45,36 @@
     "ringVolume": {
       "title": "Klingeltonlautstärke"
     }
+  },
+  "connectionInfo": {
+    "title": "Verbindungsinfo",
+    "network": "Internet",
+    "networkWifi": "Verbunden über WLAN",
+    "networkEthernet": "Verbunden über Ethernet",
+    "networkCellular": "Verbunden über Mobilfunk",
+    "networkOther": "Verbunden",
+    "networkLimited": "Verbunden, aber kein Internetzugang erkannt",
+    "networkOffline": "Nicht verbunden",
+    "relays": "Relays",
+    "relaysSummary": "{up} von {total} verbunden",
+    "relayConnected": "Verbunden",
+    "relayNotConnected": "Nicht verbunden",
+    "relayCounts": "{accepted} ok, {rejected} abgelehnt",
+    "lastHeartbeat": "Letzter Herzschlag gesendet",
+    "contactsOnline": "Kontakte online",
+    "contactsOnlineValue": "{online} von {total}",
+    "wakeUpService": "Dienst für Aufwecken bei Anruf",
+    "overlay": "Über anderen Apps anzeigen",
+    "installVerifier": "Installationsprüfung",
+    "on": "An",
+    "off": "Aus",
+    "allowed": "Erlaubt",
+    "notAllowed": "Nicht erlaubt",
+    "verifierBlocking": "An (Selbst-Updates blockiert)",
+    "never": "nie",
+    "agoSeconds": "vor {seconds} s",
+    "agoMinutes": "vor {minutes} Min.",
+    "agoHours": "vor {hours} Std."
   },
   "pairing": {
     "addContactTitle": "Kontakt hinzufügen",

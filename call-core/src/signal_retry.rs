@@ -81,9 +81,20 @@ const PENDING_PUBLISH_MAX_ENTRIES: usize = 50;
 /// wants, so [`looks_likely_permanent`] only decides *how long*.
 const REJECTION_COOLDOWN_MS: i64 = 2 * 60 * 1000;
 
-/// Longer cooldown for a rejection whose reason reads like a rate limit, ban,
-/// or proof-of-work demand — extremely unlikely to resolve soon.
+/// Longer cooldown for a rejection whose reason reads like a rate limit or a
+/// proof-of-work demand — extremely unlikely to resolve soon.
 const PERMANENT_REJECTION_COOLDOWN_MS: i64 = 10 * 60 * 1000;
+
+/// Longest cooldown, for a rejection that reads like a ban or an access policy
+/// ("banned: too many rate-limit violations", "pubkey is not in our web of
+/// trust", "restricted: sign up to write"). Hammering a relay that has banned
+/// this network only prolongs the ban, and a policy rejection never clears on
+/// its own.
+const BANNED_REJECTION_COOLDOWN_MS: i64 = 30 * 60 * 1000;
+
+/// Imported cooldowns further out than this are ignored — a clock that was
+/// wrong when one was saved must not silence a relay for days.
+const MAX_IMPORTED_COOLDOWN_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// One publish still outstanding at one or more relays. `relays` narrows
 /// down in place as results arrive via [`record_publish_result`] — the entry is
@@ -106,11 +117,20 @@ pub(crate) struct SignalRetryState {
     /// Relay URL -> when its rejection cooldown ends. At most one entry per
     /// configured relay, so never pruned.
     cooldown_until_ms: HashMap<String, i64>,
+    /// Relay URL -> how many publishes it has accepted / rejected since this
+    /// process started, for the "Connection info" screens.
+    stats: HashMap<String, RelayStats>,
+}
+
+#[derive(Serialize, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RelayStats {
+    pub accepted: u32,
+    pub rejected: u32,
 }
 
 impl SignalRetryState {
     pub(crate) fn new() -> Self {
-        SignalRetryState { pending: VecDeque::new(), cooldown_until_ms: HashMap::new() }
+        SignalRetryState { pending: VecDeque::new(), cooldown_until_ms: HashMap::new(), stats: HashMap::new() }
     }
 
     fn is_cooling_down(&self, relay: &str, now_ms: i64) -> bool {
@@ -127,6 +147,13 @@ fn looks_likely_permanent(reason: &str) -> bool {
         reason.windows(n.len()).any(|w| w == n.as_slice())
     };
     contains("banned") || contains("too many") || contains("pow:") || contains("difficulty") || matches_gapped(&reason, &["rate", "limit"]) || matches_gapped(&reason, &["proof", "of", "work"])
+}
+
+/// Whether `reason` reads like a ban or an access policy rather than a
+/// passing rate limit — see [`BANNED_REJECTION_COOLDOWN_MS`].
+fn looks_like_ban(reason: &str) -> bool {
+    let reason = reason.to_lowercase();
+    ["banned", "blocked", "web of trust", "restricted", "payment", "forbidden"].iter().any(|needle| reason.contains(needle))
 }
 
 /// Whether `segs` appear in order in `hay`, each pair separated by zero or
@@ -195,9 +222,22 @@ pub fn record_publish_result(event_id: &str, relay: &str, accepted: bool, reason
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.signal_retry;
     let resolved = accepted || reason.to_lowercase().contains("duplicate:");
-    if !resolved {
-        let cooldown = if looks_likely_permanent(reason) { PERMANENT_REJECTION_COOLDOWN_MS } else { REJECTION_COOLDOWN_MS };
-        state.cooldown_until_ms.insert(relay.to_string(), now_ms + cooldown);
+    let stats = state.stats.entry(relay.to_string()).or_default();
+    if resolved {
+        stats.accepted = stats.accepted.saturating_add(1);
+    } else {
+        stats.rejected = stats.rejected.saturating_add(1);
+        let cooldown = if looks_like_ban(reason) {
+            BANNED_REJECTION_COOLDOWN_MS
+        } else if looks_likely_permanent(reason) {
+            PERMANENT_REJECTION_COOLDOWN_MS
+        } else {
+            REJECTION_COOLDOWN_MS
+        };
+        let until = now_ms + cooldown;
+        // Never shorten a cooldown a longer rejection already set.
+        let entry = state.cooldown_until_ms.entry(relay.to_string()).or_insert(until);
+        *entry = (*entry).max(until);
     }
     let Some(entry) = state.pending.iter_mut().find(|p| p.event_id == event_id) else { return };
     if resolved {
@@ -208,6 +248,38 @@ pub fn record_publish_result(event_id: &str, relay: &str, accepted: bool, reason
     } else {
         entry.relays.insert(relay.to_string());
     }
+}
+
+/// The cooldowns still running at `now_ms`, as a JSON object of relay URL ->
+/// end time (ms since epoch), for the shell to keep across restarts: without
+/// that every app start or page reload would poke relays that rejected a
+/// moment ago all over again.
+pub fn export_cooldowns(now_ms: i64) -> String {
+    let app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let active: std::collections::BTreeMap<&String, &i64> = app.signal_retry.cooldown_until_ms.iter().filter(|(_, &until)| until > now_ms).collect();
+    serde_json::to_string(&active).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Restores cooldowns saved by [`export_cooldowns`]. Entries already over, or
+/// further out than `MAX_IMPORTED_COOLDOWN_MS`, and anything malformed are
+/// ignored; an existing longer cooldown is kept.
+pub fn import_cooldowns(json: &str, now_ms: i64) {
+    let Ok(saved) = serde_json::from_str::<HashMap<String, i64>>(json) else { return };
+    let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    for (relay, until) in saved {
+        if until > now_ms && until <= now_ms + MAX_IMPORTED_COOLDOWN_MS {
+            let entry = app.signal_retry.cooldown_until_ms.entry(relay).or_insert(until);
+            *entry = (*entry).max(until);
+        }
+    }
+}
+
+/// Per-relay accepted/rejected counts since start, as a JSON object of relay
+/// URL -> `{"accepted": n, "rejected": n}`.
+pub fn relay_stats_json() -> String {
+    let app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let sorted: std::collections::BTreeMap<&String, &RelayStats> = app.signal_retry.stats.iter().collect();
+    serde_json::to_string(&sorted).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Which of `candidates` are not currently cooling down from a rejection —
@@ -363,7 +435,7 @@ mod tests {
     fn a_rejection_cools_the_relay_down_for_retries_and_first_publishes_then_expires() {
         let _guard = reset_state_for_test();
         record_pending_publish("id1", "{}", CALL, &relays(&["wss://a", "wss://b"]), 1_000);
-        record_publish_result("id1", "wss://a", false, "blocked: spam", 1_000);
+        record_publish_result("id1", "wss://a", false, "invalid: spam", 1_000);
 
         let due = due_for_retry(1_001);
         assert_eq!(due.len(), 1);
@@ -396,7 +468,7 @@ mod tests {
     fn a_permanent_looking_reason_gets_the_longer_cooldown() {
         let _guard = reset_state_for_test();
         record_publish_result("x", "wss://a", false, "pow: 28 bits needed", 1_000);
-        record_publish_result("x", "wss://b", false, "blocked", 1_000);
+        record_publish_result("x", "wss://b", false, "something unexpected", 1_000);
         let just_after_short = 1_000 + REJECTION_COOLDOWN_MS;
         assert_eq!(available_relays(&relays(&["wss://a", "wss://b"]), just_after_short), vec!["wss://b".to_string()]);
         assert_eq!(available_relays(&relays(&["wss://a"]), 1_000 + PERMANENT_REJECTION_COOLDOWN_MS).len(), 1);
@@ -446,5 +518,69 @@ mod tests {
             record_pending_publish(n, "{}", payload, &relays(&["wss://a"]), 1_000);
         }
         assert_eq!(due_for_retry(1_000).len(), 6);
+    }
+
+    #[test]
+    fn a_ban_or_access_policy_reason_gets_the_longest_cooldown() {
+        let _guard = reset_state_for_test();
+        record_publish_result("x", "wss://a", false, "banned: too many rate-limit violations, try again later", 1_000);
+        record_publish_result("x", "wss://b", false, "Policy violated and pubkey is not in our web of trust.", 1_000);
+        record_publish_result("x", "wss://c", false, "rate-limited: slow down matey", 1_000);
+        let after_ten_minutes = 1_000 + PERMANENT_REJECTION_COOLDOWN_MS;
+        assert_eq!(available_relays(&relays(&["wss://a", "wss://b", "wss://c"]), after_ten_minutes), vec!["wss://c".to_string()]);
+        assert!(available_relays(&relays(&["wss://a", "wss://b"]), 1_000 + BANNED_REJECTION_COOLDOWN_MS).len() == 2);
+    }
+
+    #[test]
+    fn a_shorter_rejection_never_shortens_a_longer_cooldown() {
+        let _guard = reset_state_for_test();
+        record_publish_result("x", "wss://a", false, "banned", 1_000);
+        record_publish_result("y", "wss://a", false, "oops", 2_000);
+        assert!(available_relays(&relays(&["wss://a"]), 1_000 + PERMANENT_REJECTION_COOLDOWN_MS).is_empty());
+    }
+
+    #[test]
+    fn relay_stats_count_accepted_and_rejected_publishes() {
+        let _guard = reset_state_for_test();
+        record_publish_result("1", "wss://a", true, "", 1_000);
+        record_publish_result("2", "wss://a", true, "", 1_000);
+        record_publish_result("3", "wss://a", false, "oops", 1_000);
+        record_publish_result("4", "wss://b", false, "duplicate: have it", 1_000);
+        let stats: serde_json::Value = serde_json::from_str(&relay_stats_json()).unwrap();
+        assert_eq!(stats["wss://a"], serde_json::json!({"accepted": 2, "rejected": 1}));
+        assert_eq!(stats["wss://b"], serde_json::json!({"accepted": 1, "rejected": 0}), "a duplicate counts as accepted");
+    }
+
+    #[test]
+    fn cooldowns_survive_an_export_and_import() {
+        let _guard = reset_state_for_test();
+        record_publish_result("x", "wss://a", false, "banned", 1_000);
+        record_publish_result("y", "wss://b", false, "oops", 1_000);
+        let saved = export_cooldowns(1_001);
+        // A fresh process.
+        crate::STATE.lock().unwrap_or_else(|p| p.into_inner()).signal_retry = SignalRetryState::new();
+        assert_eq!(available_relays(&relays(&["wss://a", "wss://b"]), 1_002).len(), 2);
+        import_cooldowns(&saved, 1_002);
+        assert!(available_relays(&relays(&["wss://a", "wss://b"]), 1_002).is_empty());
+        assert_eq!(available_relays(&relays(&["wss://a", "wss://b"]), 1_000 + REJECTION_COOLDOWN_MS), vec!["wss://b".to_string()]);
+    }
+
+    #[test]
+    fn export_leaves_out_finished_cooldowns() {
+        let _guard = reset_state_for_test();
+        record_publish_result("x", "wss://a", false, "oops", 1_000);
+        assert_eq!(export_cooldowns(1_000 + REJECTION_COOLDOWN_MS + 1), "{}");
+    }
+
+    #[test]
+    fn import_ignores_expired_absurd_and_malformed_entries() {
+        let _guard = reset_state_for_test();
+        let now = 1_000_000_000_000;
+        let far = now + MAX_IMPORTED_COOLDOWN_MS + 1;
+        import_cooldowns(&format!(r#"{{"wss://old": {}, "wss://far": {}, "wss://ok": {}}}"#, now - 1, far, now + 5_000), now);
+        assert_eq!(available_relays(&relays(&["wss://old", "wss://far", "wss://ok"]), now), vec!["wss://old".to_string(), "wss://far".to_string()]);
+        import_cooldowns("not json", now);
+        import_cooldowns(r#"{"wss://x": "soon"}"#, now);
+        assert_eq!(available_relays(&relays(&["wss://x"]), now).len(), 1);
     }
 }

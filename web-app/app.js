@@ -90,6 +90,9 @@ const PAKE_LIVE_WINDOW_MS = PROTOCOL_CONSTANTS.pake_live_window_ms;
 // source both clients read.
 
 const DEVICE_NAME_STORAGE_KEY = 'porchlight-device-name';
+const RELAY_COOLDOWNS_STORAGE_KEY = 'porchlight-relay-cooldowns';
+const RELAY_REJECTS_STORAGE_KEY = 'porchlight-relay-rejects';
+const HEARTBEAT_SPREAD_MS = 400;
 const PAIRINGS_STORAGE_KEY = 'porchlight-pairings';
 
 // ---------------------------------------------------------------------------
@@ -279,7 +282,42 @@ function resubscribe() {
   }
 }
 
+// nostr-tools never says which relay an event or message came from, nor why
+// a connection failed or dropped (including every automatic reconnect), so the
+// per-relay "last message" and connection errors on the Connection info screen
+// come from the sockets themselves: a plain WebSocket that records what
+// happens to it. Browsers keep a failed handshake's HTTP status to themselves,
+// so the reason is only what the socket events carry.
+const relayLastMessageAt = new Map();
+const relayConnectError = new Map(); // why a relay is not connected; cleared once it connects
+class TrackedWebSocket extends WebSocket {
+  constructor(url, ...rest) {
+    super(url, ...rest);
+    const key = String(url).replace(/\/$/, '');
+    this.addEventListener('message', () => relayLastMessageAt.set(key, Date.now()));
+    this.addEventListener('open', () => relayConnectError.delete(key));
+    this.addEventListener('error', () => relayConnectError.set(key, { reason: 'connection failed', at: Date.now() }));
+    this.addEventListener('close', (e) => {
+      // A failed handshake fires 'error' then 'close': keep it one entry, with the code.
+      const prev = relayConnectError.get(key);
+      if (prev && prev.reason === 'connection failed' && Date.now() - prev.at < 2000) {
+        relayConnectError.set(key, { reason: `connection failed (code ${e.code})`, at: prev.at });
+      } else {
+        relayConnectError.set(key, { reason: `closed (code ${e.code}${e.reason ? ': ' + e.reason : ''})`, at: Date.now() });
+      }
+    });
+  }
+}
+
 function connectRelayClient() {
+  // Relays that rejected us recently stay paused across a reload instead of
+  // being poked again right away (see call-core's signal_retry).
+  try {
+    callCore.importRelayCooldowns(localStorage.getItem(RELAY_COOLDOWNS_STORAGE_KEY) || '{}', Date.now());
+    for (const [url, reject] of Object.entries(JSON.parse(localStorage.getItem(RELAY_REJECTS_STORAGE_KEY) || '{}'))) {
+      if (reject && typeof reject.reason === 'string' && Number.isFinite(reject.at) && !relayLastReject.has(url)) relayLastReject.set(url, reject);
+    }
+  } catch { /* storage unavailable or unreadable: start clean */ }
   // enableReconnect: nostr-tools' SimplePool defaults this to false — once
   // any relay connection fails or drops, it just gives up on that relay
   // forever, which a tab left open across a transient relay hiccup would
@@ -290,7 +328,7 @@ function connectRelayClient() {
   // ping neither reconnect nor anything else ever notices — publishes
   // vanish and nothing arrives. nostr-tools pings every ~29s and closes a
   // socket that doesn't answer, which hands it to the reconnect above.
-  pool = new SimplePool({ enableReconnect: true, enablePing: true });
+  pool = new SimplePool({ enableReconnect: true, enablePing: true, websocketImplementation: TrackedWebSocket });
   // nostr-tools' SimplePool has no separate "connect" step — a relay's
   // WebSocket only actually opens once something subscribes or publishes to
   // it. resubscribe() below skips calling pool.subscribe() at all when
@@ -298,7 +336,7 @@ function connectRelayClient() {
   // contacts would otherwise never open any relay connection at all.
   // ensureRelay() opens the connection directly, independent of any
   // subscription.
-  for (const url of RELAYS) pool.ensureRelay(url).catch(() => {});
+  for (const url of RELAYS) pool.ensureRelay(url).catch(() => { /* the socket itself records why (TrackedWebSocket) */ });
   resubscribe();
   onlineCheckTimer = setInterval(monitorOnlineTimeouts, ONLINE_CHECK_INTERVAL_MS);
   scheduleHeartbeat(0);
@@ -460,7 +498,24 @@ function applyPresenceUpdate(json) {
   applyCallEffects(JSON.stringify(result.call_effects));
 }
 
+// What the "Connection info" screen shows that nothing else tracks: when
+// the last heartbeat went out and each relay's most recent rejection of a
+// publish.
+let lastHeartbeatSentAt = null;
+const relayLastReject = new Map();
+const expandedRelayRows = new Set(); // relay rows tapped open to show the full message
+function recordResult(eventId, relay, accepted, reason, now) {
+  callCore.recordPublishResult(eventId, relay, accepted, reason, now);
+  if (accepted) return;
+  relayLastReject.set(relay, { reason, at: now });
+  try {
+    localStorage.setItem(RELAY_COOLDOWNS_STORAGE_KEY, callCore.exportRelayCooldowns(now));
+    localStorage.setItem(RELAY_REJECTS_STORAGE_KEY, JSON.stringify(Object.fromEntries(relayLastReject)));
+  } catch { /* storage unavailable */ }
+}
+
 function heartbeatTick() {
+  lastHeartbeatSentAt = Date.now();
   // callCore.isCallActive(): this device's own single call slot, broadcast
   // identically to every contact regardless of who (if anyone) it's
   // actually occupied by. Read once per tick, not once per peer.
@@ -469,7 +524,15 @@ function heartbeatTick() {
   // `hello` is consumed by the build itself (call-core's presence::take_hello),
   // so one payload has to serve every peer.
   const heartbeat = callCore.buildHeartbeatPayload(deviceName, busy);
-  if (heartbeat) for (const peer of confirmedPeers()) sendToConfirmedPeer(peer.pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, () => heartbeat);
+  // One event per contact, spread out rather than all in the same instant:
+  // relays throttle bursts ("rate-limited: slow down"), and a rejection that
+  // arrives before the next send pauses that relay for the rest of them.
+  if (heartbeat) {
+    confirmedPeers().forEach((peer, i) => {
+      const send = () => sendToConfirmedPeer(peer.pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, () => heartbeat);
+      if (i === 0) send(); else setTimeout(send, i * HEARTBEAT_SPREAD_MS);
+    });
+  }
   for (const pending of pendingPairingsList()) {
     if (!pending.rendezvousTag) continue;
     for (const payload of pending.bootstrapPayloads) sendPairingBootstrap(pending.ownPrivateKeyHex, pending.rendezvousTag, pending.bootstrapTarget, payload);
@@ -536,11 +599,13 @@ async function publishToRelays(event, payloadJson) {
       failedRelays.push(targets[i]);
       rejections.push([targets[i], String(result.reason)]);
       console.warn('publish failed, will retry:', targets[i], result.reason);
+    } else {
+      recordResult(event.id, targets[i], true, '', now);
     }
   });
   if (failedRelays.length === 0) return;
   callCore.recordPendingPublish(event.id, JSON.stringify(event), payloadJson, failedRelays, now);
-  for (const [relay, reason] of rejections) callCore.recordPublishResult(event.id, relay, false, reason, now);
+  for (const [relay, reason] of rejections) recordResult(event.id, relay, false, reason, now);
 }
 
 /** Republishes whatever call-core says is still outstanding (it already
@@ -551,8 +616,8 @@ async function retryPendingPublishes() {
     const event = JSON.parse(entry.event_json);
     const settled = await Promise.allSettled(pool.publish(entry.relays, event));
     settled.forEach((result, i) => {
-      if (result.status === 'fulfilled') callCore.recordPublishResult(event.id, entry.relays[i], true, '', now);
-      else callCore.recordPublishResult(event.id, entry.relays[i], false, String(result.reason), now);
+      if (result.status === 'fulfilled') recordResult(event.id, entry.relays[i], true, '', now);
+      else recordResult(event.id, entry.relays[i], false, String(result.reason), now);
     });
   }
 }
@@ -1339,7 +1404,7 @@ const submitOnEnter = (inputId, buttonId) => {
 };
 const screens = {
   name: el('screenName'), waiting: el('screenWaiting'), settings: el('screenSettings'),
-  rename: el('screenRename'), 'confirm-delete': el('screenConfirmDelete'),
+  rename: el('screenRename'), connection: el('screenConnection'), 'confirm-delete': el('screenConfirmDelete'),
   'enter-phrase': el('screenEnterPhrase'), 'pairing-progress': el('screenPairingProgress'),
   pair: el('screenPair'), calling: el('screenCalling'), 'incoming-call': el('screenIncomingCall'), call: el('screenCall'),
   'call-outcome': el('screenCallOutcome'),
@@ -1536,6 +1601,10 @@ function render() {
 
   if (screen === 'waiting') renderWaitingScreen();
   if (screen === 'settings') renderSettingsScreen();
+  if (screen === 'connection') renderConnectionScreen();
+  // The connection page refreshes itself while it's showing, nothing else does.
+  if (screen === 'connection' && !connectionRefreshTimer) connectionRefreshTimer = setInterval(() => { if (screen === 'connection') renderConnectionScreen(); }, 1000);
+  if (screen !== 'connection' && connectionRefreshTimer) { clearInterval(connectionRefreshTimer); connectionRefreshTimer = null; }
   if (screen === 'confirm-delete') renderConfirmDeleteScreen();
   if (screen === 'pairing-progress') renderPairingProgressScreen();
   if (screen === 'pair') renderPairScreen();
@@ -1731,6 +1800,97 @@ window.addEventListener('resize', () => {
 
 function renderSettingsScreen() { el('renameInput').value = deviceName; }
 el('renameBtn').addEventListener('click', () => { screen = 'rename'; render(); });
+el('connectionBtn').addEventListener('click', () => { screen = 'connection'; render(); });
+el('connectionBack').addEventListener('click', () => { screen = 'settings'; render(); });
+
+// --- Connection info (mirrors ConnectionInfoScreen) --------------------
+
+let connectionRefreshTimer = null;
+
+function agoText(atMs, now) {
+  if (atMs == null) return t('connectionInfo.never');
+  const seconds = Math.max(0, Math.floor((now - atMs) / 1000));
+  if (seconds < 60) return t('connectionInfo.agoSeconds', { seconds });
+  if (seconds < 3600) return t('connectionInfo.agoMinutes', { minutes: Math.floor(seconds / 60) });
+  return t('connectionInfo.agoHours', { hours: Math.floor(seconds / 3600) });
+}
+
+function renderConnectionScreen() {
+  const now = Date.now();
+  const rows = [];
+  const row = (label, value, tone = '') => rows.push({ label, text: value, tone });
+
+  // Not navigator.connection.effectiveType: that is a speed class ("4g" just
+  // means fast, even on Wi-Fi), and browsers don't say Wi-Fi vs. mobile.
+  const online = navigator.onLine;
+  row(t('connectionInfo.network'), online ? t('connectionInfo.networkOther') : t('connectionInfo.networkOffline'), online ? 'ok' : 'bad');
+
+  // The pool keys relays by their normalized URL (a trailing slash), RELAYS
+  // doesn't have one — compare without it.
+  const status = new Map();
+  if (pool) for (const [url, connected] of pool.listConnectionStatus()) status.set(url.replace(/\/$/, ''), connected);
+  const usable = new Set(callCore.availableRelays(RELAYS, now));
+  const up = RELAYS.filter((url) => status.get(url)).length;
+  row(t('connectionInfo.relays'), t('connectionInfo.relaysSummary', { up, total: RELAYS.length }), up > 0 ? 'ok' : 'bad');
+  const stats = JSON.parse(callCore.relayStats());
+  for (const url of RELAYS) {
+    const connected = !!status.get(url);
+    const paused = !usable.has(url);
+    const reject = relayLastReject.get(url);
+    const count = stats[url] || { accepted: 0, rejected: 0 };
+    // The dot says it: green = connected and in use, yellow = connected but
+    // paused after a rejection, red = not connected.
+    const dot = { cls: !connected ? 'danger' : paused ? 'busy' : 'ok', label: connected ? t('connectionInfo.relayConnected') : t('connectionInfo.relayNotConnected') };
+    // Not connected: why. Connected but paused: the rejection behind the pause.
+    const error = connected ? (paused ? reject : null) : (relayConnectError.get(url) || reject);
+    const counts = t('connectionInfo.relayCounts', { accepted: count.accepted, rejected: count.rejected });
+    const name = url.replace(/^wss?:\/\//, '').replace(/\/$/, '');
+    rows.push({
+      label: name,
+      dot,
+      id: name,
+      text: error ? `${counts} · ${agoText(error.at, now)}: ` : `${counts} · ${agoText(relayLastMessageAt.get(url) ?? null, now)}`,
+      italic: error ? error.reason.replace(/^Error:\s*/, '') : '',
+    });
+  }
+
+  row(t('connectionInfo.lastHeartbeat'), agoText(lastHeartbeatSentAt, now));
+  const peers = confirmedPeers();
+  row(t('connectionInfo.contactsOnline'), t('connectionInfo.contactsOnlineValue', { online: peers.filter((p) => uiState(p.pairingId).status !== 'offline').length, total: peers.length }));
+
+  const container = el('connectionRows');
+  container.replaceChildren(...rows.map(({ label, dot, id, text, italic, tone }) => {
+    const node = document.createElement('div');
+    node.className = 'info-row';
+    const l = document.createElement('span'); l.className = 'label';
+    if (dot) {
+      const d = document.createElement('span');
+      d.className = 'contact-status-dot ' + dot.cls;
+      d.setAttribute('role', 'img');
+      d.setAttribute('aria-label', dot.label);
+      l.append(d);
+    }
+    l.append(label);
+    const v = document.createElement('span');
+    v.className = 'value' + (tone ? ' ' + tone : '') + (dot ? ' dim relay' : '');
+    v.append(text);
+    if (italic) {
+      const em = document.createElement('em');
+      em.textContent = italic;
+      v.append(em);
+      // One line, ellipsized; the full text on hover (title) and, for touch,
+      // on tap (toggles wrapping).
+      v.title = text + italic;
+      if (expandedRelayRows.has(id)) v.classList.add('expanded');
+      v.addEventListener('click', () => {
+        if (expandedRelayRows.has(id)) expandedRelayRows.delete(id); else expandedRelayRows.add(id);
+        v.classList.toggle('expanded');
+      });
+    }
+    node.append(l, v);
+    return node;
+  }));
+}
 el('settingsCancel').addEventListener('click', () => { screen = 'waiting'; render(); });
 
 // --- Delete confirmation (mirrors WaitingScreen's own OutcomeScreen use) --

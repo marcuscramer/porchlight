@@ -25,8 +25,9 @@ Please report security problems privately, not in a public issue: use
   identity — but pairing shows it for you to check against who you expect.
   A contact also sees whether you're online or busy, and — during a call —
   your IP address, since media goes directly between the two devices.
-- **Nostr relays** (`relay.damus.io`, `nos.lol`, `relay.primal.net`,
-  `relay.snort.social`, `offchain.pub`) — independent, free, third-party
+- **Nostr relays** (`relay.primal.net`, `relay.snort.social`,
+  `nostr-pub.wellorder.net`, `nostr.mom`, `nostr.oxtr.dev`, `nostr.data.haus`,
+  `relay.damus.io`, `nos.lol`) — independent, free, third-party
   infrastructure this project doesn't run or control. Carries
   pairing/call-setup messages only. Pairing messages are public: relays, and
   anyone watching them, see the pairing tag, the per-pairing public key, and

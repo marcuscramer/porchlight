@@ -639,6 +639,8 @@ private sealed interface AdminScreen {
     // second entry point to distinguish, unlike before this screen's own
     // Contacts button was removed.
     data object Rename : AdminScreen
+    // Read-only debug page reached from Settings; Back reopens Settings.
+    data object ConnectionInfo : AdminScreen
     // "Add contact" only — there's no "Reconnect": a stale contact is just
     // Delete + Add contact again, so this carries no pairing id at all;
     // startPairing always mints a brand-new one. Reached directly from a
@@ -754,7 +756,18 @@ private fun AppRoot(
                 },
                 onPreviewRingVolume = { level -> service?.previewRingtone(level) },
                 onRenameDevice = { adminScreen = AdminScreen.Rename; onAdminChoiceHandled() },
+                onOpenConnectionInfo = { adminScreen = AdminScreen.ConnectionInfo; onAdminChoiceHandled() },
                 onCancel = onAdminChoiceHandled,
+            )
+        }
+        screen is AdminScreen.ConnectionInfo -> {
+            ConnectionInfoScreen(
+                service = service,
+                state = state,
+                onBack = {
+                    adminScreen = null
+                    onReopenAdminChoice()
+                },
             )
         }
         screen is AdminScreen.Rename -> {
@@ -1016,6 +1029,7 @@ private fun AdminChoiceScreen(
     onRingVolumeChange: (Config.RingVolume) -> Unit,
     onPreviewRingVolume: (Config.RingVolume) -> Unit,
     onRenameDevice: () -> Unit,
+    onOpenConnectionInfo: () -> Unit,
     onCancel: () -> Unit,
 ) {
     BackHandler(onBack = onCancel)
@@ -1060,48 +1074,6 @@ private fun AdminChoiceScreen(
                 // right-column control it describes actually has focus —
                 // same "label brightens with its control's own focus"
                 // pattern WaitingScreen's Auto-answer switch already uses.
-                val renameInteractionSource = remember { MutableInteractionSource() }
-                val renameFocused by renameInteractionSource.collectIsFocusedAsState()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
-                ) {
-                    Text(
-                        stringResource(R.string.settings_renameRow),
-                        color = if (renameFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TvButton(
-                        onClick = onRenameDevice,
-                        interactionSource = renameInteractionSource,
-                        modifier = Modifier.focusRequester(focusRequester),
-                    ) { Icon(Icons.Filled.ArrowForward, contentDescription = stringResource(R.string.settings_renameRow), modifier = Modifier.size(Dimens.dimension20)) }
-                }
-                val launchOnBootInteractionSource = remember { MutableInteractionSource() }
-                val launchOnBootFocused by launchOnBootInteractionSource.collectIsFocusedAsState()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.settings_kioskMode_title),
-                            color = if (launchOnBootFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
-                        )
-                        Text(
-                            stringResource(R.string.settings_kioskMode_subtitle),
-                            color = GeneratedColor.colorTextDim,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    FocusableSwitch(
-                        checked = launchOnBoot,
-                        onCheckedChange = onToggleLaunchOnBoot,
-                        interactionSource = launchOnBootInteractionSource,
-                    )
-                }
                 val ringVolumeInteractionSource = remember { MutableInteractionSource() }
                 val ringVolumeFocused by ringVolumeInteractionSource.collectIsFocusedAsState()
                 // Plays the chime at the chosen level only once the person
@@ -1134,7 +1106,7 @@ private fun AdminChoiceScreen(
                         selected = ringVolume.ordinal,
                         onSelectedChange = { ringVolumeTouched = true; onRingVolumeChange(Config.RingVolume.entries[it]) },
                         interactionSource = ringVolumeInteractionSource,
-                        modifier = Modifier.semantics { stateDescription = ringVolumeLabel }.onPreviewKeyEvent { event ->
+                        modifier = Modifier.focusRequester(focusRequester).semantics { stateDescription = ringVolumeLabel }.onPreviewKeyEvent { event ->
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             when (event.key) {
                                 Key.DirectionRight -> {
@@ -1148,6 +1120,47 @@ private fun AdminChoiceScreen(
                                 else -> false
                             }
                         },
+                    )
+                }
+                val renameInteractionSource = remember { MutableInteractionSource() }
+                val renameFocused by renameInteractionSource.collectIsFocusedAsState()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
+                ) {
+                    Text(
+                        stringResource(R.string.settings_renameRow),
+                        color = if (renameFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TvButton(
+                        onClick = onRenameDevice,
+                        interactionSource = renameInteractionSource,
+                    ) { Icon(Icons.Filled.ArrowForward, contentDescription = stringResource(R.string.settings_renameRow), modifier = Modifier.size(Dimens.dimension20)) }
+                }
+                val launchOnBootInteractionSource = remember { MutableInteractionSource() }
+                val launchOnBootFocused by launchOnBootInteractionSource.collectIsFocusedAsState()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.settings_kioskMode_title),
+                            color = if (launchOnBootFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        )
+                        Text(
+                            stringResource(R.string.settings_kioskMode_subtitle),
+                            color = GeneratedColor.colorTextDim,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    FocusableSwitch(
+                        checked = launchOnBoot,
+                        onCheckedChange = onToggleLaunchOnBoot,
+                        interactionSource = launchOnBootInteractionSource,
                     )
                 }
                 // Switching it on at all is a one-time adb step (see the
@@ -1181,6 +1194,23 @@ private fun AdminChoiceScreen(
                             .alpha(if (callWakeUpPossible) 1f else GeneratedOpacity.opacity50)
                             .focusProperties { canFocus = callWakeUpPossible },
                     )
+                }
+                val connectionInfoInteractionSource = remember { MutableInteractionSource() }
+                val connectionInfoFocused by connectionInfoInteractionSource.collectIsFocusedAsState()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
+                ) {
+                    Text(
+                        stringResource(R.string.settings_connectionInfoRow),
+                        color = if (connectionInfoFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TvButton(
+                        onClick = onOpenConnectionInfo,
+                        interactionSource = connectionInfoInteractionSource,
+                    ) { Icon(Icons.Filled.ArrowForward, contentDescription = stringResource(R.string.settings_connectionInfoRow), modifier = Modifier.size(Dimens.dimension20)) }
                 }
                 val installInteractionSource = remember { MutableInteractionSource() }
                 val installFocused by installInteractionSource.collectIsFocusedAsState()
