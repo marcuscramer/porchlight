@@ -601,20 +601,7 @@ video {
   pointer-events: none;
 }
 
-/* --- Calling screen (mirrors CallingScreen) ----------------------------- */
-
-#screenCalling {
-  position: relative;
-}
-
-#callingLocalVideo {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  background: var(--color-video-background);
-}
-
-/* Shared by all three video screens (Calling/IncomingCall/live Call) — a
+/* Shared by every call overlay (the message and the controls) — a
    translucent navy backdrop (the screens' own background color) behind
    whatever this overlay holds. A video feed behind it can be anything, so
    contrast can't be guaranteed by this screen's own palette. opacity-80, not
@@ -627,6 +614,10 @@ video {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
+  /* max-content: with left: 50% a shrink-to-fit box is capped at half the
+     width, so a long name would wrap early; this lets it grow up to the
+     margins below. */
+  width: max-content;
   max-width: calc(100% - 2 * var(--spacing-screen-padding));
   bottom: var(--spacing-call-overlay-offset);
   display: flex;
@@ -639,6 +630,11 @@ video {
 }
 
 .calling-name {
+  /* One line only: a very long name is cut off with an ellipsis. */
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--typography-display-font-family);
   font-weight: var(--typography-display-font-weight);
   font-size: var(--typography-display-font-size);
@@ -658,25 +654,6 @@ video {
   text-align: center;
 }
 
-.calling-buttons-row {
-  display: flex;
-  flex-direction: row;
-  gap: var(--spacing-call-overlay-gap);
-}
-
-/* --- Incoming call screen (mirrors IncomingCallScreen) -------------------- */
-
-#screenIncomingCall {
-  position: relative;
-}
-
-#incomingLocalVideo {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  background: var(--color-video-background);
-}
-
 /* --- Live call view ------------------------------------------------------- */
 
 #screenCall {
@@ -690,22 +667,78 @@ video {
   background: var(--color-video-background);
 }
 
-/* Self-view — position cycles through the four corners plus invisible (see
-   app.js's cyclePreviewPosition/PREVIEW_POSITIONS), driven by the
-   "Position self-view" call-control button — mirrors the Android app's
-   own PreviewCorner cycle. */
+/* Self-view — full-screen while calling / ringing (#screenCall.mode-calling /
+   .mode-incoming), then shrinking to its corner once the call connects. The
+   corner position cycles through the four corners plus invisible (see
+   app.js's cyclePreviewPosition/PREVIEW_POSITIONS), driven by the "Position
+   self-view" call-control button — mirrors the Android app's own
+   PreviewCorner cycle. Every state is spelled out as left/top/width/height so
+   the browser can animate between them. */
 #localVideo {
   position: absolute;
+  z-index: 1;
+  object-fit: cover;
   /* Fluid below ~563px (where 32vw drops under the 180px ceiling), floors
      at 112px on the smallest realistic phone widths. */
-  width: clamp(112px, 32vw, var(--size-local-preview-width));
+  --lv-w: clamp(112px, 32vw, var(--size-local-preview-width));
+  --lv-h: calc(var(--lv-w) * 2 / 3);
+  width: var(--lv-w);
+  height: var(--lv-h);
   background: var(--color-video-background);
+  transition: left 0.6s ease, top 0.6s ease, width 0.6s ease, height 0.6s ease;
 }
-#localVideo.preview-bottom-start { bottom: var(--dimension-24); left: var(--dimension-24); }
-#localVideo.preview-bottom-end { bottom: var(--dimension-24); right: var(--dimension-24); }
-#localVideo.preview-top-start { top: var(--dimension-24); left: var(--dimension-24); }
-#localVideo.preview-top-end { top: var(--dimension-24); right: var(--dimension-24); }
+#localVideo.preview-bottom-start { left: var(--dimension-24); top: calc(100% - var(--dimension-24) - var(--lv-h)); }
+#localVideo.preview-bottom-end { left: calc(100% - var(--dimension-24) - var(--lv-w)); top: calc(100% - var(--dimension-24) - var(--lv-h)); }
+#localVideo.preview-top-start { left: var(--dimension-24); top: var(--dimension-24); }
+#localVideo.preview-top-end { left: calc(100% - var(--dimension-24) - var(--lv-w)); top: var(--dimension-24); }
 #localVideo.preview-invisible { display: none; }
+#screenCall.mode-calling #localVideo,
+#screenCall.mode-incoming #localVideo {
+  display: block;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  #localVideo { transition: none; }
+}
+
+/* The message, centered both ways over the self-view (the controls sit at
+   the bottom, so the two never meet). */
+.call-message {
+  bottom: auto;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+@media not all and (min-aspect-ratio: 1/1) {
+  /* The controls become a column down the middle of the right edge, so the
+     message goes at the top instead, centered across the full width. */
+  .call-message {
+    top: var(--dimension-24);
+    transform: translateX(-50%);
+  }
+}
+
+/* Accept slides away (rather than just vanishing) once the call is answered. */
+.accept-slot {
+  display: flex;
+  overflow: hidden;
+  max-width: 120px;
+  margin-right: 0;
+  transition: max-width 0.3s ease, opacity 0.3s ease, margin-right 0.3s ease;
+}
+.accept-slot.gone {
+  max-width: 0;
+  opacity: 0;
+  margin-right: calc(-1 * var(--dimension-16));
+  pointer-events: none;
+}
+@media not all and (min-aspect-ratio: 1/1) {
+  .accept-slot { max-width: none; max-height: 120px; transition: max-height 0.3s ease, opacity 0.3s ease, margin-bottom 0.3s ease; }
+  .accept-slot.gone { max-width: none; max-height: 0; margin-right: 0; margin-bottom: calc(-1 * var(--dimension-16)); }
+}
 
 /* Call controls (Position self-view/Audio/Video/Disconnect) — reuses
    .calling-overlay for its scrim/shrink-to-fit background. Placed by the
@@ -715,6 +748,7 @@ video {
    taller than wide. */
 #callControls {
   bottom: var(--dimension-24);
+  z-index: 3; /* above the self-view, which is full-screen while calling */
 }
 .call-controls-row {
   display: flex;
@@ -831,4 +865,5 @@ video {
    .calling-overlay. */
 @media (max-height: 420px) {
   .calling-overlay { bottom: var(--dimension-16); gap: var(--dimension-4); }
+  .call-message { bottom: auto; }
 }

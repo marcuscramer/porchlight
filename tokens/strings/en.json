@@ -96,10 +96,8 @@
   "call": {
     "callingLabel": "Calling",
     "connectingLabel": "Connecting",
-    "pressBackToCancel": "Press Back to cancel",
     "incomingCallFrom": "Incoming call from",
-    "pressBackToDecline": "Press Back to decline",
-    "autoAnswerCountdown": "{name} will automatically connect in {secondsPhrase}",
+    "autoAnswerCountdown": "Connecting automatically in {secondsPhrase}",
     "secondsSingular": "{seconds} second",
     "secondsPlural": "{seconds} seconds",
     "accept": "Accept",

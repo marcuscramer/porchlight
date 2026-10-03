@@ -76,10 +76,8 @@
     <string name="pairing_confirmButton">Bestätigen</string>
     <string name="call_callingLabel">Anruf läuft</string>
     <string name="call_connectingLabel">Verbindet</string>
-    <string name="call_pressBackToCancel">Zurück drücken zum Abbrechen</string>
     <string name="call_incomingCallFrom">Eingehender Anruf von</string>
-    <string name="call_pressBackToDecline">Zurück drücken zum Ablehnen</string>
-    <string name="call_autoAnswerCountdown">%1$s verbindet sich automatisch in %2$s</string>
+    <string name="call_autoAnswerCountdown">Verbindet sich automatisch in %1$s</string>
     <string name="call_secondsSingular">%1$s Sekunde</string>
     <string name="call_secondsPlural">%1$s Sekunden</string>
     <string name="call_accept">Annehmen</string>

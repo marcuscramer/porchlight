@@ -96,10 +96,8 @@
   "call": {
     "callingLabel": "Anruf läuft",
     "connectingLabel": "Verbindet",
-    "pressBackToCancel": "Zurück drücken zum Abbrechen",
     "incomingCallFrom": "Eingehender Anruf von",
-    "pressBackToDecline": "Zurück drücken zum Ablehnen",
-    "autoAnswerCountdown": "{name} verbindet sich automatisch in {secondsPhrase}",
+    "autoAnswerCountdown": "Verbindet sich automatisch in {secondsPhrase}",
     "secondsSingular": "{seconds} Sekunde",
     "secondsPlural": "{seconds} Sekunden",
     "accept": "Annehmen",

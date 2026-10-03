@@ -1016,7 +1016,6 @@ async function acquireLocalStream() {
       } else {
         localStream = stream;
         setVideoSource(localVideoEl, localStream);
-        setVideoSource(callingLocalVideoEl, localStream);
         render();
       }
     } catch (err) {
@@ -1041,7 +1040,6 @@ function releaseLocalStream() {
   localStream.getTracks().forEach((t) => t.stop());
   localStream = null;
   localVideoEl.srcObject = null;
-  callingLocalVideoEl.srcObject = null;
 }
 
 /**
@@ -1099,6 +1097,7 @@ function applyCallEffects(effectsJson) {
           callId: effect.call_id,
         };
         currentPairingId = effect.pairing_id;
+        resetCallControls();
         screen = 'incoming-call';
         break;
       case 'SendBye':
@@ -1215,10 +1214,6 @@ async function ensurePeerConnection(pairingId, callId) {
   // a live PeerConnection built for it here: orphaned, never torn down
   // until the page reloads.
   if (activePairingId !== pairingId || pc) return pc;
-  // Once per call, here (not inside onconnectionstatechange below, which
-  // can fire more than once per call if the connection blips and
-  // recovers) — see resetCallControls' own doc.
-  resetCallControls();
   callCore.iceReset();
   pcPairingId = pairingId;
   pcCallId = callId;
@@ -1406,12 +1401,11 @@ const screens = {
   name: el('screenName'), waiting: el('screenWaiting'), settings: el('screenSettings'),
   rename: el('screenRename'), connection: el('screenConnection'), 'confirm-delete': el('screenConfirmDelete'),
   'enter-phrase': el('screenEnterPhrase'), 'pairing-progress': el('screenPairingProgress'),
-  pair: el('screenPair'), calling: el('screenCalling'), 'incoming-call': el('screenIncomingCall'), call: el('screenCall'),
+  pair: el('screenPair'), calling: el('screenCall'), 'incoming-call': el('screenCall'), call: el('screenCall'),
   'call-outcome': el('screenCallOutcome'),
 };
 const remoteVideoEl = el('remoteVideo');
 const localVideoEl = el('localVideo');
-const callingLocalVideoEl = el('callingLocalVideo');
 
 /**
  * The self-view's position during a call — mirrors the Android app's own
@@ -1502,17 +1496,18 @@ function setVideoEnabled(enabled) {
  * showCallControls/hideCallControls. */
 let callControlsVisible = false;
 
-/** Once per call, mirroring the old localVideoDrag.reset()'s own timing
- * (see ensurePeerConnection) — a fresh call always starts with the
+/** Once per call, when its UI first appears (startCallingUi / an incoming
+ * call's ring) — a fresh call always starts with the
  * self-view in its default spot, both mute toggles on, and the controls
- * overlay closed, undoing whatever a previous call left them at. */
+ * overlay open (it stays open once connected until dismissed), undoing
+ * whatever a previous call left them at. */
 function resetCallControls() {
   previewPositionIndex = 0;
   applyPreviewPositionClass();
   audioEnabled = true;
   videoEnabled = true;
-  callControlsVisible = false;
-  el('callControls').hidden = true;
+  callControlsVisible = true;
+  el('callControls').hidden = false;
 }
 
 function renderCallControls() {
@@ -1541,6 +1536,7 @@ function hideCallControls() {
 // again — mirrors Android's Select-to-reveal/Back-to-dismiss. The grace
 // check is cyclePreviewPosition's own doc.
 el('screenCall').addEventListener('click', (e) => {
+  if (screen !== 'call') return;
   if (callControlsVisible) {
     const inGracePeriod = Date.now() - lastPositionChangeAt < POSITION_CHANGE_DISMISS_GRACE_MS;
     if (!el('callControls').contains(e.target) && !inGracePeriod) hideCallControls();
@@ -1548,18 +1544,23 @@ el('screenCall').addEventListener('click', (e) => {
     showCallControls();
   }
 });
-// Enter/Space/Tab opens, Backspace/Escape closes — the keyboard-only
-// equivalent of the click handler above. Opening with the keyboard also puts
-// focus on the first control (the last one for Shift+Tab), so the next Tab
-// moves through them; with nothing visible there was nothing to Tab to.
+// Keyboard equivalent of the click handler above: Enter / Space toggle the
+// controls (like a click on the video), Escape / Backspace hide them, and Tab
+// opens them and moves focus in. While focus is on one of the controls
+// themselves, Enter / Space just press that control as usual — only Escape /
+// Backspace (and a click on the video) hide them from there.
 document.addEventListener('keydown', (e) => {
   if (screen !== 'call') return;
-  const opens = e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar' || e.key === 'Tab';
-  if (!callControlsVisible && opens) {
+  const toggles = e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar';
+  const tab = e.key === 'Tab';
+  const inControls = el('callControls').contains(e.target);
+  if (!callControlsVisible && (toggles || tab)) {
     e.preventDefault();
     showCallControls();
-    el(e.key === 'Tab' && e.shiftKey ? 'callDisconnect' : 'cyclePreviewPosition').focus();
-  } else if (callControlsVisible && (e.key === 'Backspace' || e.key === 'Escape')) {
+    // Tab moves into the controls (the last one for Shift+Tab); Enter / Space
+    // leave focus alone, so pressing them again hides the controls.
+    if (tab) el(e.shiftKey ? 'callDisconnect' : 'cyclePreviewPosition').focus();
+  } else if (callControlsVisible && (e.key === 'Backspace' || e.key === 'Escape' || (toggles && !inControls))) {
     e.preventDefault();
     hideCallControls();
   }
@@ -1597,7 +1598,9 @@ function render() {
     screen = 'pairing-progress';
   }
 
-  for (const [name, node] of Object.entries(screens)) node.hidden = name !== screen;
+  // Calling, ringing and live all show the one #screenCall (so the self-view
+  // can animate between them), hence a Set rather than one entry per name.
+  for (const node of new Set(Object.values(screens))) node.hidden = screens[screen] !== node;
 
   if (screen === 'waiting') renderWaitingScreen();
   if (screen === 'settings') renderSettingsScreen();
@@ -1608,8 +1611,7 @@ function render() {
   if (screen === 'confirm-delete') renderConfirmDeleteScreen();
   if (screen === 'pairing-progress') renderPairingProgressScreen();
   if (screen === 'pair') renderPairScreen();
-  if (screen === 'calling') renderCallingScreen();
-  if (screen === 'incoming-call') renderIncomingCallScreen();
+  if (screen === 'calling' || screen === 'incoming-call' || screen === 'call') renderCallScreen();
   if (screen === 'call-outcome') renderCallOutcomeScreen();
 }
 
@@ -2005,31 +2007,48 @@ el('pairCancel').addEventListener('click', () => { removePairing(currentPairingI
 
 function startCallingUi(pairingId) {
   currentPairingId = pairingId;
+  resetCallControls();
   screen = 'calling';
   render();
 }
-function renderCallingScreen() {
-  const pairing = findPairing(currentPairingId);
-  el('callingName').textContent = (pairing && pairing.peerName) || t('common.unnamedContact');
-  setVideoSource(callingLocalVideoEl, localStream);
-}
-el('callingCancel').addEventListener('click', () => { hangUp(); });
+/** The one screen for calling, ringing and live: mode classes decide where
+ * the self-view sits (full-screen, then shrinking to its corner on connect),
+ * whether the centered message shows, and whether Accept is on the controls. */
+let lastCallMode = null;
+function renderCallScreen() {
+  const mode = screen === 'call' ? 'connected' : screen === 'calling' ? 'calling' : 'incoming';
+  const section = el('screenCall');
+  for (const m of ['calling', 'incoming', 'connected']) section.classList.toggle(`mode-${m}`, m === mode);
 
-// --- Incoming call (mirrors IncomingCallScreen) ---------------------------
-
-function renderIncomingCallScreen() {
   const pairing = findPairing(currentPairingId);
   const name = (pairing && pairing.peerName) || t('common.unnamedContact');
-  el('incomingCallerName').textContent = name;
-  setVideoSource(el('incomingLocalVideo'), localStream);
-  // See incomingCallAwaitingMedia's own doc — guards against a browser
-  // permission-prompt tap landing on either button instead of the prompt
-  // itself.
-  el('incomingAccept').disabled = incomingCallAwaitingMedia;
-  el('incomingDecline').disabled = incomingCallAwaitingMedia;
+  const ringing = mode !== 'connected';
+  el('callMessage').hidden = !ringing;
+  el('callSpinner').hidden = mode !== 'calling';
+  el('callLabel').textContent = t(mode === 'incoming' ? 'call.incomingCallFrom' : 'call.callingLabel');
+  el('callName').textContent = name;
+  el('callName').title = name;
+
+  // Until connected the controls can't be dismissed; afterwards they stay up
+  // until the person dismisses them (see the click/keydown handlers).
+  if (ringing) { callControlsVisible = true; el('callControls').hidden = false; }
+  renderCallControls();
+
+  // Accept: only while ringing, slides away once the call is answered. See
+  // incomingCallAwaitingMedia's own doc for the disabled state — it guards
+  // against a browser permission-prompt tap landing on a button instead.
+  const accept = el('incomingAccept');
+  el('acceptSlot').classList.toggle('gone', mode !== 'incoming');
+  accept.tabIndex = mode === 'incoming' ? 0 : -1;
+  accept.disabled = mode === 'incoming' && incomingCallAwaitingMedia;
+  el('callDisconnect').disabled = mode === 'incoming' && incomingCallAwaitingMedia;
+  if (mode !== lastCallMode) {
+    if (mode === 'incoming') accept.focus({ preventScroll: true });
+    else if (document.activeElement === accept) el('cyclePreviewPosition').focus({ preventScroll: true });
+  }
+  lastCallMode = mode;
 }
 el('incomingAccept').addEventListener('click', () => { acceptIncomingCall(); });
-el('incomingDecline').addEventListener('click', () => { hangUp(); });
 
 // --- Live call --------------------------------------------------------------
 // See the call-controls setup right after makeOffer/ensurePeerConnection's

@@ -195,10 +195,19 @@ end.
 
 ## Day to day
 
-- **Incoming calls**: ring for a manual Accept/Decline. On the Portal app
-  (not the web version), auto-answer can be turned on for a contact — a
-  toggle right on their row in the contact list — so a call from them
-  connects automatically after a short countdown instead.
+- **Incoming calls**: ring with a green Accept button (the same one as
+  Call) in the controls at the bottom of the screen; the red button next to
+  it, or Back on the Portal, declines. On the Portal app (not the web
+  version), auto-answer can be turned on for a contact — a toggle right on
+  their row in the contact list — so a call from them connects
+  automatically after a short countdown instead (Accept skips the wait).
+- **During a call**: the controls (self-view position, Audio, Video, hang
+  up) are shown while a call is placed or rings and stay on screen once it
+  connects. To get them off the video, press Back once on the Portal (in the
+  web version: click the video, or press Esc, Backspace, Enter or Space);
+  OK on the Portal (a click, Enter or Space on the web) brings them back.
+  Pressing Back again, with the controls hidden, hangs up. While a call is still ringing or connecting,
+  Back cancels or declines it.
 - **TV off, or on a different HDMI input**: if your Portal TV is plugged into
   a TV that's off or showing something else when a call comes in, the call
   still rings and connects, but whether the TV follows depends on the call

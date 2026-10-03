@@ -76,10 +76,8 @@
     <string name="pairing_confirmButton">Confirm</string>
     <string name="call_callingLabel">Calling</string>
     <string name="call_connectingLabel">Connecting</string>
-    <string name="call_pressBackToCancel">Press Back to cancel</string>
     <string name="call_incomingCallFrom">Incoming call from</string>
-    <string name="call_pressBackToDecline">Press Back to decline</string>
-    <string name="call_autoAnswerCountdown">%1$s will automatically connect in %2$s</string>
+    <string name="call_autoAnswerCountdown">Connecting automatically in %1$s</string>
     <string name="call_secondsSingular">%1$s second</string>
     <string name="call_secondsPlural">%1$s seconds</string>
     <string name="call_accept">Accept</string>

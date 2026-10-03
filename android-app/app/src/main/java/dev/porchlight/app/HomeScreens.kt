@@ -32,6 +32,15 @@ import androidx.tv.material3.Icon
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -259,7 +268,7 @@ internal fun HomeScreen(
     // see it too. Keyed on activePairingId, not a bare Unit, so this starts
     // fresh every new call with no separate reset effect needed and never
     // flashes a stale `true` from a just-ended call.
-    var showCallControls by remember(state.activePairingId) { mutableStateOf(false) }
+    var showCallControls by remember(state.activePairingId) { mutableStateOf(true) }
 
     // Every new call starts with the self-view in the same place
     // (lower-left) regardless of wherever a *previous* call was cycled to
@@ -285,6 +294,9 @@ internal fun HomeScreen(
     BackHandler(enabled = true) {
         when {
             activeContact == null -> {}
+            // Calling or ringing: Back cancels / declines, as ever. The
+            // controls are always up on those screens.
+            !peerConnectedOk -> service?.hangUp()
             showCallControls -> showCallControls = false
             else -> service?.hangUp()
         }
@@ -321,7 +333,6 @@ internal fun HomeScreen(
             incoming != null && !peerConnectedOk -> IncomingCallScreen(
                 contactName = activeContact.name,
                 info = incoming,
-                onAccept = { service?.acceptIncomingCall() },
                 service = service,
                 capturing = state.capturing,
             )
@@ -367,8 +378,9 @@ internal fun HomeScreen(
                 val focusRequester = remember { FocusRequester() }
                 // Fresh every time we return to this branch (a new instance,
                 // same as before) — claim focus explicitly rather than
-                // relying on whatever Android would otherwise default to.
-                RequestFocusOnMount(focusRequester)
+                // relying on whatever Android would otherwise default to. Only
+                // while the controls are hidden: with them up, they hold focus.
+                if (!showCallControls) RequestFocusOnMount(focusRequester)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -380,30 +392,48 @@ internal fun HomeScreen(
                         ),
                 )
 
+                // The self-view was full-screen while calling/ringing; on connect it
+                // shrinks to its corner. Starts at full size once per call (kept
+                // outside the `if` so cycling the corner through "invisible" and
+                // back doesn't replay it).
+                var selfViewFull by remember { mutableStateOf(true) }
+                LaunchedEffect(Unit) { selfViewFull = false }
                 if (config.previewCorner != PreviewCorner.INVISIBLE) {
-                    Box(
-                        modifier = Modifier
-                            .align(config.previewCorner.toAlignment())
-                            .padding(Dimens.spacingContactRowGap)
-                            .size(Dimens.sizeLocalPreviewWidth, Dimens.sizeLocalPreviewHeight),
-                    ) {
-                        LocalPreviewView(service = service, ready = state.capturing)
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val shrink = tween<Dp>(durationMillis = SELF_VIEW_SHRINK_MS)
+                        val width by animateDpAsState(if (selfViewFull) maxWidth else Dimens.sizeLocalPreviewWidth, shrink, label = "selfViewWidth")
+                        val height by animateDpAsState(if (selfViewFull) maxHeight else Dimens.sizeLocalPreviewHeight, shrink, label = "selfViewHeight")
+                        val inset by animateDpAsState(if (selfViewFull) 0.dp else Dimens.spacingContactRowGap, shrink, label = "selfViewInset")
+                        Box(
+                            modifier = Modifier
+                                .align(config.previewCorner.toAlignment())
+                                .padding(inset)
+                                .size(width, height),
+                        ) {
+                            LocalPreviewView(service = service, ready = state.capturing)
+                        }
                     }
                 }
 
-                if (showCallControls) {
-                    CallControlsOverlay(
-                        previewCorner = config.previewCorner,
-                        audioEnabled = state.audioEnabled,
-                        videoEnabled = state.videoEnabled,
-                        onCyclePreviewPosition = onCyclePreviewPosition,
-                        onToggleAudio = { service?.setAudioEnabled(!state.audioEnabled) },
-                        onToggleVideo = { service?.setVideoEnabled(!state.videoEnabled) },
-                        onDisconnect = { service?.hangUp() },
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                    )
-                }
             }
+        }
+
+        // One controls row for the whole call — calling, ringing, connected — so
+        // it stays put (and Accept can slide away) as the call progresses. Up
+        // from the start; once connected it stays until dismissed with Back.
+        if (state.pendingCallOutcome == null && activeContact != null && (!peerConnectedOk || showCallControls)) {
+            val ringing = incoming != null && !state.acceptedIncoming && !peerConnectedOk
+            CallControlsOverlay(
+                previewCorner = config.previewCorner,
+                audioEnabled = state.audioEnabled,
+                videoEnabled = state.videoEnabled,
+                onAccept = if (ringing) ({ service?.acceptIncomingCall() }) else null,
+                onCyclePreviewPosition = onCyclePreviewPosition,
+                onToggleAudio = { service?.setAudioEnabled(!state.audioEnabled) },
+                onToggleVideo = { service?.setVideoEnabled(!state.videoEnabled) },
+                onDisconnect = { service?.hangUp() },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
     }
 }
@@ -415,6 +445,9 @@ internal fun HomeScreen(
  * a fully opaque card — still reads as "video underneath," just legible.
  * Mirrors web's identical `.calling-overlay` background (styles.css).
  */
+/** How long the self-view takes to shrink to its corner when a call connects. */
+private const val SELF_VIEW_SHRINK_MS = 600
+
 private fun Modifier.callOverlayScrim(): Modifier = this
     .background(GeneratedColor.colorBackgroundWaiting.copy(alpha = GeneratedOpacity.opacity80), RoundedCornerShape(Dimens.radiusControl))
     .padding(horizontal = Dimens.dimension24, vertical = Dimens.dimension16)
@@ -430,34 +463,65 @@ private fun CallControlsOverlay(
     previewCorner: PreviewCorner,
     audioEnabled: Boolean,
     videoEnabled: Boolean,
+    onAccept: (() -> Unit)?,
     onCyclePreviewPosition: () -> Unit,
     onToggleAudio: (Boolean) -> Unit,
     onToggleVideo: (Boolean) -> Unit,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val focusRequester = remember { FocusRequester() }
-    RequestFocusOnMount(focusRequester)
+    val acceptFocusRequester = remember { FocusRequester() }
+    val positionFocusRequester = remember { FocusRequester() }
+    // Accept holds focus while it's offered; when it goes (the call was
+    // answered) focus moves to the first control left rather than getting lost.
+    val ringing = onAccept != null
+    LaunchedEffect(ringing) {
+        runCatching { (if (ringing) acceptFocusRequester else positionFocusRequester).requestFocus() }
+    }
+    // The last Accept action, kept for the slide-away animation after onAccept is gone.
+    val latestAccept by rememberUpdatedState(onAccept)
     Row(
         modifier = modifier.padding(bottom = Dimens.spacingContactRowGap).callOverlayScrim(),
-        horizontalArrangement = Arrangement.spacedBy(Dimens.dimension16),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Icon-only — see PositionSelfViewIcon's own doc for why it's a
-        // live drawing rather than a static ImageVector.
-        TvButton(
-            onClick = onCyclePreviewPosition,
-            modifier = Modifier.focusRequester(focusRequester),
+        // Same design as the waiting screen's Call button. Not in the spaced
+        // Row below, so its spacing leaves with it.
+        AnimatedVisibility(
+            visible = ringing,
+            enter = fadeIn() + expandHorizontally(),
+            exit = fadeOut() + shrinkHorizontally(),
         ) {
-            PositionSelfViewIcon(corner = previewCorner, modifier = Modifier.size(Dimens.dimension20))
+            Row {
+                TvButton(
+                    onClick = { latestAccept?.invoke() },
+                    tint = TvButtonTint.Success,
+                    modifier = Modifier.focusRequester(acceptFocusRequester),
+                ) {
+                    Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.call_accept), modifier = Modifier.size(Dimens.dimension20))
+                }
+                Spacer(Modifier.width(Dimens.dimension16))
+            }
         }
-        val audioLabel = stringResource(R.string.call_audio)
-        val videoLabel = stringResource(R.string.call_video)
-        CallToggle(label = audioLabel, checked = audioEnabled, onCheckedChange = onToggleAudio, contentDescription = audioLabel)
-        CallToggle(label = videoLabel, checked = videoEnabled, onCheckedChange = onToggleVideo, contentDescription = videoLabel)
-        // Same shape/tint/icon as IncomingCallScreen's own Decline button.
-        TvButton(onClick = onDisconnect, tint = TvButtonTint.Danger) {
-            Icon(CallEndIcon, contentDescription = stringResource(R.string.call_disconnect), modifier = Modifier.size(Dimens.dimension20))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Dimens.dimension16),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Icon-only — see PositionSelfViewIcon's own doc for why it's a
+            // live drawing rather than a static ImageVector.
+            TvButton(
+                onClick = onCyclePreviewPosition,
+                modifier = Modifier.focusRequester(positionFocusRequester),
+            ) {
+                PositionSelfViewIcon(corner = previewCorner, modifier = Modifier.size(Dimens.dimension20))
+            }
+            val audioLabel = stringResource(R.string.call_audio)
+            val videoLabel = stringResource(R.string.call_video)
+            CallToggle(label = audioLabel, checked = audioEnabled, onCheckedChange = onToggleAudio, contentDescription = audioLabel)
+            CallToggle(label = videoLabel, checked = videoEnabled, onCheckedChange = onToggleVideo, contentDescription = videoLabel)
+            // Hangs up a live call, cancels one being placed, declines one ringing.
+            TvButton(onClick = onDisconnect, tint = TvButtonTint.Danger) {
+                Icon(CallEndIcon, contentDescription = stringResource(R.string.call_disconnect), modifier = Modifier.size(Dimens.dimension20))
+            }
         }
     }
 }
@@ -565,16 +629,15 @@ private fun PositionSelfViewIcon(corner: PreviewCorner, modifier: Modifier = Mod
  * here, since the peer might not be reachable yet, and
  * CallCoreBridge.requestCall's doc explains why that's allowed to just
  * take as long as it takes rather than timing out on a guessed clock.
- * "Press Back to cancel" as plain text rather than a focused on-screen
- * button — matches every other screen in this app, which all rely on the
- * physical Back key rather than a dedicated Cancel target.
+ * Cancelling is the hang-up button in the call controls (or Back); the
+ * name stays on one line, ellipsized when too long.
  */
 @Composable
 private fun CallingScreen(contactName: String, service: CameraAgentService?, capturing: Boolean, label: String = stringResource(R.string.call_callingLabel)) {
     Box(modifier = Modifier.fillMaxSize()) {
         LocalPreviewView(service = service, ready = capturing)
         Column(
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Dimens.spacingCallOverlayOffset).callOverlayScrim(),
+            modifier = Modifier.align(Alignment.Center).padding(horizontal = Dimens.spacingScreenPadding).callOverlayScrim(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Dimens.spacingCallOverlayGap),
         ) {
@@ -594,8 +657,9 @@ private fun CallingScreen(contactName: String, service: CameraAgentService?, cap
                 color = GeneratedColor.colorTextPrimary,
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Text(stringResource(R.string.call_pressBackToCancel), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -604,16 +668,14 @@ private fun CallingScreen(contactName: String, service: CameraAgentService?, cap
  * Shown while an incoming call is ringing (manual-accept contact) or
  * counting down (auto-answer contact) — from the instant the offer
  * arrives until it's applied. Self-view only, same reasoning as
- * CallingScreen. "Press Back to decline" mirrors CallingScreen's "Press
- * Back to cancel" — Back calls the same `service?.hangUp()` either way
- * (see its own doc for why that's correct for a not-yet-answered incoming
- * call too).
+ * CallingScreen. Declining is the hang-up button in the call controls (or
+ * Back) — both call the same `service?.hangUp()` either way (see its own
+ * doc for why that's correct for a not-yet-answered incoming call too).
  */
 @Composable
 private fun IncomingCallScreen(
     contactName: String,
     info: CameraAgentService.IncomingCall,
-    onAccept: () -> Unit,
     service: CameraAgentService?,
     capturing: Boolean,
 ) {
@@ -621,10 +683,12 @@ private fun IncomingCallScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         LocalPreviewView(service = service, ready = capturing)
         Column(
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = Dimens.spacingCallOverlayOffset).callOverlayScrim(),
+            modifier = Modifier.align(Alignment.Center).padding(horizontal = Dimens.spacingScreenPadding).callOverlayScrim(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Dimens.spacingCallOverlayGap),
         ) {
+            Text(stringResource(R.string.call_incomingCallFrom), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            Text(name, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (info.autoAnswer) {
                 val seconds = info.secondsRemaining
                 // A plain singular/plural split (count==1 vs not), not real
@@ -638,31 +702,12 @@ private fun IncomingCallScreen(
                     seconds,
                 )
                 Text(
-                    stringResource(R.string.call_autoAnswerCountdown, name, secondsPhrase),
+                    stringResource(R.string.call_autoAnswerCountdown, secondsPhrase),
                     color = GeneratedColor.colorTextPrimary,
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
                 )
-            } else {
-                Text(stringResource(R.string.call_incomingCallFrom), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-                Text(name, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-                val focusRequester = remember { FocusRequester() }
-                RequestFocusOnMount(focusRequester)
-                // Accept mirrors the waiting screen's own Call button
-                // styling (TvButtonTint.Success + Icons.Filled.Call),
-                // Decline is the same shape with Danger + CallEndIcon.
-                // "Press Back to decline" below still works the same way —
-                // this button is just the discoverable, non-hidden
-                // equivalent of it.
-                Row(horizontalArrangement = Arrangement.spacedBy(Dimens.spacingCallOverlayGap)) {
-                    TvButton(onClick = onAccept, tint = TvButtonTint.Success, modifier = Modifier.focusRequester(focusRequester)) {
-                        Icon(Icons.Filled.Call, contentDescription = stringResource(R.string.call_accept), modifier = Modifier.size(Dimens.dimension20))
-                    }
-                    TvButton(onClick = { service?.hangUp() }, tint = TvButtonTint.Danger) {
-                        Icon(CallEndIcon, contentDescription = stringResource(R.string.call_decline), modifier = Modifier.size(Dimens.dimension20))
-                    }
-                }
             }
-            Text(stringResource(R.string.call_pressBackToDecline), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -673,8 +718,8 @@ private fun IncomingCallScreen(
  * call ends for a reason the person didn't just cause themselves (peer hung
  * up, never connected, or dropped mid-call) — the "why did this call end"
  * decision itself is made once in call-core (see CallOutcomeReason's own
- * doc there). No action button — Back alone dismisses this, the same
- * "Press Back to ___" pattern CallingScreen/IncomingCallScreen already use.
+ * doc there). No action button — Back alone dismisses this, hence its
+ * "Press Back to continue" hint.
  * Also auto-dismisses on its own after [AUTO_DISMISS_DELAY_MS] — see that
  * constant's own doc.
  */
