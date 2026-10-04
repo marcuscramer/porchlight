@@ -70,24 +70,44 @@ The app appears on the Portal's own home screen once installed. If you use
 Immortal, it also shows up in its app list/catalog the same way any other
 sideloaded app does.
 
-On first launch, grant the camera, microphone, and notification
-permissions the app asks for.
+On first launch, grant the camera and microphone permissions the app asks for
+(and notifications, on Android versions that ask).
 
 ### Convenience (highly recommended)
 
-Two one-time setups make a Portal much nicer to live with. Both are `adb`
-commands run from the same computer you used for the install, because they
-touch protected system settings that no ordinary app is allowed to change.
+Two one-time setups make a Portal much nicer to live with. Both are done with
+`adb` commands run from the same computer you used for the install, because
+they touch protected system settings that no ordinary app is allowed to
+change (the first one's "Install unknown apps" part can also be switched on
+from the Portal itself).
 Neither is needed for calls to work, but you'll want both on any Portal that
 isn't sitting next to you.
 
 #### 1. Updating from inside the app
 
 Porchlight checks for new releases and can install them for you from
-Settings. For that to actually work, Meta's own on-device install
-verifier needs to be turned off once — otherwise it silently rejects
-*any* sideloaded app's install, including Porchlight's own updates, no
-matter how the install is triggered:
+Settings. For that to actually work, two things need to be switched on
+once. (The Connection info page in Settings shows whether the verifier is
+still blocking.)
+
+**Allow Porchlight to install apps.** Android only lets an app install
+packages once you've allowed it. The first time you press Install, the Portal
+opens its "Install unknown apps" page for Porchlight; switch it on there. If
+you'd rather not hunt for that page with the remote, grant it from the
+computer instead:
+
+```
+adb shell appops set dev.porchlight.app REQUEST_INSTALL_PACKAGES allow
+```
+
+(Without it, Install just keeps opening that page. It is also set back to
+"not allowed" whenever the app is uninstalled and installed afresh, so this
+is worth repeating after a full reinstall.)
+
+**Turn off Meta's install verifier.** Meta's own on-device install
+verifier silently rejects *any* sideloaded app's install, including
+Porchlight's own updates, no matter how the install is triggered, so it
+needs to be turned off once:
 
 ```
 adb shell pm disable-user --user 0 com.facebook.appverifier
@@ -101,7 +121,7 @@ first place. Both are reversible (`adb shell pm enable
 com.facebook.appverifier` and setting the value back to `1` restore
 them).
 
-If you'd rather not touch that setting, skip this step. In-app updates won't
+If you'd rather not touch these settings, skip this step. In-app updates won't
 install, but you can still update the way you installed: download the new APK
 and run `adb install -r` yourself.
 
@@ -219,6 +239,18 @@ end.
   sideloaded app can't send that HDMI-CEC request itself — the permission is
   restricted to apps signed with Meta's own key — which is why this goes
   through the Home key.) It needs a TV with HDMI-CEC turned on.
+- **When a call doesn't go through**, the screen says why instead of a
+  generic failure: *Call declined* (they pressed decline), *No answer* (it
+  rang for a minute and nobody picked up), *Not reachable* (they appear to be
+  offline), *Busy* (they're on another call), *Camera or microphone problem*
+  (this device couldn't use its camera or microphone — on a Portal, check the
+  camera cover is open), and *Couldn't connect* (both sides were there but the
+  video never came up; if it can tell, the message says whether the network
+  seems to block calls, as on two phones on mobile data). The device that was
+  being called sees *Missed call* if the caller hung up before it was answered,
+  and *Call ended* when a call that was already underway is ended from the
+  other side. These screens close by themselves after a while, or with Back
+  on the Portal (the OK button on the web).
 - **Status dots** next to each contact are purely informational — green
   means they're currently reachable, orange means they're on another call
   right now, red means they're not currently reachable, and none of this

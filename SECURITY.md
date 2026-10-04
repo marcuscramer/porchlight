@@ -113,7 +113,7 @@ number.
 | Someone watching relay traffic guesses a weak pairing passphrase from the public rendezvous tag, then joins your pairing attempt as the other party | The tag is a slow, memory-hard hash (Argon2id) of the phrase, which makes each offline guess expensive but doesn't stop guessing a weak phrase. SPAKE2 still stops anyone without the phrase. A second party showing up at the same rendezvous point is refused for everyone (see the collision row). And the "Pair with [name]?" screen is a human check: you only confirm if the name is the contact you expect. | A weak phrase can be recovered offline. The name check stops a blind attacker, who can't see your contact's name (it is sent encrypted) and has to guess it, but it is self-reported and unverified, so it won't stop one who knows what your contact's device is called. If your contact is simply late, the attacker has until they arrive. Mitigation is a long phrase and reading the name on that screen carefully; a stronger design (a rendezvous code separate from the password) is not implemented. |
 | Someone guesses a pairing passphrase by trying it against a live attempt | SPAKE2 requires a live, interactive exchange per guess | A guess that lands mid-exchange shows up as a second candidate and gets rejected outright (see the collision case below), not silently paired. |
 | Two unrelated pairs reuse the same phrase at once, or someone deliberately collides an attempt | Pairing is refused outright for everyone at that rendezvous point, not left to a choice | Both sides have to retry with a fresh phrase. Indistinguishable from a deliberate collision by design — treated the same either way. |
-| A relay refuses to deliver, or goes offline | App talks to 5 independent relays at once, not one | A relay can't forge a valid signed/encrypted message without either device's private key, but could drop traffic. Relay reliability is volunteer-grade, no SLA. |
+| A relay refuses to deliver, or goes offline | App talks to 8 independent relays at once, not one, and retries a signaling message that missed a relay (pausing a relay that rejects it for a while) | A relay can't forge a valid signed/encrypted message without either device's private key, but could drop traffic. Relay reliability is volunteer-grade, no SLA. |
 | A relay (or anyone watching it) observes traffic | NIP-44 encryption + gift-wrapping | Relays still see call-setup *metadata*: that messages reached a pairing's public key, and roughly when — never call content, and never media (which never transits a relay at all). During pairing they see the tag, the public key and the key exchange, but not the device names. |
 | Relays keep signaling ciphertext and a key is compromised later | Media has forward secrecy (DTLS-SRTP) | Signaling is encrypted to each pairing's long-lived key, so it has no forward secrecy. Someone who later gets a pairing key and kept the relay traffic could read the old call-setup messages, which include IP addresses — never the audio/video. |
 | A paired contact (or someone with their key) has auto-answer enabled on your Portal | Auto-answer is off by default and per contact, with a 5-second on-screen countdown before it picks up | A contact you've enabled it for can start your Portal's camera and microphone without anyone tapping Accept. Only enable it for contacts you'd trust that far. |
@@ -140,9 +140,12 @@ number.
   sideloading generally, not specific to this app.
 - **The convenience setup weakens the device further.** The README's
   "Convenience" section has two parts, both skippable. To let the app update
-  itself, you turn off Meta's install verifier and Android's package
-  verification as a whole, so the device stops checking any sideloaded
-  install. To let an incoming call show over the screensaver, turn the TV
+  itself, you allow it to install apps ("Install unknown apps") and turn off
+  Meta's install verifier and Android's package verification as a whole, so the
+  device stops checking any sideloaded install. The first of those is a real
+  grant: an app that may install packages could install any APK if it were
+  ever compromised, not only its own updates (Android itself only accepts an
+  update of Porchlight if it carries the same signing key). To let an incoming call show over the screensaver, turn the TV
   on and switch it to the Portal (the call wake-up, which is optional as a
   whole), you run
   two `adb` commands. The first switches on Porchlight's accessibility
