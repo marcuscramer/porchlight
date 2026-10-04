@@ -277,21 +277,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCheckCallTim
     encode_or_fallback(&mut env, empty_effects_json, |_env| Some(crate::call_arbitration::check_call_timeout(now_ms)))
 }
 
-/// See [`crate::call_arbitration::handle_peer_busy`]'s own doc.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHandlePeerBusy<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    call_id: JString<'local>,
-) -> jstring {
-    encode_or_fallback(&mut env, empty_effects_json, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let call_id = get_string(env, &call_id)?;
-        Some(crate::call_arbitration::handle_peer_busy(&pairing_id, &call_id))
-    })
-}
-
 /// See [`crate::call_arbitration::peer_connection_closed`]'s own doc.
 /// **Now returns a JSON-encoded effects array** (was `void`) — that
 /// function's own signature changed from `()` to `Vec<CallEffect>` so a

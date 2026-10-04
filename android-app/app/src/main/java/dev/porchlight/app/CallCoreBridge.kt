@@ -67,9 +67,6 @@ object CallCoreBridge {
     private external fun nativeCheckCallTimeout(nowMs: Long): String
 
     @JvmStatic
-    private external fun nativeHandlePeerBusy(pairingId: String, callId: String): String
-
-    @JvmStatic
     private external fun nativePeerConnectionClosed(): String
 
     @JvmStatic
@@ -434,9 +431,6 @@ object CallCoreBridge {
     /** See the Rust crate's own `check_call_timeout` doc — poll this on the
      * same periodic tick that already drives [checkOnlineTimeouts]. */
     fun checkCallTimeout(nowMs: Long): List<CallEffect> = parseCallEffects(nativeCheckCallTimeout(nowMs))
-
-    /** See the Rust crate's own `handle_peer_busy` doc. */
-    fun handlePeerBusy(pairingId: String, callId: String): List<CallEffect> = parseCallEffects(nativeHandlePeerBusy(pairingId, callId))
 
     /** Call any time a real `PeerConnection` is noticed gone, for *any*
      * reason — see the Rust crate's own `peer_connection_closed` doc for

@@ -27,6 +27,20 @@ object GeneratedSharedConfig {
     /** Minimum gap between two re-subscribes after a relay closes our subscription. */
     const val SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS: Long = 10_000L
 
+    /** Gap between the heartbeats to successive contacts, so a relay isn't hit by a burst. */
+    const val HEARTBEAT_SPREAD_MS: Long = 400L
+
+    /** How long the self-view takes to shrink to its corner when a call connects. */
+    const val SELF_VIEW_SHRINK_MS: Int = 600
+
+    /** Longest pairing phrase the input accepts. */
+    const val MAX_PHRASE_LENGTH: Int = 200
+
+    /** Camera capture the call asks for. */
+    const val CAPTURE_WIDTH: Int = 1280
+    const val CAPTURE_HEIGHT: Int = 720
+    const val CAPTURE_FPS: Int = 30
+
     /** Cycle order of the self-view position, as wire names (see PreviewCorner). */
     val PREVIEW_POSITIONS: List<String> = listOf(
         "bottom-start",

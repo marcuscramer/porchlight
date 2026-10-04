@@ -16,6 +16,8 @@ import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import androidx.compose.ui.graphics.toArgb
+import dev.porchlight.app.ui.theme.GeneratedColor
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -207,7 +209,7 @@ internal class RingScreenGuard(
     private fun showMask() {
         if (maskView != null) return
         if (!Settings.canDrawOverlays(context)) return
-        val view = View(context).apply { setBackgroundColor(MASK_COLOR) }
+        val view = View(context).apply { setBackgroundColor(GeneratedColor.colorBackgroundWaiting.toArgb()) }
         val type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -232,10 +234,5 @@ internal class RingScreenGuard(
 
     private companion object {
         const val TAG = "RingScreenGuard"
-
-        // The screens' own navy (colorBackgroundWaiting / --color-background-waiting)
-        // — not a GeneratedColor reference, since this runs in a plain Service
-        // with no theme context to resolve one against.
-        const val MASK_COLOR = 0xFF16202B.toInt()
     }
 }

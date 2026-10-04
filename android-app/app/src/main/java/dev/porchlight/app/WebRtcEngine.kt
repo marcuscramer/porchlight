@@ -48,9 +48,9 @@ class WebRtcEngine(
      * and every read.
      */
     private val executor: java.util.concurrent.ScheduledExecutorService,
-    private val captureW: Int = 1280,
-    private val captureH: Int = 720,
-    private val captureFps: Int = 30,
+    private val captureW: Int = GeneratedSharedConfig.CAPTURE_WIDTH,
+    private val captureH: Int = GeneratedSharedConfig.CAPTURE_HEIGHT,
+    private val captureFps: Int = GeneratedSharedConfig.CAPTURE_FPS,
 ) {
     interface Listener {
         // pairingId/callId are passed explicitly — captured by this class

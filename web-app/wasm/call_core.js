@@ -472,29 +472,6 @@ export function forgetPairing(pairing_id) {
 }
 
 /**
- * See [`crate::call_arbitration::handle_peer_busy`]'s own doc.
- * @param {string} pairing_id
- * @param {string} call_id
- * @returns {string}
- */
-export function handlePeerBusy(pairing_id, call_id) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.handlePeerBusy(ptr0, len0, ptr1, len1);
-        deferred3_0 = ret[0];
-        deferred3_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
-    }
-}
-
-/**
  * See [`crate::handle_timeout`]'s own doc. `generation` must be exactly
  * the value returned in `startAttempt`'s JSON result (see this module's
  * own doc for why it's `u32` here, not `u64`).
@@ -638,19 +615,6 @@ export function isOnline(pairing_id) {
     const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.isOnline(ptr0, len0);
-    return ret !== 0;
-}
-
-/**
- * See [`crate::presence::is_peer_busy`]'s own doc. Returns `false` on a
- * panic, matching [`is_online`]'s own "never seen" sentinel.
- * @param {string} pairing_id
- * @returns {boolean}
- */
-export function isPeerBusy(pairing_id) {
-    const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.isPeerBusy(ptr0, len0);
     return ret !== 0;
 }
 
@@ -990,22 +954,6 @@ export function sanitizeName(name) {
 }
 
 /**
- * See [`crate::call_arbitration::should_end_call_on_media_failure`]'s own
- * doc. Falls back to `true` (end the call) on a panic — matches
- * `nativeShouldEndCallOnMediaFailure`'s own reasoning: the safer
- * direction when this module's own logic couldn't be trusted, since a
- * call wrongly ended is recoverable (redial) but a media failure wrongly
- * treated as harmless during an actual live call is a worse experience (a
- * dead call that looks alive).
- * @param {boolean} has_active_peer_connection
- * @returns {boolean}
- */
-export function shouldEndCallOnMediaFailure(has_active_peer_connection) {
-    const ret = wasm.shouldEndCallOnMediaFailure(has_active_peer_connection);
-    return ret !== 0;
-}
-
-/**
  * See [`crate::start_attempt`]'s own doc. Returns a JSON-encoded
  * [`crate::StartResult`], or a JS exception on a panic — matches
  * `nativeStartAttempt`'s `null`-on-panic in spirit (both are this
@@ -1042,39 +990,6 @@ export function startAttempt(pairing_id, own_pubkey_hex, own_name, passphrase) {
         return getStringFromWasm0(ptr5, len5);
     } finally {
         wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
-    }
-}
-
-/**
- * See [`crate::call_arbitration::tick_incoming_call_countdown`]'s own doc.
- * Returns a JSON-encoded [`crate::call_arbitration::TickOutcome`], falling
- * back to `Stale` on a panic — matches `nativeTickIncomingCallCountdown`'s
- * own reasoning (a countdown that silently stops rather than one that
- * might auto-accept a call it couldn't safely reason about).
- * @param {string} pairing_id
- * @param {string} call_id
- * @returns {string}
- */
-export function tickIncomingCallCountdown(pairing_id, call_id) {
-    let deferred4_0;
-    let deferred4_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.tickIncomingCallCountdown(ptr0, len0, ptr1, len1);
-        var ptr3 = ret[0];
-        var len3 = ret[1];
-        if (ret[3]) {
-            ptr3 = 0; len3 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred4_0 = ptr3;
-        deferred4_1 = len3;
-        return getStringFromWasm0(ptr3, len3);
-    } finally {
-        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
 }
 function __wbg_get_imports() {

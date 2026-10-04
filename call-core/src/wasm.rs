@@ -168,20 +168,6 @@ pub fn accept_incoming_call(now_ms: f64) -> Option<String> {
     .flatten()
 }
 
-/// See [`crate::call_arbitration::tick_incoming_call_countdown`]'s own doc.
-/// Returns a JSON-encoded [`crate::call_arbitration::TickOutcome`], falling
-/// back to `Stale` on a panic — matches `nativeTickIncomingCallCountdown`'s
-/// own reasoning (a countdown that silently stops rather than one that
-/// might auto-accept a call it couldn't safely reason about).
-#[wasm_bindgen(js_name = tickIncomingCallCountdown)]
-pub fn tick_incoming_call_countdown(pairing_id: &str, call_id: &str) -> Result<String, JsValue> {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let outcome = crate::call_arbitration::tick_incoming_call_countdown(pairing_id, call_id);
-        serde_json::to_string(&outcome).map_err(|e| JsValue::from_str(&e.to_string()))
-    }))
-    .unwrap_or_else(|_| Ok("{\"outcome\":\"Stale\"}".to_string()))
-}
-
 /// See [`crate::call_arbitration::hang_up`]'s own doc. Falls back to just
 /// `[ClosePeerConnection]` on a panic — matches `nativeHangUp`'s own
 /// reasoning: even if this module's own state couldn't be safely
@@ -211,16 +197,6 @@ pub fn check_call_timeout(now_ms: f64) -> String {
     .unwrap_or_else(|_| empty_effects_json())
 }
 
-/// See [`crate::call_arbitration::handle_peer_busy`]'s own doc.
-#[wasm_bindgen(js_name = handlePeerBusy)]
-pub fn handle_peer_busy(pairing_id: &str, call_id: &str) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let effects = crate::call_arbitration::handle_peer_busy(pairing_id, call_id);
-        serde_json::to_string(&effects).unwrap_or_else(|_| empty_effects_json())
-    }))
-    .unwrap_or_else(|_| empty_effects_json())
-}
-
 /// See [`crate::call_arbitration::peer_connection_closed`]'s own doc.
 /// **Now returns a JSON-encoded effects array** (was `void`) — see that
 /// function's own doc for why (a genuinely spontaneous WebRTC teardown can
@@ -240,18 +216,6 @@ pub fn peer_connection_closed() -> String {
 #[wasm_bindgen(js_name = markConnected)]
 pub fn mark_connected(pairing_id: &str, call_id: &str) {
     let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::call_arbitration::mark_connected(pairing_id, call_id)));
-}
-
-/// See [`crate::call_arbitration::should_end_call_on_media_failure`]'s own
-/// doc. Falls back to `true` (end the call) on a panic — matches
-/// `nativeShouldEndCallOnMediaFailure`'s own reasoning: the safer
-/// direction when this module's own logic couldn't be trusted, since a
-/// call wrongly ended is recoverable (redial) but a media failure wrongly
-/// treated as harmless during an actual live call is a worse experience (a
-/// dead call that looks alive).
-#[wasm_bindgen(js_name = shouldEndCallOnMediaFailure)]
-pub fn should_end_call_on_media_failure(has_active_peer_connection: bool) -> bool {
-    catch_unwind(std::panic::AssertUnwindSafe(|| crate::call_arbitration::should_end_call_on_media_failure(has_active_peer_connection))).unwrap_or(true)
 }
 
 /// See [`crate::call_arbitration::forget_pairing`]'s own doc. Same
@@ -296,13 +260,6 @@ pub fn mark_seen(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, 
 #[wasm_bindgen(js_name = requestHello)]
 pub fn request_hello() {
     let _ = catch_unwind(crate::presence::request_hello);
-}
-
-/// See [`crate::presence::is_peer_busy`]'s own doc. Returns `false` on a
-/// panic, matching [`is_online`]'s own "never seen" sentinel.
-#[wasm_bindgen(js_name = isPeerBusy)]
-pub fn is_peer_busy(pairing_id: &str) -> bool {
-    catch_unwind(std::panic::AssertUnwindSafe(|| crate::presence::is_peer_busy(pairing_id))).unwrap_or(false)
 }
 
 /// See [`crate::call_arbitration::is_call_active`]'s own doc. Returns

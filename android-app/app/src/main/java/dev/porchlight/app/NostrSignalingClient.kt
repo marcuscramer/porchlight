@@ -433,7 +433,7 @@ class NostrSignalingClient(
             // for the rest of them.
             for ((i, peer) in resolver.confirmedPeers().withIndex()) {
                 if (i == 0) sendToConfirmedPeer(peer) { heartbeat }
-                else executor.safeSchedule(i * HEARTBEAT_SPREAD_MS, TimeUnit.MILLISECONDS) { sendToConfirmedPeer(peer) { heartbeat } }
+                else executor.safeSchedule(i * GeneratedSharedConfig.HEARTBEAT_SPREAD_MS, TimeUnit.MILLISECONDS) { sendToConfirmedPeer(peer) { heartbeat } }
             }
         }
         for (pending in resolver.pendingPairings()) {
@@ -727,7 +727,6 @@ class NostrSignalingClient(
         // instead of (as a prior 150s threshold did) always losing that
         // race.
         private const val FORCE_RECONNECT_AFTER_DEGRADED_MS = 45_000L
-        private const val HEARTBEAT_SPREAD_MS = 400L
 
         // See resubscribe()'s onClosed override: a relay sending NIP-01
         // CLOSED for a persistent reason (PoW/auth it'll never satisfy)

@@ -24,5 +24,17 @@ export const PRESENCE_TICK_INTERVAL_MS = 10000;
 // Minimum gap between two re-subscribes after a relay closes our subscription.
 export const SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS = 10000;
 
+// Gap between the heartbeats to successive contacts, so a relay isn't hit by a burst.
+export const HEARTBEAT_SPREAD_MS = 400;
+
+// How long the self-view takes to shrink to its corner when a call connects.
+export const SELF_VIEW_SHRINK_MS = 600;
+
+// Longest pairing phrase the input accepts.
+export const MAX_PHRASE_LENGTH = 200;
+
+// Camera capture the call asks for.
+export const CAPTURE = {"width":1280,"height":720,"fps":30};
+
 // Cycle order of the self-view position.
 export const PREVIEW_POSITIONS = ["bottom-start","top-start","top-end","bottom-end","invisible"];

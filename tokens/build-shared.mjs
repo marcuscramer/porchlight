@@ -33,8 +33,11 @@ function checkList(name, list, pattern) {
 checkList('relays', cfg.relays, /^wss:\/\/[a-z0-9.-]+(:\d+)?(\/.*)?$/i);
 checkList('stunServers', cfg.stunServers, /^stuns?:[a-z0-9.-]+(:\d+)?$/i);
 checkList('previewPositions', cfg.previewPositions, /^[a-z]+(-[a-z]+)?$/);
-for (const key of ['autoDismissDelayMs', 'presenceTickIntervalMs', 'subscriptionResubscribeCooldownMs']) {
+for (const key of ['autoDismissDelayMs', 'presenceTickIntervalMs', 'subscriptionResubscribeCooldownMs', 'heartbeatSpreadMs', 'selfViewShrinkMs', 'maxPhraseLength']) {
   if (!Number.isInteger(cfg[key]) || cfg[key] <= 0) fail(`${key} must be a positive integer`);
+}
+for (const key of ['width', 'height', 'fps']) {
+  if (!cfg.capture || !Number.isInteger(cfg.capture[key]) || cfg.capture[key] <= 0) fail(`capture.${key} must be a positive integer`);
 }
 const securityDoc = readFileSync(path.join(repoRoot, 'SECURITY.md'), 'utf8');
 for (const relay of cfg.relays) {
@@ -76,6 +79,20 @@ ${cfg.stunServers.map((r) => `        ${q(r)},`).join('\n')}
     /** Minimum gap between two re-subscribes after a relay closes our subscription. */
     const val SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS: Long = ${kotlinMs(cfg.subscriptionResubscribeCooldownMs)}
 
+    /** Gap between the heartbeats to successive contacts, so a relay isn't hit by a burst. */
+    const val HEARTBEAT_SPREAD_MS: Long = ${kotlinMs(cfg.heartbeatSpreadMs)}
+
+    /** How long the self-view takes to shrink to its corner when a call connects. */
+    const val SELF_VIEW_SHRINK_MS: Int = ${cfg.selfViewShrinkMs}
+
+    /** Longest pairing phrase the input accepts. */
+    const val MAX_PHRASE_LENGTH: Int = ${cfg.maxPhraseLength}
+
+    /** Camera capture the call asks for. */
+    const val CAPTURE_WIDTH: Int = ${cfg.capture.width}
+    const val CAPTURE_HEIGHT: Int = ${cfg.capture.height}
+    const val CAPTURE_FPS: Int = ${cfg.capture.fps}
+
     /** Cycle order of the self-view position, as wire names (see PreviewCorner). */
     val PREVIEW_POSITIONS: List<String> = listOf(
 ${cfg.previewPositions.map((r) => `        ${q(r)},`).join('\n')}
@@ -96,6 +113,18 @@ export const PRESENCE_TICK_INTERVAL_MS = ${cfg.presenceTickIntervalMs};
 
 // Minimum gap between two re-subscribes after a relay closes our subscription.
 export const SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS = ${cfg.subscriptionResubscribeCooldownMs};
+
+// Gap between the heartbeats to successive contacts, so a relay isn't hit by a burst.
+export const HEARTBEAT_SPREAD_MS = ${cfg.heartbeatSpreadMs};
+
+// How long the self-view takes to shrink to its corner when a call connects.
+export const SELF_VIEW_SHRINK_MS = ${cfg.selfViewShrinkMs};
+
+// Longest pairing phrase the input accepts.
+export const MAX_PHRASE_LENGTH = ${cfg.maxPhraseLength};
+
+// Camera capture the call asks for.
+export const CAPTURE = ${JSON.stringify(cfg.capture)};
 
 // Cycle order of the self-view position.
 export const PREVIEW_POSITIONS = ${JSON.stringify(cfg.previewPositions)};

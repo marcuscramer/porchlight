@@ -685,7 +685,7 @@ video {
   width: var(--lv-w);
   height: var(--lv-h);
   background: var(--color-video-background);
-  transition: left 0.6s ease, top 0.6s ease, width 0.6s ease, height 0.6s ease;
+  transition: left var(--self-view-shrink, 0.6s) ease, top var(--self-view-shrink, 0.6s) ease, width var(--self-view-shrink, 0.6s) ease, height var(--self-view-shrink, 0.6s) ease;
 }
 #localVideo.preview-bottom-start { left: var(--dimension-24); top: calc(100% - var(--dimension-24) - var(--lv-h)); }
 #localVideo.preview-bottom-end { left: calc(100% - var(--dimension-24) - var(--lv-w)); top: calc(100% - var(--dimension-24) - var(--lv-h)); }

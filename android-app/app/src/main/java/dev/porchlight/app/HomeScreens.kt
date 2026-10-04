@@ -407,7 +407,7 @@ internal fun HomeScreen(
                 LaunchedEffect(Unit) { selfViewFull = false }
                 if (config.previewCorner != PreviewCorner.INVISIBLE) {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                        val shrink = tween<Dp>(durationMillis = SELF_VIEW_SHRINK_MS)
+                        val shrink = tween<Dp>(durationMillis = GeneratedSharedConfig.SELF_VIEW_SHRINK_MS)
                         val width by animateDpAsState(if (selfViewFull) maxWidth else Dimens.sizeLocalPreviewWidth, shrink, label = "selfViewWidth")
                         val height by animateDpAsState(if (selfViewFull) maxHeight else Dimens.sizeLocalPreviewHeight, shrink, label = "selfViewHeight")
                         val inset by animateDpAsState(if (selfViewFull) 0.dp else Dimens.spacingContactRowGap, shrink, label = "selfViewInset")
@@ -451,9 +451,6 @@ internal fun HomeScreen(
  * a fully opaque card — still reads as "video underneath," just legible.
  * Mirrors web's identical `.calling-overlay` background (styles.css).
  */
-/** How long the self-view takes to shrink to its corner when a call connects. */
-private const val SELF_VIEW_SHRINK_MS = 600
-
 private fun Modifier.callOverlayScrim(): Modifier = this
     .background(GeneratedColor.colorBackgroundWaiting.copy(alpha = GeneratedOpacity.opacity80), RoundedCornerShape(Dimens.radiusControl))
     .padding(horizontal = Dimens.dimension24, vertical = Dimens.dimension16)

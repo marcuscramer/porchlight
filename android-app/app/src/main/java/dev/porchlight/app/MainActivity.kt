@@ -670,6 +670,15 @@ private fun AppRoot(
 ) {
     val context = LocalContext.current
     var config by remember { mutableStateOf(Config.load(context)) }
+    // Always changes the freshly loaded config, never this composable's own
+    // (possibly stale) snapshot: CameraAgentService can have pinned a peer
+    // directly to disk since `config` was last refreshed here, and saving a
+    // stale copy would silently discard that pin.
+    fun updateConfig(change: (Config) -> Config) {
+        val c = change(Config.load(context))
+        Config.save(context, c)
+        config = c
+    }
     val state by (service?.state?.collectAsState() ?: remember { mutableStateOf(CameraAgentService.AgentState()) })
     var adminScreen by remember { mutableStateOf<AdminScreen?>(null) }
 
@@ -734,25 +743,15 @@ private fun AppRoot(
             AdminChoiceScreen(
                 launchOnBoot = config.launchOnBoot,
                 onToggleLaunchOnBoot = { enabled ->
-                    // Same reasoning as onCyclePreviewPosition below —
-                    // reload fresh so this doesn't stomp a pairing change
-                    // CameraAgentService made directly since `config` was
-                    // last refreshed in this composable.
-                    val c = Config.load(context).copy(launchOnBoot = enabled)
-                    Config.save(context, c)
-                    config = c
+                    updateConfig { it.copy(launchOnBoot = enabled) }
                 },
                 callWakeUp = config.callWakeUp,
                 onToggleCallWakeUp = { enabled ->
-                    val c = Config.load(context).copy(callWakeUp = enabled)
-                    Config.save(context, c)
-                    config = c
+                    updateConfig { it.copy(callWakeUp = enabled) }
                 },
                 ringVolume = config.ringVolume,
                 onRingVolumeChange = { level ->
-                    val c = Config.load(context).copy(ringVolume = level)
-                    Config.save(context, c)
-                    config = c
+                    updateConfig { it.copy(ringVolume = level) }
                 },
                 onPreviewRingVolume = { level -> service?.previewRingtone(level) },
                 onRenameDevice = { adminScreen = AdminScreen.Rename; onAdminChoiceHandled() },
@@ -782,14 +781,7 @@ private fun AppRoot(
                     onReopenAdminChoice()
                 },
                 onDone = { name ->
-                    // Reload fresh rather than mutate this composable's own
-                    // (possibly stale) `config` snapshot — CameraAgentService
-                    // can have pinned a peer directly to disk since `config`
-                    // was last refreshed here, so saving a stale copy would
-                    // silently discard that pin.
-                    val c = Config.load(context).copy(deviceName = name)
-                    Config.save(context, c)
-                    config = c
+                    updateConfig { it.copy(deviceName = name) }
                     // Restart so the new name actually gets rebroadcast over
                     // presence now, rather than only on next app launch —
                     // see CameraAgentService.restartAgent's doc.
@@ -840,9 +832,7 @@ private fun AppRoot(
                 // NameEntryScreen's own doc.
                 onCancel = {},
                 onDone = { name ->
-                    val c = config.copy(deviceName = name)
-                    Config.save(context, c)
-                    config = c
+                    updateConfig { it.copy(deviceName = name) }
                 },
             )
         }
@@ -867,25 +857,14 @@ private fun AppRoot(
                 state = state,
                 config = config,
                 onCyclePreviewPosition = {
-                    // Same reasoning as AdminScreen.Rename's onDone above —
-                    // reload fresh so this doesn't stomp a pairing change
-                    // CameraAgentService made directly since `config` was
-                    // last refreshed in this composable.
-                    val c = Config.load(context).copy(previewCorner = config.previewCorner.next())
-                    Config.save(context, c)
-                    config = c
+                    updateConfig { it.copy(previewCorner = it.previewCorner.next()) }
                 },
                 onResetPreviewPosition = {
-                    // Same reload-fresh reasoning as onCyclePreviewPosition
-                    // above. A no-op write (skipped, not just harmless) when
-                    // already BOTTOM_START — the common case, since this
-                    // fires at the start of every call — avoids a pointless
-                    // SharedPreferences write most of the time.
-                    val fresh = Config.load(context)
-                    if (fresh.previewCorner != PreviewCorner.BOTTOM_START) {
-                        val c = fresh.copy(previewCorner = PreviewCorner.BOTTOM_START)
-                        Config.save(context, c)
-                        config = c
+                    // Skipped when already BOTTOM_START — the common case,
+                    // since this fires at the start of every call — to avoid
+                    // a pointless SharedPreferences write.
+                    if (Config.load(context).previewCorner != PreviewCorner.BOTTOM_START) {
+                        updateConfig { it.copy(previewCorner = PreviewCorner.BOTTOM_START) }
                     }
                 },
                 // Mirrors the web client's own #settingsBtn gear.

@@ -66,7 +66,7 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
             // this becomes a passphrase string fed to CallCoreBridge/JNI,
             // and while that path is panic-safe regardless, there's no
             // reason to let an accidental massive paste through.
-            onValueChange = { phrase = it.take(200) },
+            onValueChange = { phrase = it.take(GeneratedSharedConfig.MAX_PHRASE_LENGTH) },
             label = stringResource(R.string.pairing_phraseFieldLabel),
             onSubmit = submit,
             modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),

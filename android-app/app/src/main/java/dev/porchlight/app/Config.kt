@@ -134,18 +134,7 @@ data class Config(
                 PreviewCorner.valueOf(p.getString("previewCorner", null) ?: "")
             }.getOrDefault(PreviewCorner.BOTTOM_START)
             val launchOnBoot = p.getBoolean("launchOnBoot", false)
-            // Replaced the old on/off "playIncomingCallSound" boolean: a stored
-            // `false` there becomes silent, anything else (including never
-            // set) the 50% default. A short-lived Off/Low/Medium/High version
-            // stored those names instead; they map to 0/25/50/100.
-            val ringVolume = when (val stored = p.getString("ringVolume", null)) {
-                "OFF" -> RingVolume.P0
-                "LOW" -> RingVolume.P25
-                "MEDIUM" -> RingVolume.P50
-                "HIGH" -> RingVolume.P100
-                else -> runCatching { RingVolume.valueOf(stored ?: "") }
-                    .getOrElse { if (p.getBoolean("playIncomingCallSound", true)) RingVolume.P50 else RingVolume.P0 }
-            }
+            val ringVolume = runCatching { RingVolume.valueOf(p.getString("ringVolume", null) ?: "") }.getOrDefault(RingVolume.P50)
 
             Config(deviceName, pairings, previewCorner, launchOnBoot, ringVolume, p.getBoolean("callWakeUp", true))
         }

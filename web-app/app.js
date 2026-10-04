@@ -33,7 +33,7 @@ import init, * as callCore from './wasm/call_core.js';
 // already falls back correctly once a second locale file exists, no code
 // here needs to change when one does.
 import { t as translate, resolveLocale } from './strings.js';
-import { RELAYS, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS } from './shared-config.js';
+import { RELAYS, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS, HEARTBEAT_SPREAD_MS, SELF_VIEW_SHRINK_MS, MAX_PHRASE_LENGTH, CAPTURE } from './shared-config.js';
 
 // call-core's WASM module — a top-level await (legal since this file is
 // loaded as type="module"), so nothing below can run a pairing attempt
@@ -91,7 +91,6 @@ const PAKE_LIVE_WINDOW_MS = PROTOCOL_CONSTANTS.pake_live_window_ms;
 
 const DEVICE_NAME_STORAGE_KEY = 'porchlight-device-name';
 const RELAY_COOLDOWNS_STORAGE_KEY = 'porchlight-relay-cooldowns';
-const HEARTBEAT_SPREAD_MS = 400;
 const PAIRINGS_STORAGE_KEY = 'porchlight-pairings';
 
 // ---------------------------------------------------------------------------
@@ -927,7 +926,7 @@ async function acquireLocalStream() {
   if (acquireLocalStreamPromise) return acquireLocalStreamPromise;
   acquireLocalStreamPromise = (async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: CAPTURE.width }, height: { ideal: CAPTURE.height }, frameRate: { ideal: CAPTURE.fps } }, audio: true });
       // The call attempt that triggered this may already have been
       // cancelled/ended while getUserMedia was still pending (a fast
       // Call-then-Cancel) — shut it down immediately instead of adopting it.
@@ -1960,6 +1959,9 @@ async function startApp() {
   render();
   connectRelayClient();
 }
+
+document.documentElement.style.setProperty('--self-view-shrink', `${SELF_VIEW_SHRINK_MS}ms`);
+el('phraseInput').maxLength = MAX_PHRASE_LENGTH;
 
 if (deviceName) {
   screen = 'waiting';
