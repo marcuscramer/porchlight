@@ -190,6 +190,13 @@ The easiest way to use it: **[marcuscramer.github.io/porchlight](https://marcusc
 host `web-app/` somewhere reachable (any static web host), or open
 `web-app/index.html` directly for a quick local test.
 
+A web page that has been hidden for about 30 seconds with nothing going on
+(no call, no pairing) disconnects from the relays to save battery, and its
+contacts see it as offline until you come back to it; it reconnects as soon as
+you do. While a call is ringing or running it stays connected. Because of
+that, a hidden or closed page can't ring: calls only reach a web page that
+is open and visible.
+
 The web version stores its name and contacts in that browser's own local
 storage — clearing the browser's site data for that page resets it to a
 fresh, unpaired profile, the same as reinstalling the Android app.

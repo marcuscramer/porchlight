@@ -7,11 +7,8 @@ object GeneratedSharedConfig {
         "wss://relay.primal.net",
         "wss://relay.snort.social",
         "wss://nostr-pub.wellorder.net",
-        "wss://nostr.mom",
         "wss://nostr.oxtr.dev",
         "wss://nostr.data.haus",
-        "wss://relay.damus.io",
-        "wss://nos.lol",
     )
 
     val STUN_SERVERS: List<String> = listOf(
@@ -32,6 +29,9 @@ object GeneratedSharedConfig {
 
     /** How long the self-view takes to shrink to its corner when a call connects. */
     const val SELF_VIEW_SHRINK_MS: Int = 600
+
+    /** How long a page may stay hidden, with nothing going on, before it disconnects from the relays. */
+    const val PAUSE_WHEN_HIDDEN_MS: Long = 30_000L
 
     /** Longest pairing phrase the input accepts. */
     const val MAX_PHRASE_LENGTH: Int = 200

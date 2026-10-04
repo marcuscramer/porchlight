@@ -33,7 +33,7 @@ function checkList(name, list, pattern) {
 checkList('relays', cfg.relays, /^wss:\/\/[a-z0-9.-]+(:\d+)?(\/.*)?$/i);
 checkList('stunServers', cfg.stunServers, /^stuns?:[a-z0-9.-]+(:\d+)?$/i);
 checkList('previewPositions', cfg.previewPositions, /^[a-z]+(-[a-z]+)?$/);
-for (const key of ['autoDismissDelayMs', 'presenceTickIntervalMs', 'subscriptionResubscribeCooldownMs', 'heartbeatSpreadMs', 'selfViewShrinkMs', 'maxPhraseLength']) {
+for (const key of ['autoDismissDelayMs', 'presenceTickIntervalMs', 'subscriptionResubscribeCooldownMs', 'heartbeatSpreadMs', 'selfViewShrinkMs', 'maxPhraseLength', 'pauseWhenHiddenMs']) {
   if (!Number.isInteger(cfg[key]) || cfg[key] <= 0) fail(`${key} must be a positive integer`);
 }
 for (const key of ['width', 'height', 'fps']) {
@@ -85,6 +85,9 @@ ${cfg.stunServers.map((r) => `        ${q(r)},`).join('\n')}
     /** How long the self-view takes to shrink to its corner when a call connects. */
     const val SELF_VIEW_SHRINK_MS: Int = ${cfg.selfViewShrinkMs}
 
+    /** How long a page may stay hidden, with nothing going on, before it disconnects from the relays. */
+    const val PAUSE_WHEN_HIDDEN_MS: Long = ${kotlinMs(cfg.pauseWhenHiddenMs)}
+
     /** Longest pairing phrase the input accepts. */
     const val MAX_PHRASE_LENGTH: Int = ${cfg.maxPhraseLength}
 
@@ -119,6 +122,9 @@ export const HEARTBEAT_SPREAD_MS = ${cfg.heartbeatSpreadMs};
 
 // How long the self-view takes to shrink to its corner when a call connects.
 export const SELF_VIEW_SHRINK_MS = ${cfg.selfViewShrinkMs};
+
+// How long a page may stay hidden, with nothing going on, before it disconnects from the relays.
+export const PAUSE_WHEN_HIDDEN_MS = ${cfg.pauseWhenHiddenMs};
 
 // Longest pairing phrase the input accepts.
 export const MAX_PHRASE_LENGTH = ${cfg.maxPhraseLength};

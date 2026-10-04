@@ -4,11 +4,8 @@ export const RELAYS = [
   "wss://relay.primal.net",
   "wss://relay.snort.social",
   "wss://nostr-pub.wellorder.net",
-  "wss://nostr.mom",
   "wss://nostr.oxtr.dev",
-  "wss://nostr.data.haus",
-  "wss://relay.damus.io",
-  "wss://nos.lol"
+  "wss://nostr.data.haus"
 ];
 
 export const STUN_SERVERS = [
@@ -29,6 +26,9 @@ export const HEARTBEAT_SPREAD_MS = 400;
 
 // How long the self-view takes to shrink to its corner when a call connects.
 export const SELF_VIEW_SHRINK_MS = 600;
+
+// How long a page may stay hidden, with nothing going on, before it disconnects from the relays.
+export const PAUSE_WHEN_HIDDEN_MS = 30000;
 
 // Longest pairing phrase the input accepts.
 export const MAX_PHRASE_LENGTH = 200;

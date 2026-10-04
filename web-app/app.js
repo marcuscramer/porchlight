@@ -33,7 +33,7 @@ import init, * as callCore from './wasm/call_core.js';
 // already falls back correctly once a second locale file exists, no code
 // here needs to change when one does.
 import { t as translate, resolveLocale } from './strings.js';
-import { RELAYS, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS, HEARTBEAT_SPREAD_MS, SELF_VIEW_SHRINK_MS, MAX_PHRASE_LENGTH, CAPTURE } from './shared-config.js';
+import { RELAYS, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS, HEARTBEAT_SPREAD_MS, SELF_VIEW_SHRINK_MS, MAX_PHRASE_LENGTH, CAPTURE, PAUSE_WHEN_HIDDEN_MS } from './shared-config.js';
 
 // call-core's WASM module — a top-level await (legal since this file is
 // loaded as type="module"), so nothing below can run a pairing attempt
@@ -482,6 +482,7 @@ function kickHeartbeat() {
 }
 
 function monitorOnlineTimeouts() {
+  maybePauseConnection();
   const now = Date.now();
   applyPresenceUpdate(callCore.checkOnlineTimeouts(now));
   applyCallEffects(callCore.checkCallTimeout(now));
@@ -507,6 +508,8 @@ function monitorOnlineTimeouts() {
  * recent rejection, handing its retry queue whichever ones reject it (or were
  * skipped for cooling down) instead of just discarding the failure. */
 async function publishToRelays(event, payloadJson) {
+  // Paused while the page is hidden (see pauseConnection): nothing to send to.
+  if (!pool) return;
   const now = Date.now();
   const targets = callCore.availableRelays(RELAYS, now);
   const failedRelays = RELAYS.filter(url => !targets.includes(url));
@@ -529,6 +532,7 @@ async function publishToRelays(event, payloadJson) {
 /** Republishes whatever call-core says is still outstanding (it already
  * leaves out relays cooling down from a rejection). */
 async function retryPendingPublishes() {
+  if (!pool) return;
   const now = Date.now();
   for (const entry of JSON.parse(callCore.dueForRetry(now))) {
     const event = JSON.parse(entry.event_json);
@@ -636,15 +640,84 @@ window.addEventListener('storage', (event) => {
 // same thing proactively, the moment the tab is actually looked at again,
 // instead of waiting for a retry to stumble into it.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return;
-  callCore.requestHello();
-  kickHeartbeat();
+  if (document.visibilityState !== 'visible') {
+    // Hidden: after a grace period (so a quick look at another app doesn't
+    // make this client look offline) and only if nothing is going on, stop
+    // using the network until the page is looked at again.
+    clearTimeout(pauseTimeoutHandle);
+    pauseTimeoutHandle = setTimeout(maybePauseConnection, PAUSE_WHEN_HIDDEN_MS);
+    return;
+  }
+  clearTimeout(pauseTimeoutHandle);
+  if (connectionPaused) resumeConnection();
+  else {
+    callCore.requestHello();
+    kickHeartbeat();
+  }
   // iOS pauses a playing video when the page is backgrounded; resume it
   // rather than leaving a paused frame for Safari to decorate.
   for (const video of document.querySelectorAll('video')) {
     if (video.srcObject && video.paused) keepPlaying(video);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Pause while hidden. A hidden mobile page can't take a call anyway (browsers
+// freeze it), so keeping the relay sockets, their pings and the 25 s heartbeat
+// running only drains the battery. After PAUSE_WHEN_HIDDEN_MS hidden with
+// nothing going on, tell the contacts we're leaving, close the relays and stop
+// the timers; coming back reconnects and says hello (resumeConnection). Never
+// while a call is ringing, being placed or live, a call is waiting for a
+// contact to come online, or a pairing attempt is running.
+// ---------------------------------------------------------------------------
+let connectionPaused = false;
+let pausingInFlight = null;
+let pauseTimeoutHandle = null;
+
+function connectionIsIdle() {
+  const pairingAttemptLive = pendingPairingsList().some((p) => p.rendezvousTag);
+  // isCallActive covers a ringing, placed or live call and one deferred until
+  // the contact comes online (that holds the call slot too).
+  return !callCore.isCallActive() && !pc && !pairingAttemptLive;
+}
+
+function maybePauseConnection() {
+  if (document.visibilityState === 'visible' || connectionPaused || !pool || !connectionIsIdle()) return;
+  pauseConnection();
+}
+
+async function pauseConnection() {
+  connectionPaused = true;
+  clearTimeout(heartbeatTimeoutHandle);
+  clearInterval(onlineCheckTimer);
+  onlineCheckTimer = null;
+  // The "leaving" messages have to be out before the sockets close.
+  pausingInFlight = (async () => {
+    const sends = confirmedPeers().map((peer) => {
+      const payload = callCore.buildLeavingPayload();
+      return payload ? publish(peer.ownPrivateKeyHex, peer.peerPublicKey, payload) : null;
+    });
+    await Promise.allSettled(sends);
+    if (wrapSub) { wrapSub.close(); wrapSub = null; }
+    if (bootstrapSub) { bootstrapSub.close(); bootstrapSub = null; }
+    try { pool.close(RELAYS); } catch { /* already closed */ }
+    pool = null;
+    // Everyone is unreachable from here until we reconnect; don't show the
+    // pre-pause dots for the moment before the hellos come back.
+    applyPresenceUpdate(callCore.checkOnlineTimeouts(Date.now() + 24 * 3600 * 1000));
+  })();
+  await pausingInFlight;
+  pausingInFlight = null;
+}
+
+async function resumeConnection() {
+  if (pausingInFlight) await pausingInFlight;
+  if (!connectionPaused) return;
+  connectionPaused = false;
+  callCore.requestHello();
+  connectRelayClient();
+  render();
+}
 
 // The browser regained network (Wi-Fi back, airplane mode off): same staleness
 // as coming back to a backgrounded tab — say hello so peers answer right away.
