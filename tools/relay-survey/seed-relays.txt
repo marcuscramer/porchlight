@@ -1,0 +1,43 @@
+# Seed list for `survey.mjs discover`, merged with whatever the online list sources return.
+# From memory — expect some of these to be dead or to have changed their rules; that's what the survey is for.
+# One URL per line, wss:// only. Lines starting with # are ignored.
+wss://relay.primal.net
+wss://relay.snort.social
+wss://nostr-pub.wellorder.net
+wss://nostr.oxtr.dev
+wss://nostr.data.haus
+wss://relay.damus.io
+wss://nos.lol
+wss://nostr.mom
+wss://relay.nostr.band
+wss://nostr.wine
+wss://purplepag.es
+wss://relay.current.fyi
+wss://nostr.bitcoiner.social
+wss://relay.nostr.bg
+wss://nostr-01.yakihonne.com
+wss://relay.mostr.pub
+wss://offchain.pub
+wss://relay.nostrplebs.com
+wss://relayable.org
+wss://relay.noswhere.com
+wss://eden.nostr.land
+wss://nostr.milou.lol
+wss://relay.orangepill.dev
+wss://relay.nostr.net
+wss://nostr.rocks
+wss://relay.nostrich.land
+wss://nostr.fmt.wiz.biz
+wss://relay.nostr.wirednet.jp
+wss://nostr-relay.nokotaro.com
+wss://relay.lexingtonbitcoin.org
+wss://nostr.sathoarder.com
+wss://nostr.einundzwanzig.space
+wss://relay.nostrdice.com
+wss://relay.nsec.app
+wss://strfry.iris.to
+wss://relay.hodl.ar
+wss://relay.siamstr.com
+wss://relay.stoner.com
+wss://nostr.sidnlabs.nl
+wss://relay.bitcoinpark.com

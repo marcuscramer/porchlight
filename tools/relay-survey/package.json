@@ -1,0 +1,12 @@
+{
+  "name": "relay-survey",
+  "private": true,
+  "type": "module",
+  "description": "Measures public Nostr relays for Porchlight's signaling: probe, overnight soak, ranked report. No dependencies (Node 22+).",
+  "scripts": {
+    "discover": "node survey.mjs discover",
+    "probe": "node survey.mjs probe",
+    "soak": "node survey.mjs soak",
+    "report": "node survey.mjs report"
+  }
+}
