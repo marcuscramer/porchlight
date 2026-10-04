@@ -88,7 +88,13 @@ export async function probe({ concurrency = 6, limit = Infinity, urls } = {}) {
     appendJsonl(outFile('probe.jsonl'), r);
     log(`[${++done}/${list.length}] ${r.ok ? 'PASS' : 'fail'} ${url}${r.ok ? ` (connect ${r.connectMs} ms, heartbeat rtt ${r.sizes.heartbeat.deliveredMs} ms${r.checks.offer65k ? '' : ', no 65 KB'})` : ' — ' + (r.limits?.[0] || r.errors?.[0] || 'failed')}`);
   });
-  const survivors = readJsonl(outFile('probe.jsonl')).filter((r) => r.ok && !(r.limits || []).some((x) => !x.startsWith('max ')))  // size limits are judged by the actual tests.map((r) => r.url);
+  // Best first (so a cap in `soak` drops the weakest, not the last to finish): handles bigger events, then faster delivery.
+  // Size limits from NIP-11 are judged by the actual tests, not trusted.
+  const quality = (r) => (r.checks.offer65k ? 0 : 1) * 1e6 + (r.checks.offer33k ? 0 : 1) * 1e5 + (r.sizes.heartbeat.deliveredMs ?? 99999);
+  const survivors = readJsonl(outFile('probe.jsonl'))
+    .filter((r) => r.ok && !(r.limits || []).some((x) => !x.startsWith('max ')))
+    .sort((a, b) => quality(a) - quality(b))
+    .map((r) => r.url);
   writeFileSync(outFile('survivors.json'), JSON.stringify(survivors, null, 2));
   log(`${survivors.length} of ${list.length} passed the probe -> out/survivors.json`);
   return survivors;

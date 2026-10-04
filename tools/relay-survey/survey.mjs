@@ -26,7 +26,7 @@ switch (cmd) {
     await probe({ concurrency: num(flags.concurrency, 10), limit: num(flags.limit, Infinity), urls });
     break;
   case 'soak':
-    await soak({ hours: num(flags.hours, 8), top: num(flags.top, 40), urls });
+    await soak({ hours: num(flags.hours, 8), top: num(flags.top, 120), urls });
     break;
   case 'report':
     await report({ pool: num(flags.pool, 20) });
@@ -34,7 +34,7 @@ switch (cmd) {
   case 'all': {
     await discover({ listUrls: flags.listUrl.length ? flags.listUrl : undefined, csvUrls: flags.csvUrl.length ? flags.csvUrl : undefined, nip66Relays: flags.nip66.length ? flags.nip66 : undefined, files: flags.file, max: num(flags.max, 400) });
     await probe({ concurrency: num(flags.concurrency, 10) });
-    await soak({ hours: num(flags.hours, 8), top: num(flags.top, 40) });
+    await soak({ hours: num(flags.hours, 8), top: num(flags.top, 120) });
     await report({ pool: num(flags.pool, 20) });
     break;
   }
@@ -42,7 +42,7 @@ switch (cmd) {
     console.log(`usage: node survey.mjs <command> [options]
   discover [--list-url URL]... [--csv-url URL]... [--nip66 WSS]... [--file PATH]... [--max N]   build out/candidates.json
   probe    [--concurrency 6] [--limit N] [--urls a,b]        quick check of every candidate -> out/survivors.json
-  soak     [--hours 8] [--top 40] [--urls a,b]                hold connections and send heartbeat-like load
+  soak     [--hours 8] [--top 120] [--urls a,b]                hold connections and send heartbeat-like load
   report   [--pool 20]                                        rank everything -> out/report.md
   all      [--hours 8]                                        discover, probe, soak, report`);
 }
