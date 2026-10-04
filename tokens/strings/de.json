@@ -22,7 +22,7 @@
   "settings": {
     "title": "Einstellungen",
     "renameRow": "Dieses Gerät umbenennen",
-    "connectionInfoRow": "Verbindungsinfo",
+    "connectionInfoRow": "Status",
     "kioskMode": {
       "title": "Kiosk-Modus",
       "subtitle": "Startet Porchlight automatisch nach dem (Neu-)Start und wenn der Bildschirmschoner endet"
@@ -47,7 +47,7 @@
     }
   },
   "connectionInfo": {
-    "title": "Verbindungsinfo",
+    "title": "Status",
     "network": "Internet",
     "networkWifi": "Verbunden über WLAN",
     "networkEthernet": "Verbunden über Ethernet",

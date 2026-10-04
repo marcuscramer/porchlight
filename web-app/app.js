@@ -282,7 +282,7 @@ function resubscribe() {
 
 // nostr-tools never says which relay an event or message came from, nor why
 // a connection failed or dropped (including every automatic reconnect), so the
-// per-relay "last message" and connection errors on the Connection info screen
+// per-relay "last message" and connection errors on the Status screen
 // come from the sockets themselves: a plain WebSocket that records what
 // happens to it. Browsers keep a failed handshake's HTTP status to themselves,
 // so the reason is only what the socket events carry.
@@ -420,7 +420,7 @@ function applyPresenceUpdate(json) {
   applyCallEffects(JSON.stringify(result.call_effects));
 }
 
-// What the "Connection info" screen shows that nothing else tracks: when
+// What the "Status" screen shows that nothing else tracks: when
 // the last heartbeat went out.
 let lastHeartbeatSentAt = null;
 const expandedRelayRows = new Set(); // relay rows tapped open to show the full message
@@ -1670,7 +1670,7 @@ el('renameBtn').addEventListener('click', () => { screen = 'rename'; render(); }
 el('connectionBtn').addEventListener('click', () => { screen = 'connection'; render(); });
 el('connectionBack').addEventListener('click', () => { screen = 'settings'; render(); });
 
-// --- Connection info (mirrors ConnectionInfoScreen) --------------------
+// --- Status (mirrors ConnectionInfoScreen) --------------------
 
 let connectionRefreshTimer = null;
 

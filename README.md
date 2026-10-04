@@ -87,7 +87,7 @@ isn't sitting next to you.
 
 Porchlight checks for new releases and can install them for you from
 Settings. For that to actually work, two things need to be switched on
-once. (The Connection info page in Settings shows whether the verifier is
+once. (The Status page in Settings shows whether the verifier is
 still blocking.)
 
 **Allow Porchlight to install apps.** Android only lets an app install

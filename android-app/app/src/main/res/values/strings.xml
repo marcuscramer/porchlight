@@ -16,7 +16,7 @@
     <string name="nameEntry_defaultNameWeb">Porchlight (web)</string>
     <string name="settings_title">Settings</string>
     <string name="settings_renameRow">Rename this device</string>
-    <string name="settings_connectionInfoRow">Connection info</string>
+    <string name="settings_connectionInfoRow">Status</string>
     <string name="settings_kioskMode_title">Kiosk mode</string>
     <string name="settings_kioskMode_subtitle">Bring Porchlight up automatically after (re)boot and when the screensaver ends</string>
     <string name="settings_callWakeUp_title">Call wake-up</string>
@@ -31,7 +31,7 @@
     <string name="settings_update_installButton">Install</string>
     <string name="settings_update_installNeedsSetup">Self-updates need a one-time setup step, see the README</string>
     <string name="settings_ringVolume_title">Ringtone volume</string>
-    <string name="connectionInfo_title">Connection info</string>
+    <string name="connectionInfo_title">Status</string>
     <string name="connectionInfo_network">Internet</string>
     <string name="connectionInfo_networkWifi">Connected via Wi-Fi</string>
     <string name="connectionInfo_networkEthernet">Connected via Ethernet</string>

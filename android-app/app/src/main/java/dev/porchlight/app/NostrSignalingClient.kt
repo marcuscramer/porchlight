@@ -216,7 +216,7 @@ class NostrSignalingClient(
     // own watchdog below.
     private val connectedRelays = mutableSetOf<NormalizedRelayUrl>()
 
-    // What the "Connection info" screen reads from the UI thread: copies and
+    // What the "Status" screen reads from the UI thread: copies and
     // concurrent maps, written from the callbacks below, so nothing here needs
     // [executor] (unlike [connectedRelays] itself).
     @Volatile private var connectedSnapshot: Set<String> = emptySet()

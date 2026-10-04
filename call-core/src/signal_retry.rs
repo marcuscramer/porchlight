@@ -118,7 +118,7 @@ pub(crate) struct SignalRetryState {
     /// configured relay, so never pruned.
     cooldown_until_ms: HashMap<String, i64>,
     /// Relay URL -> how many publishes it has accepted / rejected since this
-    /// process started, for the "Connection info" screens.
+    /// process started, for the "Status" screens.
     stats: HashMap<String, RelayStats>,
 }
 

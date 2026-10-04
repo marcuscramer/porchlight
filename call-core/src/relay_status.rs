@@ -1,4 +1,4 @@
-//! What the "Connection info" screens say about each relay, decided once for
+//! What the "Status" screens say about each relay, decided once for
 //! both shells.
 //!
 //! The shells report what happened (a message arrived, a connection failed or

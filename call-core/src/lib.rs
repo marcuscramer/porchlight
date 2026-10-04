@@ -41,7 +41,7 @@
 //! - `signal_router` — the single entry point for an incoming relay event:
 //!   dedup, unwrap/verify, parse, presence and per-message decisions, returned
 //!   as one ordered result for the shell to execute;
-//! - `relay_status` — what the Connection info screens say about each relay;
+//! - `relay_status` — what the Status screens say about each relay;
 //! - `call_ui` — which phase a call is in (ringing/calling/connecting/live/
 //!   outcome) and which text an ended call gets;
 //! - `wake_up` — the step-by-step decisions for getting the call screen in

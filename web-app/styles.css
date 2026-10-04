@@ -126,7 +126,7 @@ html, body {
   color: var(--color-text-primary);
 }
 
-/* Connection info rows (#connectionRows): label left, value right, one line each. */
+/* Status rows (#connectionRows): label left, value right, one line each. */
 .info-rows {
   display: flex;
   flex-direction: column;

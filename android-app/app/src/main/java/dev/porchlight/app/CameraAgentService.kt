@@ -726,7 +726,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         }
     }
 
-    /** For the "Connection info" screen; null while the agent isn't running. Any thread. */
+    /** For the "Status" screen; null while the agent isn't running. Any thread. */
     fun signalingSnapshot(): NostrSignalingClient.Snapshot? = signaling?.snapshot(System.currentTimeMillis())
 
     /** Dismisses the full-screen call-outcome prompt — Back or "Call again" tap. */

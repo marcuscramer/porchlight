@@ -717,7 +717,7 @@ object CallCoreBridge {
     /** What the dot says: green connected, yellow paused after a rejection, red down. */
     enum class RelayState { CONNECTED, PAUSED, DOWN }
 
-    /** One relay as the Connection info screen shows it — see the Rust
+    /** One relay as the Status screen shows it — see the Rust
      * crate's own `relay_status::RelayView` doc. */
     data class RelayView(val url: String, val host: String, val state: RelayState, val accepted: Int, val rejected: Int, val error: String?, val ago: Ago)
 

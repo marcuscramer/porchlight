@@ -16,7 +16,7 @@
     <string name="nameEntry_defaultNameWeb">Porchlight (Web)</string>
     <string name="settings_title">Einstellungen</string>
     <string name="settings_renameRow">Dieses Gerät umbenennen</string>
-    <string name="settings_connectionInfoRow">Verbindungsinfo</string>
+    <string name="settings_connectionInfoRow">Status</string>
     <string name="settings_kioskMode_title">Kiosk-Modus</string>
     <string name="settings_kioskMode_subtitle">Startet Porchlight automatisch nach dem (Neu-)Start und wenn der Bildschirmschoner endet</string>
     <string name="settings_callWakeUp_title">Aufwecken bei Anruf</string>
@@ -31,7 +31,7 @@
     <string name="settings_update_installButton">Installieren</string>
     <string name="settings_update_installNeedsSetup">Selbst-Updates brauchen einen einmaligen Einrichtungsschritt, siehe README</string>
     <string name="settings_ringVolume_title">Klingeltonlautstärke</string>
-    <string name="connectionInfo_title">Verbindungsinfo</string>
+    <string name="connectionInfo_title">Status</string>
     <string name="connectionInfo_network">Internet</string>
     <string name="connectionInfo_networkWifi">Verbunden über WLAN</string>
     <string name="connectionInfo_networkEthernet">Verbunden über Ethernet</string>

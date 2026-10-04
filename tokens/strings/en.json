@@ -22,7 +22,7 @@
   "settings": {
     "title": "Settings",
     "renameRow": "Rename this device",
-    "connectionInfoRow": "Connection info",
+    "connectionInfoRow": "Status",
     "kioskMode": {
       "title": "Kiosk mode",
       "subtitle": "Bring Porchlight up automatically after (re)boot and when the screensaver ends"
@@ -47,7 +47,7 @@
     }
   },
   "connectionInfo": {
-    "title": "Connection info",
+    "title": "Status",
     "network": "Internet",
     "networkWifi": "Connected via Wi-Fi",
     "networkEthernet": "Connected via Ethernet",
