@@ -222,7 +222,12 @@ class WebRtcEngine(
             // `should_end_call_on_media_failure` rather than an inline
             // guard here, so web automatically gets the same guarantee once
             // it grows an equivalent trigger.
-            if (CallCoreBridge.shouldEndCallOnMediaFailure(pc != null)) closePeer() else releaseMedia()
+            if (CallCoreBridge.shouldEndCallOnMediaFailure(pc != null)) {
+                CallCoreBridge.noteMediaFailure()
+                closePeer()
+            } else {
+                releaseMedia()
+            }
         }
     }
 

@@ -70,6 +70,9 @@ object CallCoreBridge {
     private external fun nativePeerConnectionClosed(): String
 
     @JvmStatic
+    private external fun nativeNoteMediaFailure()
+
+    @JvmStatic
     private external fun nativeMarkConnected(pairingId: String, callId: String)
 
     @JvmStatic
@@ -275,7 +278,7 @@ object CallCoreBridge {
         data object KickHeartbeat : CallEffect
     }
 
-    enum class CallOutcomeReason { PEER_ENDED, NEVER_CONNECTED, DROPPED }
+    enum class CallOutcomeReason { PEER_ENDED, DECLINED, CANCELLED, NO_ANSWER, UNREACHABLE, BUSY, CAMERA_FAILED, NEVER_CONNECTED, DROPPED }
 
     /** What [requestCall] hands back — see the Rust crate's own
      * `RequestCallResult` doc. [callId] is `null` only when a *different*
@@ -443,6 +446,11 @@ object CallCoreBridge {
      * guarantee. */
     fun peerConnectionClosed(): List<CallEffect> = parseCallEffects(nativePeerConnectionClosed())
 
+    /** This device's own camera/microphone failed: call before closing the
+     * connection so the outcome says so (see the Rust crate's own
+     * `note_media_failure` doc). */
+    fun noteMediaFailure() = nativeNoteMediaFailure()
+
     /** Called the instant the real `PeerConnection` reaches CONNECTED —
      * see the Rust crate's own `mark_connected` doc. */
     fun markConnected(pairingId: String, callId: String) = nativeMarkConnected(pairingId, callId)
@@ -605,7 +613,7 @@ object CallCoreBridge {
 
     /** Which text an ended call gets — see the Rust crate's own
      * `call_ui::OutcomeText` doc. */
-    enum class OutcomeText { PEER_ENDED, NEVER_CONNECTED, UDP_BLOCKED, NO_DIRECT_PATH, DROPPED }
+    enum class OutcomeText { PEER_ENDED, DECLINED, CANCELLED, NO_ANSWER, UNREACHABLE, BUSY, CAMERA_FAILED, NEVER_CONNECTED, UDP_BLOCKED, NO_DIRECT_PATH, DROPPED }
 
     fun outcomeText(reason: CallOutcomeReason, diagnosis: IceDiagnosis?): OutcomeText =
         OutcomeText.valueOf(nativeOutcomeText(reason.name.lowercase(), diagnosis?.name?.lowercase() ?: "").trim('"').uppercase())

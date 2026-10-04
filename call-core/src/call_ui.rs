@@ -89,6 +89,12 @@ pub fn phase(input: &PhaseInput) -> PhaseView {
 #[serde(rename_all = "snake_case")]
 pub enum OutcomeText {
     PeerEnded,
+    Declined,
+    Cancelled,
+    NoAnswer,
+    Unreachable,
+    Busy,
+    CameraFailed,
     NeverConnected,
     /// Never connected, and the ICE evidence says UDP is blocked.
     UdpBlocked,
@@ -101,6 +107,12 @@ pub enum OutcomeText {
 pub fn outcome_text(reason: &CallOutcomeReason, diagnosis: Option<IceDiagnosis>) -> OutcomeText {
     match (reason, diagnosis) {
         (CallOutcomeReason::PeerEnded, _) => OutcomeText::PeerEnded,
+        (CallOutcomeReason::Declined, _) => OutcomeText::Declined,
+        (CallOutcomeReason::Cancelled, _) => OutcomeText::Cancelled,
+        (CallOutcomeReason::NoAnswer, _) => OutcomeText::NoAnswer,
+        (CallOutcomeReason::Unreachable, _) => OutcomeText::Unreachable,
+        (CallOutcomeReason::Busy, _) => OutcomeText::Busy,
+        (CallOutcomeReason::CameraFailed, _) => OutcomeText::CameraFailed,
         (CallOutcomeReason::Dropped, _) => OutcomeText::Dropped,
         (CallOutcomeReason::NeverConnected, Some(IceDiagnosis::UdpBlocked)) => OutcomeText::UdpBlocked,
         (CallOutcomeReason::NeverConnected, Some(IceDiagnosis::NoDirectPath)) => OutcomeText::NoDirectPath,
@@ -179,6 +191,18 @@ mod tests {
         assert_eq!(outcome_text(&NeverConnected, Some(IceDiagnosis::NoDirectPath)), OutcomeText::NoDirectPath);
         assert_eq!(outcome_text(&PeerEnded, Some(IceDiagnosis::UdpBlocked)), OutcomeText::PeerEnded);
         assert_eq!(outcome_text(&Dropped, Some(IceDiagnosis::NoDirectPath)), OutcomeText::Dropped);
+        // The other reasons keep their own text whatever the ICE evidence says.
+        for (reason, text) in [
+            (Declined, OutcomeText::Declined),
+            (Cancelled, OutcomeText::Cancelled),
+            (NoAnswer, OutcomeText::NoAnswer),
+            (Unreachable, OutcomeText::Unreachable),
+            (Busy, OutcomeText::Busy),
+            (CameraFailed, OutcomeText::CameraFailed),
+        ] {
+            assert_eq!(outcome_text(&reason, Some(IceDiagnosis::UdpBlocked)), text);
+            assert_eq!(outcome_text(&reason, None), text);
+        }
     }
 
     #[test]

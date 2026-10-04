@@ -352,6 +352,12 @@ pub fn route_event(event_json: &str, context_json: &str, now_ms: f64) -> String 
     .unwrap_or_else(|_| crate::signal_router::empty_result_json())
 }
 
+/// See [`crate::call_arbitration::note_media_failure`]'s own doc.
+#[wasm_bindgen(js_name = noteMediaFailure)]
+pub fn note_media_failure() {
+    let _ = catch_unwind(crate::call_arbitration::note_media_failure);
+}
+
 /// See [`crate::call_ui::phase`]'s own doc. Returns a JSON-encoded
 /// [`crate::call_ui::PhaseView`]; a panic reads as "no call".
 #[wasm_bindgen(js_name = callPhase)]

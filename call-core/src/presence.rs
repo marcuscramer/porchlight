@@ -500,7 +500,7 @@ mod tests {
             result.call_effects,
             vec![
                 CallEffect::ClearIncomingCallTimer,
-                CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::NeverConnected },
+                CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::Cancelled },
                 CallEffect::ClosePeerConnection,
             ],
             "{:?}",

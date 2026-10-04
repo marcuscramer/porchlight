@@ -508,6 +508,13 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRouteEvent<'
     })
 }
 
+/// See [`crate::call_arbitration::note_media_failure`]'s own doc. No return
+/// value.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeNoteMediaFailure<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) {
+    run_catching(&mut env, |_| crate::call_arbitration::note_media_failure());
+}
+
 /// See [`crate::call_ui::phase`]'s own doc. Returns a JSON-encoded
 /// [`crate::call_ui::PhaseView`]; a panic reads as "no call" (the contact
 /// list), the screen that can always be shown.

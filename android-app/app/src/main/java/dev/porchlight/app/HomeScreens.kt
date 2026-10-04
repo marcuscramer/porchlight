@@ -737,6 +737,18 @@ private fun CallOutcomeScreen(
     val (title, message) = when (CallCoreBridge.outcomeText(reason, iceDiagnosis)) {
         CallCoreBridge.OutcomeText.PEER_ENDED ->
             stringResource(R.string.call_outcome_peerEndedTitle) to stringResource(R.string.call_outcome_peerEndedMessage, name)
+        CallCoreBridge.OutcomeText.DECLINED ->
+            stringResource(R.string.call_outcome_declinedTitle) to stringResource(R.string.call_outcome_declinedMessage, name)
+        CallCoreBridge.OutcomeText.CANCELLED ->
+            stringResource(R.string.call_outcome_cancelledTitle) to stringResource(R.string.call_outcome_cancelledMessage, name)
+        CallCoreBridge.OutcomeText.NO_ANSWER ->
+            stringResource(R.string.call_outcome_noAnswerTitle) to stringResource(R.string.call_outcome_noAnswerMessage, name)
+        CallCoreBridge.OutcomeText.UNREACHABLE ->
+            stringResource(R.string.call_outcome_unreachableTitle) to stringResource(R.string.call_outcome_unreachableMessage, name)
+        CallCoreBridge.OutcomeText.BUSY ->
+            stringResource(R.string.call_outcome_busyTitle) to stringResource(R.string.call_outcome_busyMessage, name)
+        CallCoreBridge.OutcomeText.CAMERA_FAILED ->
+            stringResource(R.string.call_outcome_cameraFailedTitle) to stringResource(R.string.call_outcome_cameraFailedMessage)
         CallCoreBridge.OutcomeText.NEVER_CONNECTED ->
             stringResource(R.string.call_outcome_neverConnectedTitle) to stringResource(R.string.call_outcome_neverConnectedMessage, name)
         CallCoreBridge.OutcomeText.UDP_BLOCKED ->

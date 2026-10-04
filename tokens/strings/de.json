@@ -116,7 +116,19 @@
       "noDirectPathMessage": "Die Verbindung mit {name} konnte nicht direkt aufgebaut werden. Meist blockieren beide Netze direkte Verbindungen, zum Beispiel bei zwei Handys im Mobilfunknetz.",
       "udpBlockedMessage": "Die Verbindung mit {name} kam nicht zustande. Dieses Netz blockiert offenbar den Datenverkehr, den Videoanrufe brauchen.",
       "droppedTitle": "Anruf unterbrochen",
-      "droppedMessage": "Die Verbindung mit {name} wurde unerwartet unterbrochen — meist nur ein kurzes Netzwerkproblem."
+      "droppedMessage": "Die Verbindung mit {name} wurde unerwartet unterbrochen — meist nur ein kurzes Netzwerkproblem.",
+      "declinedTitle": "Anruf abgelehnt",
+      "declinedMessage": "{name} hat den Anruf abgelehnt.",
+      "cancelledTitle": "Verpasster Anruf",
+      "cancelledMessage": "{name} hat aufgelegt, bevor du abgenommen hast.",
+      "noAnswerTitle": "Keine Antwort",
+      "noAnswerMessage": "{name} hat den Anruf nicht angenommen.",
+      "unreachableTitle": "Nicht erreichbar",
+      "unreachableMessage": "{name} scheint gerade offline zu sein. Versuch es in einer Weile noch einmal.",
+      "busyTitle": "Besetzt",
+      "busyMessage": "{name} telefoniert gerade. Versuch es in einer Weile noch einmal.",
+      "cameraFailedTitle": "Kamera- oder Mikrofonproblem",
+      "cameraFailedMessage": "Der Anruf konnte die Kamera oder das Mikrofon dieses Geräts nicht nutzen. Prüfe, ob nichts anderes sie verwendet und Porchlight sie nutzen darf, und versuche es dann erneut."
     }
   },
   "contacts": {

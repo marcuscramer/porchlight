@@ -941,8 +941,9 @@ async function acquireLocalStream() {
       // A denied/unavailable camera would otherwise leave the user stranded
       // on the calling/incoming-call screen forever with no explanation —
       // failCallAttempt tears the attempt down and lets call-core's own
-      // NeverConnected outcome surface, same as any other reason this call
-      // never got anywhere.
+      // outcome surface — told first that it was this device's camera or
+      // microphone, so the message doesn't blame the network.
+      callCore.noteMediaFailure();
       failCallAttempt('camera/mic access failed', err);
     } finally {
       acquireLocalStreamPromise = null;
@@ -1929,6 +1930,12 @@ el('incomingAccept').addEventListener('click', () => { acceptIncomingCall(); });
 // connected") is call-core's decision; this maps each case to its strings.
 const CALL_OUTCOME_COPY = {
   peer_ended: ['call.outcome.peerEndedTitle', 'call.outcome.peerEndedMessage'],
+  declined: ['call.outcome.declinedTitle', 'call.outcome.declinedMessage'],
+  cancelled: ['call.outcome.cancelledTitle', 'call.outcome.cancelledMessage'],
+  no_answer: ['call.outcome.noAnswerTitle', 'call.outcome.noAnswerMessage'],
+  unreachable: ['call.outcome.unreachableTitle', 'call.outcome.unreachableMessage'],
+  busy: ['call.outcome.busyTitle', 'call.outcome.busyMessage'],
+  camera_failed: ['call.outcome.cameraFailedTitle', 'call.outcome.cameraFailedMessage'],
   never_connected: ['call.outcome.neverConnectedTitle', 'call.outcome.neverConnectedMessage'],
   udp_blocked: ['call.outcome.neverConnectedTitle', 'call.outcome.udpBlockedMessage'],
   no_direct_path: ['call.outcome.neverConnectedTitle', 'call.outcome.noDirectPathMessage'],

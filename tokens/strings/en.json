@@ -116,7 +116,19 @@
       "noDirectPathMessage": "The call with {name} couldn't connect directly. This usually means both of you are on networks that block direct connections, such as two phones on mobile data.",
       "udpBlockedMessage": "The call with {name} couldn't connect. This network seems to block the kind of traffic video calls need.",
       "droppedTitle": "Call dropped",
-      "droppedMessage": "The call with {name} disconnected unexpectedly — usually just a brief network issue."
+      "droppedMessage": "The call with {name} disconnected unexpectedly — usually just a brief network issue.",
+      "declinedTitle": "Call declined",
+      "declinedMessage": "{name} declined the call.",
+      "cancelledTitle": "Missed call",
+      "cancelledMessage": "{name} hung up before you answered.",
+      "noAnswerTitle": "No answer",
+      "noAnswerMessage": "{name} didn't answer the call.",
+      "unreachableTitle": "Not reachable",
+      "unreachableMessage": "{name} appears to be offline right now. Try again in a little while.",
+      "busyTitle": "Busy",
+      "busyMessage": "{name} is on another call right now. Try again in a little while.",
+      "cameraFailedTitle": "Camera or microphone problem",
+      "cameraFailedMessage": "The call couldn't use this device's camera or microphone. Check that nothing else is using them and that Porchlight is allowed to, then try again."
     }
   },
   "contacts": {

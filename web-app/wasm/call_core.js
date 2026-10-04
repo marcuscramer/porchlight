@@ -672,6 +672,13 @@ export function markSeen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms, pe
 }
 
 /**
+ * See [`crate::call_arbitration::note_media_failure`]'s own doc.
+ */
+export function noteMediaFailure() {
+    wasm.noteMediaFailure();
+}
+
+/**
  * See [`crate::relay_status::note_connect_error`]'s own doc.
  * @param {string} relay
  * @param {string} reason

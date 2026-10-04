@@ -245,11 +245,15 @@ impl CallSlot {
 pub(crate) struct CallState {
     slot: CallSlot,
     deferred_call: Option<DeferredCall>,
+    /// Set by [`note_media_failure`] for the call it was reported against;
+    /// read by [`peer_connection_closed`] so the outcome says "camera", not
+    /// "network". Only counts while that same call still holds the slot.
+    media_failed: Option<(String, String)>,
 }
 
 impl CallState {
     pub(crate) fn new() -> Self {
-        CallState { slot: CallSlot::Idle, deferred_call: None }
+        CallState { slot: CallSlot::Idle, deferred_call: None, media_failed: None }
     }
 }
 
@@ -333,14 +337,30 @@ pub enum CallEffect {
 }
 
 /// Why a call ended, for [`CallEffect::ShowCallOutcome`] — not every
-/// teardown path emits this (`hang_up`/`forget_pairing` never do).
-/// `PeerEnded` is the one case with an explicit signal (a real `"bye"`);
-/// the other two are distinguished only by `ActiveCall::connected_once`.
+/// teardown path emits this (`hang_up`/`forget_pairing` never do). Which
+/// reason applies comes from what the slot looked like at that moment
+/// (ringing or calling, whether an offer/answer was exchanged,
+/// `ActiveCall::connected_once`) and which signal arrived.
 #[derive(Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum CallOutcomeReason {
+    /// The other side hung up a call that was already underway.
     PeerEnded,
+    /// We were calling and they said no before anything was negotiated.
+    Declined,
+    /// We were ringing and they hung up before we answered (a missed call).
+    Cancelled,
+    /// We called and nothing ever answered, though the peer looked reachable.
+    NoAnswer,
+    /// We called and the peer isn't reachable (offline, or went offline).
+    Unreachable,
+    /// The peer is on another call.
+    Busy,
+    /// This device's own camera or microphone failed.
+    CameraFailed,
+    /// Both sides were there but the media never connected.
     NeverConnected,
+    /// Was connected, then lost.
     Dropped,
 }
 
@@ -750,9 +770,10 @@ pub fn hang_up() -> Vec<CallEffect> {
 /// On timeout: exactly [`hang_up`]'s own effects (`SendBye` covers the case
 /// where the peer *did* get the offer and is sitting there ringing; the
 /// timed-out side may as well tell them) plus
-/// [`CallEffect::ShowCallOutcome`] with `NeverConnected` — the one thing
-/// `hang_up` deliberately never emits, since here the person doesn't
-/// already know why.
+/// [`CallEffect::ShowCallOutcome`] — the one thing `hang_up` deliberately
+/// never emits, since here the person doesn't already know why: `Unreachable`
+/// for a peer that never came online, `NoAnswer` for one that was there but
+/// never answered, `NeverConnected` once an offer/answer was exchanged.
 pub fn check_call_timeout(now_ms: i64) -> Vec<CallEffect> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.call;
@@ -764,14 +785,25 @@ pub fn check_call_timeout(now_ms: i64) -> Vec<CallEffect> {
         return vec![];
     }
     let CallSlot::Claimed(active) = std::mem::replace(&mut state.slot, CallSlot::Idle) else { unreachable!() };
-    if state.deferred_call.as_ref().is_some_and(|d| d.pairing_id == active.pairing_id) {
+    let was_deferred = state.deferred_call.as_ref().is_some_and(|d| d.pairing_id == active.pairing_id);
+    if was_deferred {
         state.deferred_call = None;
     }
+    // Nothing ever came back from a peer that never showed up online:
+    // unreachable. Nothing came back from one that did: no answer. An
+    // offer or answer did get exchanged: the media is what failed.
+    let reason = if was_deferred {
+        CallOutcomeReason::Unreachable
+    } else if active.answer_applied || active.offer_applied {
+        CallOutcomeReason::NeverConnected
+    } else {
+        CallOutcomeReason::NoAnswer
+    };
     vec![
         CallEffect::ClearIncomingCallTimer,
         CallEffect::SendBye { pairing_id: active.pairing_id.clone(), call_id: active.call_id.clone() },
         CallEffect::ClosePeerConnection,
-        CallEffect::ShowCallOutcome { pairing_id: active.pairing_id, call_id: active.call_id, reason: CallOutcomeReason::NeverConnected },
+        CallEffect::ShowCallOutcome { pairing_id: active.pairing_id, call_id: active.call_id, reason },
     ]
 }
 
@@ -789,30 +821,36 @@ fn end_active_call_if_matching(state: &mut CallState, pairing_id: &str, call_id:
 
 /// Mirrors `onPeerHangup` — gated on **both** `pairing_id` and `call_id`
 /// matching. Same effects as [`hang_up`] minus `SendBye` (we don't bye a
-/// bye) plus [`CallEffect::ShowCallOutcome`] with
-/// [`CallOutcomeReason::PeerEnded`] — an explicit "bye" is the most
-/// specific signal available, reported regardless of
-/// `ActiveCall::connected_once`.
+/// bye) plus [`CallEffect::ShowCallOutcome`]: `Cancelled` if we were still
+/// ringing, `Declined` if we were calling and nothing had been exchanged,
+/// otherwise `PeerEnded` — an explicit "bye" is the most specific signal
+/// available, reported regardless of `ActiveCall::connected_once`.
 pub fn handle_peer_hangup(pairing_id: &str, call_id: &str) -> Vec<CallEffect> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.call;
+    // Read before the slot is cleared: what a "bye" means depends on what
+    // it ended.
+    let reason = match &state.slot {
+        CallSlot::Ringing(p) if p.pairing_id == pairing_id && p.call_id == call_id => CallOutcomeReason::Cancelled,
+        CallSlot::Claimed(a) if a.pairing_id == pairing_id && a.call_id == call_id && !a.connected_once && !a.answer_applied && !a.offer_applied => {
+            CallOutcomeReason::Declined
+        }
+        _ => CallOutcomeReason::PeerEnded,
+    };
     if !end_active_call_if_matching(state, pairing_id, call_id) {
         return vec![];
     }
     vec![
         CallEffect::ClearIncomingCallTimer,
-        CallEffect::ShowCallOutcome { pairing_id: pairing_id.to_string(), call_id: call_id.to_string(), reason: CallOutcomeReason::PeerEnded },
+        CallEffect::ShowCallOutcome { pairing_id: pairing_id.to_string(), call_id: call_id.to_string(), reason },
         CallEffect::ClosePeerConnection,
     ]
 }
 
 /// Mirrors receiving a `"busy"` reply to our own outgoing call attempt —
 /// releases the caller's own claimed slot (without this, the caller would
-/// be stuck on the calling screen with no way back to idle). Same gating
-/// as [`handle_peer_hangup`], but **deliberately no**
-/// [`CallEffect::ShowCallOutcome`] — a busy reply already has its own
-/// transient contact-badge UI; a full-screen "call ended" prompt on top
-/// would be misleading, since the callee isn't reachable at all right now.
+/// be stuck on the calling screen with no way back to idle) and says why
+/// with a `Busy` outcome. Same gating as [`handle_peer_hangup`].
 pub fn handle_peer_busy(pairing_id: &str, call_id: &str) -> Vec<CallEffect> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     inner_handle_peer_busy(&mut app.call, pairing_id, call_id)
@@ -822,16 +860,20 @@ pub(crate) fn inner_handle_peer_busy(state: &mut CallState, pairing_id: &str, ca
     if !end_active_call_if_matching(state, pairing_id, call_id) {
         return vec![];
     }
-    vec![CallEffect::ClearIncomingCallTimer, CallEffect::ClosePeerConnection]
+    vec![
+        CallEffect::ClearIncomingCallTimer,
+        CallEffect::ShowCallOutcome { pairing_id: pairing_id.to_string(), call_id: call_id.to_string(), reason: CallOutcomeReason::Busy },
+        CallEffect::ClosePeerConnection,
+    ]
 }
 
 /// Mirrors `onPeerLeft` — **no `call_id` check, unlike `bye`'s
 /// call_id-scoped guard**: a peer going fully offline ends *any* call with
 /// them regardless of which `call_id`. Confirmed intentional on both
-/// platforms, not a bug to fix. Reports [`CallOutcomeReason::NeverConnected`]
-/// or `::Dropped` based on `ActiveCall::connected_once` — the best signal
-/// available for a peer that vanished from presence without an explicit
-/// "bye".
+/// platforms, not a bug to fix. Reports `Dropped` for a call that had
+/// connected, `Cancelled` for one still ringing, and `Unreachable` for one we
+/// were still placing — the best signal available for a peer that vanished
+/// from presence without an explicit "bye".
 pub fn handle_peer_left(pairing_id: &str) -> Vec<CallEffect> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     inner_handle_peer_left(&mut app.call, pairing_id)
@@ -842,15 +884,15 @@ pub(crate) fn inner_handle_peer_left(state: &mut CallState, pairing_id: &str) ->
         return vec![];
     }
     let call_id = state.slot.call_id().unwrap_or_default().to_string();
-    let was_connected = matches!(&state.slot, CallSlot::Claimed(active) if active.connected_once);
+    let reason = match &state.slot {
+        CallSlot::Ringing(_) => CallOutcomeReason::Cancelled,
+        CallSlot::Claimed(active) if active.connected_once => CallOutcomeReason::Dropped,
+        _ => CallOutcomeReason::Unreachable,
+    };
     state.slot = CallSlot::Idle;
     vec![
         CallEffect::ClearIncomingCallTimer,
-        CallEffect::ShowCallOutcome {
-            pairing_id: pairing_id.to_string(),
-            call_id,
-            reason: if was_connected { CallOutcomeReason::Dropped } else { CallOutcomeReason::NeverConnected },
-        },
+        CallEffect::ShowCallOutcome { pairing_id: pairing_id.to_string(), call_id, reason },
         CallEffect::ClosePeerConnection,
     ]
 }
@@ -910,21 +952,45 @@ pub fn forget_pairing(pairing_id: &str) -> Vec<CallEffect> {
 pub fn peer_connection_closed() -> Vec<CallEffect> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.call;
+    let media_failed = state.media_failed.take();
+    let failed_here = |pairing_id: &str, call_id: &str| media_failed.as_ref().is_some_and(|(p, c)| p == pairing_id && c == call_id);
     match std::mem::replace(&mut state.slot, CallSlot::Idle) {
         CallSlot::Idle => vec![],
-        CallSlot::Ringing(pending) => vec![
-            CallEffect::SendBye { pairing_id: pending.pairing_id.clone(), call_id: pending.call_id.clone() },
-            CallEffect::ShowCallOutcome { pairing_id: pending.pairing_id, call_id: pending.call_id, reason: CallOutcomeReason::NeverConnected },
-        ],
-        CallSlot::Claimed(active) => vec![
-            CallEffect::SendBye { pairing_id: active.pairing_id.clone(), call_id: active.call_id.clone() },
-            CallEffect::ShowCallOutcome {
-                pairing_id: active.pairing_id,
-                call_id: active.call_id,
-                reason: if active.connected_once { CallOutcomeReason::Dropped } else { CallOutcomeReason::NeverConnected },
-            },
-        ],
+        CallSlot::Ringing(pending) => {
+            let reason = if failed_here(&pending.pairing_id, &pending.call_id) { CallOutcomeReason::CameraFailed } else { CallOutcomeReason::NeverConnected };
+            vec![
+                CallEffect::SendBye { pairing_id: pending.pairing_id.clone(), call_id: pending.call_id.clone() },
+                CallEffect::ShowCallOutcome { pairing_id: pending.pairing_id, call_id: pending.call_id, reason },
+            ]
+        }
+        CallSlot::Claimed(active) => {
+            let reason = if failed_here(&active.pairing_id, &active.call_id) {
+                CallOutcomeReason::CameraFailed
+            } else if active.connected_once {
+                CallOutcomeReason::Dropped
+            } else {
+                CallOutcomeReason::NeverConnected
+            };
+            vec![
+                CallEffect::SendBye { pairing_id: active.pairing_id.clone(), call_id: active.call_id.clone() },
+                CallEffect::ShowCallOutcome { pairing_id: active.pairing_id, call_id: active.call_id, reason },
+            ]
+        }
     }
+}
+
+/// The shell calls this when this device's own camera or microphone failed
+/// (a denied permission, a camera that errors or disconnects), *before* it
+/// closes the connection: the outcome then says so instead of blaming the
+/// network. Remembered for the call that holds the slot right now only; a
+/// no-op when there is none.
+pub fn note_media_failure() {
+    let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let state = &mut app.call;
+    state.media_failed = match (state.slot.pairing_id(), state.slot.call_id()) {
+        (Some(p), Some(c)) => Some((p.to_string(), c.to_string())),
+        _ => None,
+    };
 }
 
 /// Mirrors `onMediaFailure`'s `if (pc != null)` guard: a live call
@@ -1374,7 +1440,7 @@ mod tests {
                 CallEffect::ClearIncomingCallTimer,
                 CallEffect::SendBye { pairing_id: id.clone(), call_id: call_id.clone() },
                 CallEffect::ClosePeerConnection,
-                CallEffect::ShowCallOutcome { pairing_id: id, call_id, reason: CallOutcomeReason::NeverConnected },
+                CallEffect::ShowCallOutcome { pairing_id: id, call_id, reason: CallOutcomeReason::NoAnswer },
             ]
         );
         assert!(!any_call_wanted(), "the expired slot must actually clear, not just report effects");
@@ -1475,7 +1541,7 @@ mod tests {
             effects,
             vec![
                 CallEffect::ClearIncomingCallTimer,
-                CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::PeerEnded },
+                CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::Cancelled },
                 CallEffect::ClosePeerConnection,
             ]
         );
@@ -1491,7 +1557,7 @@ mod tests {
             effects,
             vec![
                 CallEffect::ClearIncomingCallTimer,
-                CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::NeverConnected },
+                CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::Cancelled },
                 CallEffect::ClosePeerConnection,
             ]
         );
@@ -1516,27 +1582,96 @@ mod tests {
 
     // --- CallEffect::ShowCallOutcome ---
 
-    #[test]
-    fn handle_peer_hangup_reports_peer_ended_regardless_of_connected_once() {
-        let _guard = reset_state_for_test();
-        // Without a prior mark_connected — still PeerEnded, not NeverConnected.
-        let id = fresh_id();
-        handle_should_offer(&id, "call1", "aaa", "bbb", false);
-        let effects = handle_peer_hangup(&id, "call1");
-        assert!(
-            matches!(effects.as_slice(), [_, CallEffect::ShowCallOutcome { reason: CallOutcomeReason::PeerEnded, .. }, _]),
-            "{effects:?}"
-        );
+    fn outcome_of(effects: &[CallEffect]) -> CallOutcomeReason {
+        effects
+            .iter()
+            .find_map(|e| match e {
+                CallEffect::ShowCallOutcome { reason, .. } => Some(reason.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no outcome in {effects:?}"))
+    }
 
-        // With a prior mark_connected — still PeerEnded, not Dropped: "bye" always wins.
-        let id2 = fresh_id();
-        handle_should_offer(&id2, "call2", "aaa", "bbb", false);
-        mark_connected(&id2, "call2");
-        let effects = handle_peer_hangup(&id2, "call2");
-        assert!(
-            matches!(effects.as_slice(), [_, CallEffect::ShowCallOutcome { reason: CallOutcomeReason::PeerEnded, .. }, _]),
-            "{effects:?}"
-        );
+    #[test]
+    fn a_bye_means_cancelled_declined_or_ended_depending_on_what_it_ended() {
+        let _guard = reset_state_for_test();
+        // We were ringing: the caller gave up (a missed call).
+        let ringing = fresh_id();
+        handle_should_offer(&ringing, "call1", "aaa", "bbb", false);
+        assert_eq!(outcome_of(&handle_peer_hangup(&ringing, "call1")), CallOutcomeReason::Cancelled);
+
+        // We were calling and nothing had been exchanged: they said no.
+        let calling = fresh_id();
+        let call_id = request_call(&calling, "aaa", "bbb", true, 0).call_id.unwrap();
+        assert_eq!(outcome_of(&handle_peer_hangup(&calling, &call_id)), CallOutcomeReason::Declined);
+
+        // Anything past that — an answer applied, or connected — is an ended call.
+        let answered = fresh_id();
+        let call_id = request_call(&answered, "aaa", "bbb", true, 0).call_id.unwrap();
+        assert!(should_apply_answer(&answered, &call_id));
+        assert_eq!(outcome_of(&handle_peer_hangup(&answered, &call_id)), CallOutcomeReason::PeerEnded);
+
+        let connected = fresh_id();
+        handle_should_offer(&connected, "call3", "aaa", "bbb", false);
+        accept_incoming_call(0);
+        mark_connected(&connected, "call3");
+        assert_eq!(outcome_of(&handle_peer_hangup(&connected, "call3")), CallOutcomeReason::PeerEnded);
+    }
+
+    #[test]
+    fn a_timeout_says_unreachable_no_answer_or_never_connected() {
+        let _guard = reset_state_for_test();
+        // The peer never showed up online.
+        let offline = fresh_id();
+        request_call(&offline, "aaa", "bbb", false, 0);
+        assert_eq!(outcome_of(&check_call_timeout(CALL_ANSWER_TIMEOUT_MS)), CallOutcomeReason::Unreachable);
+
+        // The peer was online and nothing came back.
+        let silent = fresh_id();
+        request_call(&silent, "aaa", "bbb", true, 0);
+        assert_eq!(outcome_of(&check_call_timeout(CALL_ANSWER_TIMEOUT_MS)), CallOutcomeReason::NoAnswer);
+
+        // They answered, but the media never came up.
+        let answered = fresh_id();
+        let call_id = request_call(&answered, "aaa", "bbb", true, 0).call_id.unwrap();
+        should_apply_answer(&answered, &call_id);
+        assert_eq!(outcome_of(&check_call_timeout(CALL_ANSWER_TIMEOUT_MS)), CallOutcomeReason::NeverConnected);
+    }
+
+    #[test]
+    fn a_camera_failure_is_reported_as_one_not_as_a_network_problem() {
+        let _guard = reset_state_for_test();
+        let id = fresh_id();
+        request_call(&id, "aaa", "bbb", true, 0);
+        note_media_failure();
+        assert_eq!(outcome_of(&peer_connection_closed()), CallOutcomeReason::CameraFailed);
+
+        // Also while ringing, and also after having connected.
+        let ringing = fresh_id();
+        handle_should_offer(&ringing, "call1", "aaa", "bbb", false);
+        note_media_failure();
+        assert_eq!(outcome_of(&peer_connection_closed()), CallOutcomeReason::CameraFailed);
+        let connected = fresh_id();
+        handle_should_offer(&connected, "call2", "aaa", "bbb", false);
+        accept_incoming_call(0);
+        mark_connected(&connected, "call2");
+        note_media_failure();
+        assert_eq!(outcome_of(&peer_connection_closed()), CallOutcomeReason::CameraFailed);
+    }
+
+    #[test]
+    fn a_camera_failure_does_not_leak_into_the_next_call() {
+        let _guard = reset_state_for_test();
+        let first = fresh_id();
+        request_call(&first, "aaa", "bbb", true, 0);
+        note_media_failure();
+        hang_up(); // the call ended some other way first
+        let second = fresh_id();
+        request_call(&second, "aaa", "bbb", true, 0);
+        assert_eq!(outcome_of(&peer_connection_closed()), CallOutcomeReason::NeverConnected);
+        // With no call at all it is a no-op.
+        note_media_failure();
+        assert!(peer_connection_closed().is_empty());
     }
 
     #[test]
@@ -1579,8 +1714,15 @@ mod tests {
         // (waiting-for-answer) branch.
         let result = request_call(&id, "bbb", "aaa", true, 0);
         assert_eq!(result.effects, vec![CallEffect::AcquireMedia, CallEffect::SendCall { pairing_id: id.clone(), call_id: result.call_id.clone().unwrap() }]);
-        let effects = handle_peer_busy(&id, &result.call_id.unwrap());
-        assert_eq!(effects, vec![CallEffect::ClearIncomingCallTimer, CallEffect::ClosePeerConnection]);
+        let effects = handle_peer_busy(&id, result.call_id.as_deref().unwrap());
+        assert_eq!(
+            effects,
+            vec![
+                CallEffect::ClearIncomingCallTimer,
+                CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: result.call_id.clone().unwrap(), reason: CallOutcomeReason::Busy },
+                CallEffect::ClosePeerConnection,
+            ]
+        );
         // The slot must actually be free again -- a fresh call attempt to
         // a different pairing must not be rejected as "already busy".
         let other_id = fresh_id();
