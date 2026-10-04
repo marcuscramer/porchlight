@@ -226,7 +226,7 @@ export const STRINGS = {
     "pairing.phaseConnecting": "Verbindung zu den Relays…",
     "pairing.phaseFound": "Gerät gefunden – wird überprüft…",
     "pairing.progressRelays": "Mit {connected} von {total} Relays verbunden",
-    "pairing.progressCancelsIn": "Wird automatisch abgebrochen in {left}",
+    "pairing.progressCancelsIn": "Automatischer Abbruch in {left}",
     "call.callingLabel": "Anruf läuft",
     "call.connectingLabel": "Verbindet",
     "call.incomingCallFrom": "Eingehender Anruf von",
