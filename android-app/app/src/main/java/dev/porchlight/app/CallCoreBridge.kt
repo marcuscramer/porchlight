@@ -211,13 +211,25 @@ object CallCoreBridge {
     private external fun nativeDueForRetry(nowMs: Long): String
 
     @JvmStatic
-    private external fun nativeExportRelayCooldowns(nowMs: Long): String
+    private external fun nativeExportRelayMemory(nowMs: Long): String
 
     @JvmStatic
-    private external fun nativeImportRelayCooldowns(json: String, nowMs: Long)
+    private external fun nativeImportRelayMemory(json: String, nowMs: Long)
 
     @JvmStatic
-    private external fun nativeRelayStats(): String
+    private external fun nativeNoteRelayMessage(relay: String, nowMs: Long)
+
+    @JvmStatic
+    private external fun nativeNoteRelayConnected(relay: String)
+
+    @JvmStatic
+    private external fun nativeNoteRelayConnectError(relay: String, reason: String, atMs: Long)
+
+    @JvmStatic
+    private external fun nativeRelayView(relaysJson: String, connectedJson: String, nowMs: Long): String
+
+    @JvmStatic
+    private external fun nativeAgo(atMs: Long, nowMs: Long): String
 
     /** What starting a new attempt hands back — see the Rust crate's own
      * `StartResult` doc. [generation] must be passed back verbatim to
@@ -667,19 +679,60 @@ object CallCoreBridge {
         }
     }
 
-    /** See the Rust crate's own `signal_retry::export_cooldowns` doc: the
-     * relay cooldowns still running, as JSON to keep across restarts. */
-    fun exportRelayCooldowns(nowMs: Long): String = nativeExportRelayCooldowns(nowMs)
+    /** See the Rust crate's own `relay_status::export_memory` doc: the relay
+     * cooldowns still running and each relay's last rejection, as JSON to
+     * keep across restarts. */
+    fun exportRelayMemory(nowMs: Long): String = nativeExportRelayMemory(nowMs)
 
-    /** Restores what [exportRelayCooldowns] returned. */
-    fun importRelayCooldowns(json: String, nowMs: Long) = nativeImportRelayCooldowns(json, nowMs)
+    /** Restores what [exportRelayMemory] returned. */
+    fun importRelayMemory(json: String, nowMs: Long) = nativeImportRelayMemory(json, nowMs)
 
-    data class RelayStats(val accepted: Int, val rejected: Int)
+    fun noteRelayMessage(relay: String, nowMs: Long) = nativeNoteRelayMessage(relay, nowMs)
 
-    /** How many publishes each relay (keyed by URL) has accepted / rejected since start. */
-    fun relayStats(): Map<String, RelayStats> {
-        val obj = JSONObject(nativeRelayStats())
-        return obj.keys().asSequence().associateWith { url -> obj.getJSONObject(url).let { RelayStats(it.getInt("accepted"), it.getInt("rejected")) } }
+    fun noteRelayConnected(relay: String) = nativeNoteRelayConnected(relay)
+
+    fun noteRelayConnectError(relay: String, reason: String, atMs: Long) = nativeNoteRelayConnectError(relay, reason, atMs)
+
+    /** See the Rust crate's own `relay_status::Ago` doc. */
+    sealed interface Ago {
+        data object Never : Ago
+        data class Seconds(val n: Long) : Ago
+        data class Minutes(val n: Long) : Ago
+        data class Hours(val n: Long) : Ago
+    }
+
+    private fun parseAgo(obj: JSONObject): Ago = when (val unit = obj.getString("unit")) {
+        "never" -> Ago.Never
+        "seconds" -> Ago.Seconds(obj.getLong("n"))
+        "minutes" -> Ago.Minutes(obj.getLong("n"))
+        "hours" -> Ago.Hours(obj.getLong("n"))
+        else -> error("CallCoreBridge: unknown ago unit from native layer: $unit")
+    }
+
+    /** How long ago [atMs] was ([null] → never). */
+    fun ago(atMs: Long?, nowMs: Long): Ago = parseAgo(JSONObject(nativeAgo(atMs ?: -1, nowMs)))
+
+    /** What the dot says: green connected, yellow paused after a rejection, red down. */
+    enum class RelayState { CONNECTED, PAUSED, DOWN }
+
+    /** One relay as the Connection info screen shows it — see the Rust
+     * crate's own `relay_status::RelayView` doc. */
+    data class RelayView(val url: String, val host: String, val state: RelayState, val accepted: Int, val rejected: Int, val error: String?, val ago: Ago)
+
+    fun relayView(relays: List<String>, connected: Collection<String>, nowMs: Long): List<RelayView> {
+        val array = JSONArray(nativeRelayView(JSONArray(relays).toString(), JSONArray(connected).toString(), nowMs))
+        return (0 until array.length()).map { i ->
+            val o = array.getJSONObject(i)
+            RelayView(
+                o.getString("url"),
+                o.getString("host"),
+                RelayState.valueOf(o.getString("state").uppercase()),
+                o.getInt("accepted"),
+                o.getInt("rejected"),
+                if (o.isNull("error")) null else o.getString("error"),
+                parseAgo(o.getJSONObject("ago")),
+            )
+        }
     }
 
     /** Mirrors `currentFilters`'s exact filter-set construction — see the

@@ -133,7 +133,11 @@ impl SignalRetryState {
         SignalRetryState { pending: VecDeque::new(), cooldown_until_ms: HashMap::new(), stats: HashMap::new() }
     }
 
-    fn is_cooling_down(&self, relay: &str, now_ms: i64) -> bool {
+    pub(crate) fn stats_for(&self, relay: &str) -> Option<RelayStats> {
+        self.stats.get(relay).copied()
+    }
+
+    pub(crate) fn is_cooling_down(&self, relay: &str, now_ms: i64) -> bool {
         self.cooldown_until_ms.get(relay).is_some_and(|&until| until > now_ms)
     }
 }
@@ -220,8 +224,11 @@ pub fn record_pending_publish(event_id: &str, event_json: &str, payload_json: &s
 /// or whatever the shell's library surfaces for a rejection; empty is fine.
 pub fn record_publish_result(event_id: &str, relay: &str, accepted: bool, reason: &str, now_ms: i64) {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
-    let state = &mut app.signal_retry;
     let resolved = accepted || reason.to_lowercase().contains("duplicate:");
+    if !resolved {
+        app.relay_log.note_reject(relay.trim_end_matches('/'), reason, now_ms);
+    }
+    let state = &mut app.signal_retry;
     let stats = state.stats.entry(relay.to_string()).or_default();
     if resolved {
         stats.accepted = stats.accepted.saturating_add(1);
@@ -254,7 +261,7 @@ pub fn record_publish_result(event_id: &str, relay: &str, accepted: bool, reason
 /// end time (ms since epoch), for the shell to keep across restarts: without
 /// that every app start or page reload would poke relays that rejected a
 /// moment ago all over again.
-pub fn export_cooldowns(now_ms: i64) -> String {
+pub(crate) fn export_cooldowns(now_ms: i64) -> String {
     let app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let active: std::collections::BTreeMap<&String, &i64> = app.signal_retry.cooldown_until_ms.iter().filter(|(_, &until)| until > now_ms).collect();
     serde_json::to_string(&active).unwrap_or_else(|_| "{}".to_string())
@@ -263,7 +270,7 @@ pub fn export_cooldowns(now_ms: i64) -> String {
 /// Restores cooldowns saved by [`export_cooldowns`]. Entries already over, or
 /// further out than `MAX_IMPORTED_COOLDOWN_MS`, and anything malformed are
 /// ignored; an existing longer cooldown is kept.
-pub fn import_cooldowns(json: &str, now_ms: i64) {
+pub(crate) fn import_cooldowns(json: &str, now_ms: i64) {
     let Ok(saved) = serde_json::from_str::<HashMap<String, i64>>(json) else { return };
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     for (relay, until) in saved {
@@ -314,7 +321,7 @@ pub fn due_for_retry(now_ms: i64) -> Vec<PendingRetry> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
 
@@ -329,7 +336,7 @@ mod tests {
     /// clean slate and returns the serialization guard above — held by the
     /// caller for its test's whole duration (`let _guard = ...`), same
     /// pattern as [`crate::presence::tests::reset_state_for_test`].
-    fn reset_state_for_test() -> std::sync::MutexGuard<'static, ()> {
+    pub(crate) fn reset_state_for_test() -> std::sync::MutexGuard<'static, ()> {
         let guard = TEST_SERIAL.lock().unwrap_or_else(|p| p.into_inner());
         crate::STATE.lock().unwrap_or_else(|p| p.into_inner()).signal_retry = SignalRetryState::new();
         guard

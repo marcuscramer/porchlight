@@ -537,24 +537,56 @@ pub fn available_relays(candidates: Vec<String>, now_ms: f64) -> Vec<String> {
     catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::available_relays(&candidates, now_ms as i64))).unwrap_or_default()
 }
 
-/// See [`crate::signal_retry::export_cooldowns`]'s own doc. A JSON object of
-/// relay URL -> cooldown end (ms since epoch); `"{}"` on a panic.
-#[wasm_bindgen(js_name = exportRelayCooldowns)]
-pub fn export_relay_cooldowns(now_ms: f64) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::export_cooldowns(now_ms as i64))).unwrap_or_else(|_| "{}".to_string())
+/// See [`crate::relay_status::export_memory`]'s own doc. A JSON object; `"{}"`
+/// on a panic.
+#[wasm_bindgen(js_name = exportRelayMemory)]
+pub fn export_relay_memory(now_ms: f64) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| crate::relay_status::export_memory(now_ms as i64))).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// See [`crate::signal_retry::import_cooldowns`]'s own doc. No return value;
+/// See [`crate::relay_status::import_memory`]'s own doc. No return value;
 /// malformed input or a panic is a silent no-op.
-#[wasm_bindgen(js_name = importRelayCooldowns)]
-pub fn import_relay_cooldowns(json: &str, now_ms: f64) {
-    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::import_cooldowns(json, now_ms as i64)));
+#[wasm_bindgen(js_name = importRelayMemory)]
+pub fn import_relay_memory(json: &str, now_ms: f64) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::relay_status::import_memory(json, now_ms as i64)));
 }
 
-/// See [`crate::signal_retry::relay_stats_json`]'s own doc. `"{}"` on a panic.
-#[wasm_bindgen(js_name = relayStats)]
-pub fn relay_stats() -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(crate::signal_retry::relay_stats_json)).unwrap_or_else(|_| "{}".to_string())
+/// See [`crate::relay_status::note_message`]'s own doc.
+#[wasm_bindgen(js_name = noteRelayMessage)]
+pub fn note_relay_message(relay: &str, now_ms: f64) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::relay_status::note_message(relay, now_ms as i64)));
+}
+
+/// See [`crate::relay_status::note_connected`]'s own doc.
+#[wasm_bindgen(js_name = noteRelayConnected)]
+pub fn note_relay_connected(relay: &str) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::relay_status::note_connected(relay)));
+}
+
+/// See [`crate::relay_status::note_connect_error`]'s own doc.
+#[wasm_bindgen(js_name = noteRelayConnectError)]
+pub fn note_relay_connect_error(relay: &str, reason: &str, at_ms: f64) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::relay_status::note_connect_error(relay, reason, at_ms as i64)));
+}
+
+/// See [`crate::relay_status::view`]'s own doc. Returns a JSON array of
+/// [`crate::relay_status::RelayView`]; `"[]"` on a panic.
+#[wasm_bindgen(js_name = relayView)]
+pub fn relay_view(relays: Vec<String>, connected: Vec<String>, now_ms: f64) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::relay_status::view(&relays, &connected, now_ms as i64)).unwrap_or_default()))
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "[]".to_string())
+}
+
+/// See [`crate::relay_status::ago`]'s own doc. `at_ms` is `undefined` for "no
+/// time". Returns a JSON-encoded [`crate::relay_status::Ago`].
+#[wasm_bindgen(js_name = ago)]
+pub fn ago(at_ms: Option<f64>, now_ms: f64) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::relay_status::ago(at_ms.map(|ms| ms as i64), now_ms as i64)).unwrap_or_default()))
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| r#"{"unit":"never"}"#.to_string())
 }
 
 /// See [`crate::signal_retry::due_for_retry`]'s own doc. Returns a

@@ -21,6 +21,26 @@ export function acceptIncomingCall(now_ms) {
 }
 
 /**
+ * See [`crate::relay_status::ago`]'s own doc. `at_ms` is `undefined` for "no
+ * time". Returns a JSON-encoded [`crate::relay_status::Ago`].
+ * @param {number | null | undefined} at_ms
+ * @param {number} now_ms
+ * @returns {string}
+ */
+export function ago(at_ms, now_ms) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.ago(!isLikeNone(at_ms), isLikeNone(at_ms) ? 0 : at_ms, now_ms);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * See [`crate::signal_retry::available_relays`]'s own doc. Falls back to
  * "no relays" on a panic — every skipped relay is recorded as a miss by the
  * caller and retried, so nothing is lost.
@@ -411,16 +431,16 @@ export function dueForRetry(now_ms) {
 }
 
 /**
- * See [`crate::signal_retry::export_cooldowns`]'s own doc. A JSON object of
- * relay URL -> cooldown end (ms since epoch); `"{}"` on a panic.
+ * See [`crate::relay_status::export_memory`]'s own doc. A JSON object; `"{}"`
+ * on a panic.
  * @param {number} now_ms
  * @returns {string}
  */
-export function exportRelayCooldowns(now_ms) {
+export function exportRelayMemory(now_ms) {
     let deferred1_0;
     let deferred1_1;
     try {
-        const ret = wasm.exportRelayCooldowns(now_ms);
+        const ret = wasm.exportRelayMemory(now_ms);
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -584,15 +604,15 @@ export function iceReset() {
 }
 
 /**
- * See [`crate::signal_retry::import_cooldowns`]'s own doc. No return value;
+ * See [`crate::relay_status::import_memory`]'s own doc. No return value;
  * malformed input or a panic is a silent no-op.
  * @param {string} json
  * @param {number} now_ms
  */
-export function importRelayCooldowns(json, now_ms) {
+export function importRelayMemory(json, now_ms) {
     const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    wasm.importRelayCooldowns(ptr0, len0, now_ms);
+    wasm.importRelayMemory(ptr0, len0, now_ms);
 }
 
 /**
@@ -685,6 +705,41 @@ export function markSeen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms, pe
     } finally {
         wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
+}
+
+/**
+ * See [`crate::relay_status::note_connect_error`]'s own doc.
+ * @param {string} relay
+ * @param {string} reason
+ * @param {number} at_ms
+ */
+export function noteRelayConnectError(relay, reason, at_ms) {
+    const ptr0 = passStringToWasm0(relay, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(reason, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    wasm.noteRelayConnectError(ptr0, len0, ptr1, len1, at_ms);
+}
+
+/**
+ * See [`crate::relay_status::note_connected`]'s own doc.
+ * @param {string} relay
+ */
+export function noteRelayConnected(relay) {
+    const ptr0 = passStringToWasm0(relay, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.noteRelayConnected(ptr0, len0);
+}
+
+/**
+ * See [`crate::relay_status::note_message`]'s own doc.
+ * @param {string} relay
+ * @param {number} now_ms
+ */
+export function noteRelayMessage(relay, now_ms) {
+    const ptr0 = passStringToWasm0(relay, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.noteRelayMessage(ptr0, len0, now_ms);
 }
 
 /**
@@ -809,19 +864,27 @@ export function recordPublishResult(event_id, relay, accepted, reason, now_ms) {
 }
 
 /**
- * See [`crate::signal_retry::relay_stats_json`]'s own doc. `"{}"` on a panic.
+ * See [`crate::relay_status::view`]'s own doc. Returns a JSON array of
+ * [`crate::relay_status::RelayView`]; `"[]"` on a panic.
+ * @param {string[]} relays
+ * @param {string[]} connected
+ * @param {number} now_ms
  * @returns {string}
  */
-export function relayStats() {
-    let deferred1_0;
-    let deferred1_1;
+export function relayView(relays, connected, now_ms) {
+    let deferred3_0;
+    let deferred3_1;
     try {
-        const ret = wasm.relayStats();
-        deferred1_0 = ret[0];
-        deferred1_1 = ret[1];
+        const ptr0 = passArrayJsValueToWasm0(relays, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayJsValueToWasm0(connected, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.relayView(ptr0, len0, ptr1, len1, now_ms);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
-        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
     }
 }
 

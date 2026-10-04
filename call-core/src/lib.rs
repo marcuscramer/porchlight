@@ -41,6 +41,7 @@
 //! - `signal_router` — the single entry point for an incoming relay event:
 //!   dedup, unwrap/verify, parse, presence and per-message decisions, returned
 //!   as one ordered result for the shell to execute;
+//! - `relay_status` — what the Connection info screens say about each relay;
 //! - `call_ui` — which phase a call is in (ringing/calling/connecting/live/
 //!   outcome) and which text an ended call gets;
 //! - `wake_up` — the step-by-step decisions for getting the call screen in
@@ -73,6 +74,8 @@ pub mod signal_router;
 pub mod call_ui;
 
 pub mod signal_retry;
+
+pub mod relay_status;
 
 pub mod ice_evidence;
 
@@ -189,6 +192,7 @@ struct AppState {
     call: call_arbitration::CallState,
     dedup: nostr_protocol::DedupState,
     signal_retry: signal_retry::SignalRetryState,
+    relay_log: relay_status::RelayLogState,
     ice: ice_evidence::IceState,
 }
 
@@ -200,6 +204,7 @@ impl AppState {
             call: call_arbitration::CallState::new(),
             dedup: nostr_protocol::DedupState::new(),
             signal_retry: signal_retry::SignalRetryState::new(),
+            relay_log: relay_status::RelayLogState::new(),
             ice: ice_evidence::IceState::new(),
         }
     }

@@ -91,7 +91,6 @@ const PAKE_LIVE_WINDOW_MS = PROTOCOL_CONSTANTS.pake_live_window_ms;
 
 const DEVICE_NAME_STORAGE_KEY = 'porchlight-device-name';
 const RELAY_COOLDOWNS_STORAGE_KEY = 'porchlight-relay-cooldowns';
-const RELAY_REJECTS_STORAGE_KEY = 'porchlight-relay-rejects';
 const HEARTBEAT_SPREAD_MS = 400;
 const PAIRINGS_STORAGE_KEY = 'porchlight-pairings';
 
@@ -288,22 +287,20 @@ function resubscribe() {
 // come from the sockets themselves: a plain WebSocket that records what
 // happens to it. Browsers keep a failed handshake's HTTP status to themselves,
 // so the reason is only what the socket events carry.
-const relayLastMessageAt = new Map();
-const relayConnectError = new Map(); // why a relay is not connected; cleared once it connects
 class TrackedWebSocket extends WebSocket {
   constructor(url, ...rest) {
     super(url, ...rest);
     const key = String(url).replace(/\/$/, '');
-    this.addEventListener('message', () => relayLastMessageAt.set(key, Date.now()));
-    this.addEventListener('open', () => relayConnectError.delete(key));
-    this.addEventListener('error', () => relayConnectError.set(key, { reason: 'connection failed', at: Date.now() }));
+    let failedAt = 0;
+    this.addEventListener('message', () => callCore.noteRelayMessage(key, Date.now()));
+    this.addEventListener('open', () => callCore.noteRelayConnected(key));
+    this.addEventListener('error', () => { failedAt = Date.now(); callCore.noteRelayConnectError(key, 'connection failed', failedAt); });
     this.addEventListener('close', (e) => {
       // A failed handshake fires 'error' then 'close': keep it one entry, with the code.
-      const prev = relayConnectError.get(key);
-      if (prev && prev.reason === 'connection failed' && Date.now() - prev.at < 2000) {
-        relayConnectError.set(key, { reason: `connection failed (code ${e.code})`, at: prev.at });
+      if (failedAt && Date.now() - failedAt < 2000) {
+        callCore.noteRelayConnectError(key, `connection failed (code ${e.code})`, failedAt);
       } else {
-        relayConnectError.set(key, { reason: `closed (code ${e.code}${e.reason ? ': ' + e.reason : ''})`, at: Date.now() });
+        callCore.noteRelayConnectError(key, `closed (code ${e.code}${e.reason ? ': ' + e.reason : ''})`, Date.now());
       }
     });
   }
@@ -313,10 +310,7 @@ function connectRelayClient() {
   // Relays that rejected us recently stay paused across a reload instead of
   // being poked again right away (see call-core's signal_retry).
   try {
-    callCore.importRelayCooldowns(localStorage.getItem(RELAY_COOLDOWNS_STORAGE_KEY) || '{}', Date.now());
-    for (const [url, reject] of Object.entries(JSON.parse(localStorage.getItem(RELAY_REJECTS_STORAGE_KEY) || '{}'))) {
-      if (reject && typeof reject.reason === 'string' && Number.isFinite(reject.at) && !relayLastReject.has(url)) relayLastReject.set(url, reject);
-    }
+    callCore.importRelayMemory(localStorage.getItem(RELAY_COOLDOWNS_STORAGE_KEY) || '{}', Date.now());
   } catch { /* storage unavailable or unreadable: start clean */ }
   // enableReconnect: nostr-tools' SimplePool defaults this to false — once
   // any relay connection fails or drops, it just gives up on that relay
@@ -428,18 +422,14 @@ function applyPresenceUpdate(json) {
 }
 
 // What the "Connection info" screen shows that nothing else tracks: when
-// the last heartbeat went out and each relay's most recent rejection of a
-// publish.
+// the last heartbeat went out.
 let lastHeartbeatSentAt = null;
-const relayLastReject = new Map();
 const expandedRelayRows = new Set(); // relay rows tapped open to show the full message
 function recordResult(eventId, relay, accepted, reason, now) {
   callCore.recordPublishResult(eventId, relay, accepted, reason, now);
   if (accepted) return;
-  relayLastReject.set(relay, { reason, at: now });
   try {
-    localStorage.setItem(RELAY_COOLDOWNS_STORAGE_KEY, callCore.exportRelayCooldowns(now));
-    localStorage.setItem(RELAY_REJECTS_STORAGE_KEY, JSON.stringify(Object.fromEntries(relayLastReject)));
+    localStorage.setItem(RELAY_COOLDOWNS_STORAGE_KEY, callCore.exportRelayMemory(now));
   } catch { /* storage unavailable */ }
 }
 
@@ -1685,11 +1675,16 @@ el('connectionBack').addEventListener('click', () => { screen = 'settings'; rend
 let connectionRefreshTimer = null;
 
 function agoText(atMs, now) {
-  if (atMs == null) return t('connectionInfo.never');
-  const seconds = Math.max(0, Math.floor((now - atMs) / 1000));
-  if (seconds < 60) return t('connectionInfo.agoSeconds', { seconds });
-  if (seconds < 3600) return t('connectionInfo.agoMinutes', { minutes: Math.floor(seconds / 60) });
-  return t('connectionInfo.agoHours', { hours: Math.floor(seconds / 3600) });
+  return formatAgo(JSON.parse(callCore.ago(atMs ?? undefined, now)));
+}
+
+function formatAgo(ago) {
+  switch (ago.unit) {
+    case 'seconds': return t('connectionInfo.agoSeconds', { seconds: ago.n });
+    case 'minutes': return t('connectionInfo.agoMinutes', { minutes: ago.n });
+    case 'hours': return t('connectionInfo.agoHours', { hours: ago.n });
+    default: return t('connectionInfo.never');
+  }
 }
 
 function renderConnectionScreen() {
@@ -1703,31 +1698,22 @@ function renderConnectionScreen() {
   row(t('connectionInfo.network'), online ? t('connectionInfo.networkOther') : t('connectionInfo.networkOffline'), online ? 'ok' : 'bad');
 
   // The pool keys relays by their normalized URL (a trailing slash), RELAYS
-  // doesn't have one — compare without it.
-  const status = new Map();
-  if (pool) for (const [url, connected] of pool.listConnectionStatus()) status.set(url.replace(/\/$/, ''), connected);
-  const usable = new Set(callCore.availableRelays(RELAYS, now));
-  const up = RELAYS.filter((url) => status.get(url)).length;
+  // doesn't have one — call-core compares without it. Which dot, which error,
+  // how it is trimmed and how long ago all come from call-core.
+  const connectedUrls = pool ? [...pool.listConnectionStatus()].filter(([, up]) => up).map(([url]) => url) : [];
+  const views = JSON.parse(callCore.relayView(RELAYS, connectedUrls, now));
+  const up = views.filter((v) => v.state !== 'down').length;
   row(t('connectionInfo.relays'), t('connectionInfo.relaysSummary', { up, total: RELAYS.length }), up > 0 ? 'ok' : 'bad');
-  const stats = JSON.parse(callCore.relayStats());
-  for (const url of RELAYS) {
-    const connected = !!status.get(url);
-    const paused = !usable.has(url);
-    const reject = relayLastReject.get(url);
-    const count = stats[url] || { accepted: 0, rejected: 0 };
-    // The dot says it: green = connected and in use, yellow = connected but
-    // paused after a rejection, red = not connected.
-    const dot = { cls: !connected ? 'danger' : paused ? 'busy' : 'ok', label: connected ? t('connectionInfo.relayConnected') : t('connectionInfo.relayNotConnected') };
-    // Not connected: why. Connected but paused: the rejection behind the pause.
-    const error = connected ? (paused ? reject : null) : (relayConnectError.get(url) || reject);
-    const counts = t('connectionInfo.relayCounts', { accepted: count.accepted, rejected: count.rejected });
-    const name = url.replace(/^wss?:\/\//, '').replace(/\/$/, '');
+  for (const v of views) {
+    const dot = { cls: { connected: 'ok', paused: 'busy', down: 'danger' }[v.state], label: v.state === 'down' ? t('connectionInfo.relayNotConnected') : t('connectionInfo.relayConnected') };
+    const counts = t('connectionInfo.relayCounts', { accepted: v.accepted, rejected: v.rejected });
+    const when = formatAgo(v.ago);
     rows.push({
-      label: name,
+      label: v.host,
       dot,
-      id: name,
-      text: error ? `${counts} · ${agoText(error.at, now)}: ` : `${counts} · ${agoText(relayLastMessageAt.get(url) ?? null, now)}`,
-      italic: error ? error.reason.replace(/^Error:\s*/, '') : '',
+      id: v.host,
+      text: v.error ? `${counts} · ${when}: ` : `${counts} · ${when}`,
+      italic: v.error || '',
     });
   }
 

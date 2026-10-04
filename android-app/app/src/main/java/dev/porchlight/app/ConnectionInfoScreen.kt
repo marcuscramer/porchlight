@@ -66,35 +66,31 @@ internal fun ConnectionInfoScreen(
             InfoRow(stringResource(R.string.connectionInfo_network), stringResource(network.textRes), if (network.good) OK else BAD)
 
             val relays = snapshot?.relays.orEmpty()
-            val up = relays.count { it.connected }
+            val up = relays.count { it.state != CallCoreBridge.RelayState.DOWN }
             InfoRow(
                 stringResource(R.string.connectionInfo_relays),
                 stringResource(R.string.connectionInfo_relaysSummary, up, relays.size),
                 if (up > 0) OK else BAD,
             )
             for (relay in relays) {
-                // The dot says it: green = connected and in use, yellow = connected
-                // but paused after a rejection, red = not connected.
-                val dot = when {
-                    !relay.connected -> BAD
-                    relay.backingOff -> WARN
-                    else -> OK
+                val dot = when (relay.state) {
+                    CallCoreBridge.RelayState.DOWN -> BAD
+                    CallCoreBridge.RelayState.PAUSED -> WARN
+                    CallCoreBridge.RelayState.CONNECTED -> OK
                 }
-                val dotDescription = stringResource(if (relay.connected) R.string.connectionInfo_relayConnected else R.string.connectionInfo_relayNotConnected)
+                val dotDescription = stringResource(if (relay.state == CallCoreBridge.RelayState.DOWN) R.string.connectionInfo_relayNotConnected else R.string.connectionInfo_relayConnected)
                 val counts = stringResource(R.string.connectionInfo_relayCounts, relay.accepted, relay.rejected)
-                val showError = relay.lastError != null && relay.lastErrorAtMs != null && (!relay.connected || relay.backingOff)
-                val whenText = ago(if (showError) relay.lastErrorAtMs else relay.lastMessageAtMs, now)
                 val detail = buildAnnotatedString {
-                    append("$counts · $whenText")
-                    if (showError) {
+                    append("$counts · ${agoText(relay.ago)}")
+                    if (relay.error != null) {
                         append(": ")
-                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(relay.lastError!!.substringBefore(". Exception:").take(200)) }
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(relay.error) }
                     }
                 }
                 RelayRow(relay.host, detail, dot, dotDescription)
             }
 
-            InfoRow(stringResource(R.string.connectionInfo_lastHeartbeat), ago(snapshot?.lastHeartbeatSentAtMs, now))
+            InfoRow(stringResource(R.string.connectionInfo_lastHeartbeat), agoText(CallCoreBridge.ago(snapshot?.lastHeartbeatSentAtMs, now)))
             val peers = state.contacts.filter { it.isPaired }
             InfoRow(
                 stringResource(R.string.connectionInfo_contactsOnline),
@@ -143,16 +139,13 @@ private fun networkStatus(context: Context): NetworkStatus {
     return NetworkStatus(res, true)
 }
 
-/** "3 s ago" / "2 min ago" / "1 h ago", or "never". */
+/** "3 s ago" / "2 min ago" / "1 h ago", or "never" — the buckets are `call-core`'s. */
 @Composable
-private fun ago(atMs: Long?, now: Long): String {
-    if (atMs == null) return stringResource(R.string.connectionInfo_never)
-    val seconds = ((now - atMs) / 1_000).coerceAtLeast(0)
-    return when {
-        seconds < 60 -> stringResource(R.string.connectionInfo_agoSeconds, seconds)
-        seconds < 3_600 -> stringResource(R.string.connectionInfo_agoMinutes, seconds / 60)
-        else -> stringResource(R.string.connectionInfo_agoHours, seconds / 3_600)
-    }
+private fun agoText(ago: CallCoreBridge.Ago): String = when (ago) {
+    CallCoreBridge.Ago.Never -> stringResource(R.string.connectionInfo_never)
+    is CallCoreBridge.Ago.Seconds -> stringResource(R.string.connectionInfo_agoSeconds, ago.n)
+    is CallCoreBridge.Ago.Minutes -> stringResource(R.string.connectionInfo_agoMinutes, ago.n)
+    is CallCoreBridge.Ago.Hours -> stringResource(R.string.connectionInfo_agoHours, ago.n)
 }
 
 /** A relay line: a small status dot hugging the top-left of the name (as in the contact list), then the one-line detail, ellipsized if long. */

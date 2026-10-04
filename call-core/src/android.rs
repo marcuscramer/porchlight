@@ -803,35 +803,85 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeDueForRetry<
     encode_or_fallback(&mut env, empty_pending_retries_json, |_env| Some(crate::signal_retry::due_for_retry(now_ms)))
 }
 
-/// See [`crate::signal_retry::export_cooldowns`]'s own doc. A JSON object of
-/// relay URL -> cooldown end (ms since epoch); `"{}"` on a panic.
+/// See [`crate::relay_status::export_memory`]'s own doc. A JSON object; `"{}"`
+/// on a panic.
 #[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeExportRelayCooldowns<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, now_ms: jlong) -> jstring {
-    let json = catch_unwind(std::panic::AssertUnwindSafe(|| crate::signal_retry::export_cooldowns(now_ms))).unwrap_or_else(|_| "{}".to_string());
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeExportRelayMemory<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, now_ms: jlong) -> jstring {
+    let json = catch_unwind(std::panic::AssertUnwindSafe(|| crate::relay_status::export_memory(now_ms))).unwrap_or_else(|_| "{}".to_string());
     match env.new_string(json) {
         Ok(s) => s.into_raw(),
         Err(_) => null_jstring(),
     }
 }
 
-/// See [`crate::signal_retry::import_cooldowns`]'s own doc. No return value;
+/// See [`crate::relay_status::import_memory`]'s own doc. No return value;
 /// malformed input or a panic is a silent no-op.
 #[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeImportRelayCooldowns<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, json: JString<'local>, now_ms: jlong) {
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeImportRelayMemory<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, json: JString<'local>, now_ms: jlong) {
     run_catching(&mut env, |env| {
         let Some(json) = get_string(env, &json) else { return };
-        crate::signal_retry::import_cooldowns(&json, now_ms);
+        crate::relay_status::import_memory(&json, now_ms);
     });
 }
 
-/// See [`crate::signal_retry::relay_stats_json`]'s own doc. `"{}"` on a panic.
+/// See [`crate::relay_status::note_message`]'s own doc. No return value.
 #[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRelayStats<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) -> jstring {
-    let json = catch_unwind(std::panic::AssertUnwindSafe(crate::signal_retry::relay_stats_json)).unwrap_or_else(|_| "{}".to_string());
-    match env.new_string(json) {
-        Ok(s) => s.into_raw(),
-        Err(_) => null_jstring(),
-    }
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeNoteRelayMessage<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, relay: JString<'local>, now_ms: jlong) {
+    run_catching(&mut env, |env| {
+        let Some(relay) = get_string(env, &relay) else { return };
+        crate::relay_status::note_message(&relay, now_ms);
+    });
+}
+
+/// See [`crate::relay_status::note_connected`]'s own doc. No return value.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeNoteRelayConnected<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, relay: JString<'local>) {
+    run_catching(&mut env, |env| {
+        let Some(relay) = get_string(env, &relay) else { return };
+        crate::relay_status::note_connected(&relay);
+    });
+}
+
+/// See [`crate::relay_status::note_connect_error`]'s own doc. No return value.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeNoteRelayConnectError<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    relay: JString<'local>,
+    reason: JString<'local>,
+    at_ms: jlong,
+) {
+    run_catching(&mut env, |env| {
+        let Some(relay) = get_string(env, &relay) else { return };
+        let Some(reason) = get_string(env, &reason) else { return };
+        crate::relay_status::note_connect_error(&relay, &reason, at_ms);
+    });
+}
+
+/// See [`crate::relay_status::view`]'s own doc. `relays_json`/`connected_json`
+/// are JSON arrays of URLs. Returns a JSON array of
+/// [`crate::relay_status::RelayView`]; `"[]"` on a panic.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRelayView<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    relays_json: JString<'local>,
+    connected_json: JString<'local>,
+    now_ms: jlong,
+) -> jstring {
+    encode_or_fallback(&mut env, || "[]".to_string(), |env| {
+        let relays: Vec<String> = serde_json::from_str(&get_string(env, &relays_json)?).ok()?;
+        let connected: Vec<String> = serde_json::from_str(&get_string(env, &connected_json)?).ok()?;
+        Some(crate::relay_status::view(&relays, &connected, now_ms))
+    })
+}
+
+/// See [`crate::relay_status::ago`]'s own doc. `at_ms` is negative for "no
+/// time". Returns a JSON-encoded [`crate::relay_status::Ago`]; "never" on a
+/// panic.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeAgo<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, at_ms: jlong, now_ms: jlong) -> jstring {
+    encode_or_fallback(&mut env, || r#"{"unit":"never"}"#.to_string(), |_| Some(crate::relay_status::ago((at_ms >= 0).then_some(at_ms), now_ms)))
 }
 
 // ---------------------------------------------------------------------------
