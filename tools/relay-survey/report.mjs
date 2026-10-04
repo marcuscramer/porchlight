@@ -16,12 +16,15 @@ function soakStats(events, nowMs) {
     else if (e.type === 'connect_failed') s.connectFailures++;
     else if (e.type === 'end') { if (upSince != null) { s.upMs += e.t - upSince; upSince = null; } }
     else if (e.type === 'pub' && !e.skipped) {
-      s.pubs++;
-      if (e.ok) s.accepted++; else s.reasons[e.reason] = (s.reasons[e.reason] || 0) + 1;
-      if (e.kind === 'offer') { s.offers++; if (e.ok) s.offersOk++; }
+      if (e.kind === 'offer') { s.pubs++; if (e.ok) s.accepted++; s.offers++; if (e.ok) s.offersOk++; }
+      if (!e.ok) s.reasons[e.reason] = (s.reasons[e.reason] || 0) + 1;
     } else if (e.type === 'delivered') { s.delivered++; if (e.kind === 'hb') s.hbMs.push(e.ms); else s.offerDelivered++; }
     else if (e.type === 'lost') s.lost++;
-    else if (e.type === 'ping') { s.pings++; if (e.ms == null) s.pingFail++; else s.pingMs.push(e.ms); }
+    else if (e.type === 'ping') { /* counted in the agg lines; the individual line only shows when */ }
+    else if (e.type === 'agg') {
+      s.pubs += e.pubs; s.accepted += e.ok; s.delivered += e.hb.length; s.hbMs.push(...e.hb);
+      s.pings += e.pingMs.length + e.pingFail; s.pingFail += e.pingFail; s.pingMs.push(...e.pingMs);
+    }
   }
   if (upSince != null) s.upMs += (last ?? nowMs) - upSince;
   s.totalMs = Math.max(1, (last ?? nowMs) - (first ?? nowMs));

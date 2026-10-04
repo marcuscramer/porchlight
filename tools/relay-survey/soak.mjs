@@ -23,6 +23,15 @@ class Soaker {
     this.A = null; this.B = null;
     this.stopped = false;
     this.backoff = 1000;
+    this.agg = this.#freshAgg();
+  }
+
+  #freshAgg() { return { pubs: 0, ok: 0, hb: [], pingMs: [], pingFail: 0 }; }
+
+  /** Routine results are summed into 5-minute `agg` lines (a 20-hour run would otherwise log millions of lines); failures and anything unusual are logged individually. */
+  flush() {
+    if (this.agg.pubs || this.agg.hb.length || this.agg.pingMs.length || this.agg.pingFail) this.event('agg', this.agg);
+    this.agg = this.#freshAgg();
   }
 
   event(type, extra = {}) { this.log({ t: Date.now(), url: this.url, type, ...extra }); }
@@ -64,7 +73,8 @@ class Soaker {
     const p = this.pending.get(ev.id);
     if (!p) return;
     this.pending.delete(ev.id);
-    this.event('delivered', { kind: p.kind, ms: Date.now() - p.t0 });
+    if (p.kind === 'hb') this.agg.hb.push(Date.now() - p.t0);
+    else this.event('delivered', { kind: p.kind, ms: Date.now() - p.t0 });
   }
 
   async publish(kind, ev) {
@@ -73,15 +83,21 @@ class Soaker {
     this.pending.set(ev.id, { t0, kind });
     setTimeout(() => { if (this.pending.delete(ev.id)) this.event('lost', { kind }); }, DELIVERY_TIMEOUT_MS);
     const ack = await this.A.publish(ev);
-    this.event('pub', { kind, ok: ack.ok, reason: ack.reason, ms: ack.ms });
+    if (kind === 'hb') { this.agg.pubs++; if (ack.ok) this.agg.ok++; }
+    if (kind !== 'hb' || !ack.ok) this.event('pub', { kind, ok: ack.ok, reason: ack.reason, ms: ack.ms });
   }
 
   async run(untilMs) {
     await this.connect();
     let lastOffer = Date.now();
     const pinger = setInterval(async () => {
-      for (const [name, c] of [['A', this.A], ['B', this.B]]) if (c) this.event('ping', { conn: name, ms: await c.ping() });
+      for (const [name, c] of [['A', this.A], ['B', this.B]]) {
+        if (!c) continue;
+        const ms = await c.ping();
+        if (ms == null) { this.agg.pingFail++; this.event('ping', { conn: name, ms: null }); } else this.agg.pingMs.push(ms);
+      }
     }, PING_MS);
+    const flusher = setInterval(() => this.flush(), 5 * 60_000);
     while (!this.stopped && Date.now() < untilMs) {
       const tick = Date.now();
       for (let i = 0; i < this.contacts.length; i++) {
@@ -92,6 +108,8 @@ class Soaker {
       await sleep(Math.max(0, HEARTBEAT_MS - (Date.now() - tick)));
     }
     clearInterval(pinger);
+    clearInterval(flusher);
+    this.flush();
     this.stopped = true;
     this.A?.close(); this.B?.close();
     this.event('end');
