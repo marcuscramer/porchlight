@@ -236,6 +236,33 @@ tasks.whenTaskAdded {
     }
     if (name == "mergeDebugJniLibFolders" || name == "mergeReleaseJniLibFolders") {
         dependsOn("cargoBuild")
+        dependsOn("verifyCallCoreSymbols")
+    }
+}
+
+// Fails the build if the native library about to be packaged doesn't export
+// every JNI function `CallCoreBridge.kt` declares. A stale library (built
+// before a new `native*` function was added on the Rust side) otherwise
+// installs fine and only crashes with UnsatisfiedLinkError at the moment that
+// function is first called — which for a ring-path function is on the
+// Portal, mid-call. The fix when this fails: `./gradlew clean`, then rebuild.
+// ELF symbol names are plain strings in the file, so no extra tool is needed.
+val verifyCallCoreSymbols = tasks.register("verifyCallCoreSymbols") {
+    mustRunAfter("cargoBuild")
+    val bridge = file("src/main/java/dev/porchlight/app/CallCoreBridge.kt")
+    val libs = listOf("arm64-v8a", "armeabi-v7a", "x86_64").map { layout.buildDirectory.file("rustJniLibs/android/$it/libcall_core.so") }
+    doLast {
+        val declared = Regex("""external fun (native\w+)""").findAll(bridge.readText()).map { it.groupValues[1] }.toList()
+        check(declared.isNotEmpty()) { "verifyCallCoreSymbols: found no `external fun native*` in ${bridge.name}" }
+        for (lib in libs) {
+            val file = lib.get().asFile
+            check(file.exists()) { "verifyCallCoreSymbols: ${file.path} doesn't exist — the Rust build didn't produce it" }
+            val text = String(file.readBytes(), Charsets.ISO_8859_1)
+            val missing = declared.filter { !text.contains("Java_dev_porchlight_app_CallCoreBridge_$it") }
+            check(missing.isEmpty()) {
+                "verifyCallCoreSymbols: ${file.path} is stale — it doesn't export ${missing.joinToString()}. Run `./gradlew clean` and build again."
+            }
+        }
     }
 }
 

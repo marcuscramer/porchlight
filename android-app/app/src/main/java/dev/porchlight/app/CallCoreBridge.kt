@@ -222,6 +222,15 @@ object CallCoreBridge {
     private external fun nativeProtocolConstants(): String?
 
     @JvmStatic
+    private external fun nativeWakeUpStart(serviceEnabled: Boolean, switchOn: Boolean): String
+
+    @JvmStatic
+    private external fun nativeWakeUpNextStep(elapsedMs: Long, presses: Int, interactive: Boolean, uiResumed: Boolean, dreaming: Boolean): String
+
+    @JvmStatic
+    private external fun nativeWakeUpConstants(): String
+
+    @JvmStatic
     private external fun nativeCanPlaceCall(isPaired: Boolean, connected: Boolean): Boolean
 
     @JvmStatic
@@ -907,6 +916,46 @@ object CallCoreBridge {
                 maxIceCandidateLength = obj.getInt("max_ice_candidate_length"),
             )
         }
+    }
+
+    /** The next thing the call wake-up should do — see the Rust crate's own
+     * `wake_up::Step` doc. All timing and branching decisions live there. */
+    sealed interface WakeUpStep {
+        data class WaitForScreen(val recheckAfterMs: Long) : WakeUpStep
+        data object PlainBringToFront : WakeUpStep
+        data class PressHome(val pressNumber: Int, val bringBackAfterMs: Long, val verifyAfterMs: Long) : WakeUpStep
+        data class BringBack(val recheckAfterMs: Long) : WakeUpStep
+        data object Settled : WakeUpStep
+        data object GiveUp : WakeUpStep
+    }
+
+    /** True if a ringing call should run the Home-press steps (accessibility
+     * service on *and* the Settings switch on), false for a plain
+     * bring-to-front. */
+    fun wakeUpShouldEscalate(serviceEnabled: Boolean, switchOn: Boolean): Boolean =
+        JSONObject(nativeWakeUpStart(serviceEnabled, switchOn)).getString("kind") == "Escalate"
+
+    /** See the Rust crate's own `wake_up::next_step` doc. [elapsedMs] is the
+     * time since the ring started; [presses] the Home presses made so far. */
+    fun wakeUpNextStep(elapsedMs: Long, presses: Int, interactive: Boolean, uiResumed: Boolean, dreaming: Boolean): WakeUpStep {
+        val obj = JSONObject(nativeWakeUpNextStep(elapsedMs, presses, interactive, uiResumed, dreaming))
+        return when (val kind = obj.getString("kind")) {
+            "WaitForScreen" -> WakeUpStep.WaitForScreen(obj.getLong("recheck_after_ms"))
+            "PlainBringToFront" -> WakeUpStep.PlainBringToFront
+            "PressHome" -> WakeUpStep.PressHome(obj.getInt("press_number"), obj.getLong("bring_back_after_ms"), obj.getLong("verify_after_ms"))
+            "BringBack" -> WakeUpStep.BringBack(obj.getLong("recheck_after_ms"))
+            "Settled" -> WakeUpStep.Settled
+            "GiveUp" -> WakeUpStep.GiveUp
+            else -> error("CallCoreBridge: unknown wake-up step from native layer: $kind")
+        }
+    }
+
+    /** The two wake-up timings a shell needs outside the step results. */
+    data class WakeUpConstants(val ownPressWindowMs: Long, val maskTimeoutMs: Long)
+
+    val wakeUpConstants: WakeUpConstants by lazy {
+        val obj = JSONObject(nativeWakeUpConstants())
+        WakeUpConstants(obj.getLong("own_press_window_ms"), obj.getLong("mask_timeout_ms"))
     }
 
     private fun parseFilterSpec(obj: JSONObject?): FilterSpec? {

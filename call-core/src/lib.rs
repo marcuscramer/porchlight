@@ -37,7 +37,10 @@
 //! - `signal_retry` — the retry queue and per-relay rejection cooldown for
 //!   signal messages that missed a relay;
 //! - `ice_evidence` — ICE-candidate evidence and the "why did this call never
-//!   connect?" diagnosis.
+//!   connect?" diagnosis;
+//! - `wake_up` — the step-by-step decisions for getting the call screen in
+//!   front of the Portal's screensaver (Android-only feature; the logic lives
+//!   here so it runs under `cargo test`).
 //!
 //! The last three (and `nostr_protocol`) are independent of one another and
 //! of `call_arbitration`/`presence`.
@@ -53,6 +56,8 @@ mod android;
 mod wasm;
 
 pub mod call_arbitration;
+
+pub mod wake_up;
 
 pub mod presence;
 

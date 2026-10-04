@@ -32,11 +32,12 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * After the press the app brings itself back to the front (Home takes it
  * off the front when it was already there), then checks that its screen is
- * resumed and the screensaver is not running. It presses Home again only if
- * the screensaver is back (a second press on the system's home screen starts
- * the screensaver), and otherwise just asks to come to the front again, for
- * up to [GIVE_UP_MS]. Without the accessibility service enabled it does a
- * plain bring-to-front.
+ * resumed and the screensaver is not running, pressing Home again only if
+ * the screensaver is back. All of those decisions, and every timing, live
+ * in the core's `wake_up` module (`call-core/src/wake_up.rs`), where they
+ * are covered by `cargo test`; this class only observes the device and
+ * carries each step out. Without the accessibility service enabled (or with
+ * the Settings switch off) it does a plain bring-to-front.
  *
  * Pressing Home briefly shows whatever Android resolves Home to (normally
  * the Portal's own home screen) before this app gets back in front — around
@@ -125,7 +126,7 @@ internal class RingScreenGuard(
             // hide one that existed when it ran, and this block runs later.
             if (id != ringId.get()) return@post
             repost = repostCallNotification
-            if (CallWakeUpAccessibilityService.isEnabled && Config.load(context).callWakeUp) {
+            if (CallCoreBridge.wakeUpShouldEscalate(CallWakeUpAccessibilityService.isEnabled, Config.load(context).callWakeUp)) {
                 showMask()
                 step(id, presses = 0, startedAt = SystemClock.elapsedRealtime())
             } else {
@@ -140,7 +141,7 @@ internal class RingScreenGuard(
      * press while it is in front as the person leaving and hangs the call up,
      * which must not happen for the app's own press.
      */
-    fun pressedHomeRecently(): Boolean = SystemClock.elapsedRealtime() - lastPressAt < OWN_PRESS_WINDOW_MS
+    fun pressedHomeRecently(): Boolean = SystemClock.elapsedRealtime() - lastPressAt < CallCoreBridge.wakeUpConstants.ownPressWindowMs
 
     /** The call stopped ringing (answered, declined, missed or cancelled). */
     fun cancel() {
@@ -150,49 +151,40 @@ internal class RingScreenGuard(
         handler.post { hideMask() }
     }
 
+    /**
+     * One step of the wake-up. *What* to do next (wait for the display, press
+     * Home, bring the app back, settle, give up) is decided by the core's
+     * `wake_up` module from what is observed here; this only looks at the
+     * device and carries the decision out. A step belonging to a ring that
+     * has since been cancelled does nothing.
+     */
     private fun step(id: Int, presses: Int, startedAt: Long) {
         if (id != ringId.get()) return
-        if (!power.isInteractive) {
-            // Home does nothing while the display is off. If it never comes on, do the old thing.
-            if (SystemClock.elapsedRealtime() - startedAt >= SCREEN_ON_TIMEOUT_MS) {
+        val elapsed = SystemClock.elapsedRealtime() - startedAt
+        when (val next = CallCoreBridge.wakeUpNextStep(elapsed, presses, power.isInteractive, uiResumed, dreaming)) {
+            is CallCoreBridge.WakeUpStep.WaitForScreen ->
+                handler.postDelayed({ step(id, presses, startedAt) }, next.recheckAfterMs)
+            CallCoreBridge.WakeUpStep.PlainBringToFront -> {
                 Log.w(TAG, "screen never came on: plain bring-to-front")
                 bringToFront()
-                return
             }
-            handler.postDelayed({ step(id, presses, startedAt) }, POLL_MS)
-            return
-        }
-        // Home goes first, once; then the app puts itself back in front.
-        if (presses == 0) {
-            lastPressAt = SystemClock.elapsedRealtime()
-            val ok = CallWakeUpAccessibilityService.pressHome()
-            Log.i(TAG, "press #1 -> $ok (resumed=$uiResumed dreaming=$dreaming)")
-            handler.postDelayed({ if (id == ringId.get()) bringBack() }, BRING_BACK_DELAY_MS)
-            handler.postDelayed({ step(id, 1, startedAt) }, VERIFY_DELAY_MS)
-            return
-        }
-        // Checks after the first press. A second Home press on the system's own
-        // home screen makes the Portal start the screensaver, so Home is only
-        // pressed again when the screensaver really is back, and at most
-        // MAX_PRESSES times. Otherwise it just asks to come to the front again.
-        when {
-            uiResumed && !dreaming -> {
+            is CallCoreBridge.WakeUpStep.PressHome -> {
+                lastPressAt = SystemClock.elapsedRealtime()
+                val ok = CallWakeUpAccessibilityService.pressHome()
+                Log.i(TAG, "press #${next.pressNumber} -> $ok (resumed=$uiResumed dreaming=$dreaming)")
+                handler.postDelayed({ if (id == ringId.get()) bringBack() }, next.bringBackAfterMs)
+                handler.postDelayed({ step(id, next.pressNumber, startedAt) }, next.verifyAfterMs)
+            }
+            is CallCoreBridge.WakeUpStep.BringBack -> {
+                bringBack()
+                handler.postDelayed({ step(id, presses, startedAt) }, next.recheckAfterMs)
+            }
+            CallCoreBridge.WakeUpStep.Settled -> {
                 Log.i(TAG, "settled after $presses press(es)")
                 hideMask()
             }
-            dreaming && presses < MAX_PRESSES -> {
-                lastPressAt = SystemClock.elapsedRealtime()
-                val ok = CallWakeUpAccessibilityService.pressHome()
-                Log.i(TAG, "press #${presses + 1} -> $ok: screensaver is back")
-                handler.postDelayed({ if (id == ringId.get()) bringBack() }, BRING_BACK_DELAY_MS)
-                handler.postDelayed({ step(id, presses + 1, startedAt) }, VERIFY_DELAY_MS)
-            }
-            SystemClock.elapsedRealtime() - startedAt < GIVE_UP_MS -> {
-                bringBack()
-                handler.postDelayed({ step(id, presses, startedAt) }, VERIFY_DELAY_MS)
-            }
-            else -> {
-                Log.w(TAG, "gave up after ${presses} press(es) (resumed=$uiResumed dreaming=$dreaming)")
+            CallCoreBridge.WakeUpStep.GiveUp -> {
+                Log.w(TAG, "gave up after $presses press(es) (resumed=$uiResumed dreaming=$dreaming)")
                 hideMask()
             }
         }
@@ -227,7 +219,7 @@ internal class RingScreenGuard(
         runCatching {
             windowManager.addView(view, params)
             maskView = view
-            handler.postDelayed(hideMaskAfterTimeout, MASK_TIMEOUT_MS)
+            handler.postDelayed(hideMaskAfterTimeout, CallCoreBridge.wakeUpConstants.maskTimeoutMs)
         }.onFailure { Log.e(TAG, "showMask failed", it) }
     }
 
@@ -240,22 +232,10 @@ internal class RingScreenGuard(
 
     private companion object {
         const val TAG = "RingScreenGuard"
-        const val POLL_MS = 100L
-        const val SCREEN_ON_TIMEOUT_MS = 3_000L
-        const val BRING_BACK_DELAY_MS = 150L
-        const val VERIFY_DELAY_MS = 700L
-        const val GIVE_UP_MS = 8_000L
-        const val OWN_PRESS_WINDOW_MS = 2_500L
-        const val MAX_PRESSES = 3
 
         // The screens' own navy (colorBackgroundWaiting / --color-background-waiting)
         // — not a GeneratedColor reference, since this runs in a plain Service
         // with no theme context to resolve one against.
         const val MASK_COLOR = 0xFF16202B.toInt()
-
-        // Covers the longest realistic give-up window (GIVE_UP_MS) with margin,
-        // so a bug in step()'s own accounting still can't leave the screen
-        // covered indefinitely.
-        const val MASK_TIMEOUT_MS = 10_000L
     }
 }

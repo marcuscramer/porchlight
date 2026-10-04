@@ -1132,3 +1132,56 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIceLastDiagn
         serde_json::to_value(diagnosis).ok()?.as_str().map(str::to_string)
     })
 }
+
+// ---------------------------------------------------------------------------
+// Call wake-up — see `crate::wake_up`'s own doc. Android-only feature, so
+// there is no wasm twin. Every function falls back to the plain
+// bring-to-front behavior on a panic or malformed input: the old, simple
+// behavior is the right thing to degrade to.
+// ---------------------------------------------------------------------------
+
+const WAKE_UP_PLAIN_FALLBACK: &str = "{\"kind\":\"PlainBringToFront\"}";
+
+/// See [`crate::wake_up::start`]'s own doc. Returns the JSON-encoded
+/// [`crate::wake_up::StartDecision`].
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeWakeUpStart<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    service_enabled: jni::sys::jboolean,
+    switch_on: jni::sys::jboolean,
+) -> jstring {
+    encode_or_fallback(&mut env, || WAKE_UP_PLAIN_FALLBACK.to_string(), |_env| {
+        Some(crate::wake_up::start(service_enabled != 0, switch_on != 0))
+    })
+}
+
+/// See [`crate::wake_up::next_step`]'s own doc. Returns the JSON-encoded
+/// [`crate::wake_up::Step`].
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeWakeUpNextStep<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    elapsed_ms: jlong,
+    presses: jni::sys::jint,
+    interactive: jni::sys::jboolean,
+    ui_resumed: jni::sys::jboolean,
+    dreaming: jni::sys::jboolean,
+) -> jstring {
+    encode_or_fallback(&mut env, || WAKE_UP_PLAIN_FALLBACK.to_string(), |_env| {
+        Some(crate::wake_up::next_step(&crate::wake_up::Observation {
+            elapsed_ms,
+            presses: presses.max(0) as u32,
+            interactive: interactive != 0,
+            ui_resumed: ui_resumed != 0,
+            dreaming: dreaming != 0,
+        }))
+    })
+}
+
+/// See [`crate::wake_up::constants`]'s own doc. Call once and keep the result.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeWakeUpConstants<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) -> jstring {
+    // Static fallback, same reasoning as `nativeProtocolConstants`'s.
+    encode_or_fallback(&mut env, || "{\"own_press_window_ms\":2500,\"mask_timeout_ms\":10000}".to_string(), |_env| Some(crate::wake_up::constants()))
+}
