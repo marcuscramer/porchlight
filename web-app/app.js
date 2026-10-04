@@ -950,6 +950,13 @@ let callActive = false;
 // would see `localStream` still null and each kick off a *separate* real
 // getUserMedia() call, leaking whichever stream loses the race.
 let acquireLocalStreamPromise = null;
+/** The name of the last getUserMedia failure ("NotAllowedError", "NotFoundError", "TimeoutError", ...), so the
+ * call-ended screen can say what to do. Reset at the start of every attempt. */
+let lastMediaErrorName = null;
+/** True while the browser's camera/microphone permission request is taking suspiciously long. */
+let mediaWaitNote = false;
+const MEDIA_PERMISSION_NOTE_MS = 6000;
+const MEDIA_PERMISSION_GIVE_UP_MS = 45000;
 
 /** Assigns [stream] to [video] only if it isn't already there. Setting
  * `srcObject` re-runs the browser's media-element load algorithm even for the
@@ -997,9 +1004,22 @@ function keepPlaying(video) {
 async function acquireLocalStream() {
   if (localStream) return localStream;
   if (acquireLocalStreamPromise) return acquireLocalStreamPromise;
+  lastMediaErrorName = null;
   acquireLocalStreamPromise = (async () => {
+    // The browser's permission prompt can legitimately take a while (the person has to tap Allow), so a slow
+    // answer first only shows a note; a prompt that never comes (iOS browsers without the phone-level
+    // permission don't always ask or refuse) eventually fails the attempt instead of hanging forever.
+    mediaWaitNote = false;
+    const noteTimer = setTimeout(() => { mediaWaitNote = true; render(); }, MEDIA_PERMISSION_NOTE_MS);
+    let giveUpTimer;
+    const request = navigator.mediaDevices.getUserMedia({ video: { width: { ideal: CAPTURE.width }, height: { ideal: CAPTURE.height }, frameRate: { ideal: CAPTURE.fps } }, audio: true });
+    const giveUp = new Promise((_, reject) => {
+      giveUpTimer = setTimeout(() => reject(Object.assign(new Error('getUserMedia: no answer'), { name: 'TimeoutError' })), MEDIA_PERMISSION_GIVE_UP_MS);
+    });
+    // If the browser answers only after we gave up, release what it hands over (the camera light would stay on).
+    request.then((late) => { if (lastMediaErrorName === 'TimeoutError') late.getTracks().forEach((tr) => tr.stop()); }, () => {});
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: CAPTURE.width }, height: { ideal: CAPTURE.height }, frameRate: { ideal: CAPTURE.fps } }, audio: true });
+      const stream = await Promise.race([request, giveUp]);
       // The call attempt that triggered this may already have been
       // cancelled/ended while getUserMedia was still pending (a fast
       // Call-then-Cancel) — shut it down immediately instead of adopting it.
@@ -1016,10 +1036,15 @@ async function acquireLocalStream() {
       // failCallAttempt tears the attempt down and lets call-core's own
       // outcome surface — told first that it was this device's camera or
       // microphone, so the message doesn't blame the network.
+      lastMediaErrorName = err && err.name ? err.name : 'Error';
       callCore.noteMediaFailure();
       failCallAttempt('camera/mic access failed', err);
     } finally {
+      clearTimeout(noteTimer);
+      clearTimeout(giveUpTimer);
+      mediaWaitNote = false;
       acquireLocalStreamPromise = null;
+      render();
     }
     return localStream;
   })();
@@ -2008,6 +2033,8 @@ function renderCallScreen() {
   if (view.label_key) el('callLabel').textContent = t(view.label_key);
   el('callName').textContent = name;
   el('callName').title = name;
+  el('callNote').hidden = !mediaWaitNote;
+  if (mediaWaitNote) el('callNote').textContent = t('call.mediaPermissionWait');
 
   // Until connected the controls can't be dismissed; afterwards they stay up
   // until the person dismisses them (see the click/keydown handlers).
@@ -2058,10 +2085,24 @@ const CALL_OUTCOME_COPY = {
   dropped: ['call.outcome.droppedTitle', 'call.outcome.droppedMessage'],
 };
 
+const CAMERA_ERROR_MESSAGE = {
+  NotAllowedError: 'call.outcome.cameraDeniedMessage',
+  SecurityError: 'call.outcome.cameraDeniedMessage',
+  NotFoundError: 'call.outcome.cameraMissingMessage',
+  OverconstrainedError: 'call.outcome.cameraMissingMessage',
+  NotReadableError: 'call.outcome.cameraBusyMessage',
+  AbortError: 'call.outcome.cameraBusyMessage',
+  TimeoutError: 'call.outcome.cameraTimeoutMessage',
+};
+
 function renderCallOutcomeScreen() {
   const pairing = findPairing(pendingCallOutcome && pendingCallOutcome.pairingId);
   const name = (pairing && pairing.peerName) || t('common.unnamedContact');
-  const [titleKey, messageKey] = CALL_OUTCOME_COPY[callCore.outcomeText(pendingCallOutcome.reason, callCore.iceLastDiagnosis() ?? null)];
+  const text = callCore.outcomeText(pendingCallOutcome.reason, callCore.iceLastDiagnosis() ?? null);
+  let [titleKey, messageKey] = CALL_OUTCOME_COPY[text];
+  // What went wrong with the camera or microphone is known only here (browser error names), so it refines the
+  // generic message the same way the ICE evidence refines "never connected".
+  if (text === 'camera_failed' && lastMediaErrorName) messageKey = CAMERA_ERROR_MESSAGE[lastMediaErrorName] || messageKey;
   const title = t(titleKey);
   const message = t(messageKey, { name });
   el('callOutcomeTitle').textContent = title;

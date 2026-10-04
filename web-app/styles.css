@@ -629,6 +629,13 @@ video {
   padding: var(--dimension-16) var(--dimension-24);
 }
 
+/* Shown only while the browser's camera/microphone permission request is slow. */
+.call-note {
+  max-width: 22rem;
+  margin: 0;
+  text-align: center;
+}
+
 .calling-name {
   /* One line only: a very long name is cut off with an ellipsis. */
   max-width: 100%;

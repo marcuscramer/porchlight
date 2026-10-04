@@ -133,8 +133,13 @@
       "busyTitle": "Besetzt",
       "busyMessage": "{name} telefoniert gerade. Versuch es in einer Weile noch einmal.",
       "cameraFailedTitle": "Kamera- oder Mikrofonproblem",
-      "cameraFailedMessage": "Der Anruf konnte die Kamera oder das Mikrofon dieses Geräts nicht nutzen. Prüfe, ob nichts anderes sie verwendet und Porchlight sie nutzen darf, und versuche es dann erneut."
-    }
+      "cameraFailedMessage": "Der Anruf konnte die Kamera oder das Mikrofon dieses Geräts nicht nutzen. Prüfe, ob nichts anderes sie verwendet und Porchlight sie nutzen darf, und versuche es dann erneut.",
+      "cameraDeniedMessage": "Porchlight darf Kamera oder Mikrofon nicht verwenden. Erlaube es in den Berechtigungen deines Browsers und in den Einstellungen deines Telefons für diesen Browser. Dann versuche es erneut.",
+      "cameraMissingMessage": "Auf diesem Gerät wurde keine Kamera oder kein Mikrofon gefunden.",
+      "cameraBusyMessage": "Kamera oder Mikrofon werden von einer anderen App verwendet. Schließe sie und versuche es erneut.",
+      "cameraTimeoutMessage": "Der Browser hat auf die Anfrage für Kamera und Mikrofon nicht geantwortet. Prüfe, ob sie in den Einstellungen des Browsers und des Telefons erlaubt ist, und versuche es erneut."
+    },
+    "mediaPermissionWait": "Warte auf die Erlaubnis für Kamera und Mikrofon. Prüfe die Anfrage im Browser – und die Einstellungen deines Telefons für diesen Browser."
   },
   "contacts": {
     "deleteConfirmTitle": "{name} löschen?",

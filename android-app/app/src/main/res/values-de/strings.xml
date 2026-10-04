@@ -113,6 +113,11 @@
     <string name="call_outcome_busyMessage">%1$s telefoniert gerade. Versuch es in einer Weile noch einmal.</string>
     <string name="call_outcome_cameraFailedTitle">Kamera- oder Mikrofonproblem</string>
     <string name="call_outcome_cameraFailedMessage">Der Anruf konnte die Kamera oder das Mikrofon dieses Geräts nicht nutzen. Prüfe, ob nichts anderes sie verwendet und Porchlight sie nutzen darf, und versuche es dann erneut.</string>
+    <string name="call_outcome_cameraDeniedMessage">Porchlight darf Kamera oder Mikrofon nicht verwenden. Erlaube es in den Berechtigungen deines Browsers und in den Einstellungen deines Telefons für diesen Browser. Dann versuche es erneut.</string>
+    <string name="call_outcome_cameraMissingMessage">Auf diesem Gerät wurde keine Kamera oder kein Mikrofon gefunden.</string>
+    <string name="call_outcome_cameraBusyMessage">Kamera oder Mikrofon werden von einer anderen App verwendet. Schließe sie und versuche es erneut.</string>
+    <string name="call_outcome_cameraTimeoutMessage">Der Browser hat auf die Anfrage für Kamera und Mikrofon nicht geantwortet. Prüfe, ob sie in den Einstellungen des Browsers und des Telefons erlaubt ist, und versuche es erneut.</string>
+    <string name="call_mediaPermissionWait">Warte auf die Erlaubnis für Kamera und Mikrofon. Prüfe die Anfrage im Browser – und die Einstellungen deines Telefons für diesen Browser.</string>
     <string name="contacts_deleteConfirmTitle">%1$s löschen?</string>
     <string name="contacts_deleteConfirmMessage">Das kann nicht rückgängig gemacht werden.</string>
     <string name="contacts_deleteButton">Löschen</string>
