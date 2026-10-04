@@ -169,15 +169,14 @@ private fun WaitingForDeviceScreen(pairingId: String, service: CameraAgentServic
         // Bright, not dimmed — matches web's #progressWaiting h1 (plain .panel h1, --color-text-primary)
         // and this same file's other centered-dialog titles.
         Text(stringResource(title), color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
-        if (phase != CallCoreBridge.PairingPhase.PREPARING) {
-            val elapsed = ((now - startedAt) / 1000).coerceAtLeast(0)
-            val leftSeconds = ((CallCoreBridge.protocolConstants.pakeLiveWindowMs - (now - startedAt)) / 1000).coerceAtLeast(0)
-            Text(
-                stringResource(R.string.pairing_progressDetail, connected, relays.size, elapsed, "%d:%02d".format(leftSeconds / 60, leftSeconds % 60)),
-                color = GeneratedColor.colorTextDim,
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-            )
+        // Always two short lines (blank ones while preparing), so the spinner stays put from step to step.
+        val elapsed = ((now - startedAt) / 1000).coerceAtLeast(0)
+        val preparing = phase == CallCoreBridge.PairingPhase.PREPARING
+        for (line in listOf(
+            if (preparing) " " else stringResource(R.string.pairing_progressRelays, connected, relays.size),
+            if (preparing) " " else stringResource(R.string.pairing_progressSearching, elapsed),
+        )) {
+            Text(line, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
         }
     }
 }

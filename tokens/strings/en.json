@@ -95,7 +95,8 @@
     "phasePreparing": "Preparing…",
     "phaseConnecting": "Connecting to relays…",
     "phaseFound": "Found a device — verifying…",
-    "progressDetail": "{connected} of {total} relays connected · {elapsed} s · {left} left"
+    "progressRelays": "Connected to {connected} of {total} relays",
+    "progressSearching": "Searching for {elapsed} s"
   },
   "call": {
     "callingLabel": "Calling",

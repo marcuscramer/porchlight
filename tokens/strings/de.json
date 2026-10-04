@@ -95,7 +95,8 @@
     "phasePreparing": "Wird vorbereitet…",
     "phaseConnecting": "Verbindung zu den Relays…",
     "phaseFound": "Gerät gefunden – wird überprüft…",
-    "progressDetail": "{connected} von {total} Relays verbunden · {elapsed} s · noch {left}"
+    "progressRelays": "Mit {connected} von {total} Relays verbunden",
+    "progressSearching": "Suche seit {elapsed} s"
   },
   "call": {
     "callingLabel": "Anruf läuft",
