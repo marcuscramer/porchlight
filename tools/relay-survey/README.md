@@ -12,8 +12,9 @@ node survey.mjs report --pool 20    # ranking + proposed pool -> out/report.md, 
 node survey.mjs all --hours 8       # all of the above
 ```
 
-Overnight on a Mac: `caffeinate -i node survey.mjs all --hours 8`. Options: `--list-url URL` and `--file PATH` add
-candidate sources, `--urls a,b` restricts probe/soak to given relays, `--top N` caps how many survivors are soaked.
+Overnight on a Mac: `caffeinate -i node survey.mjs all --hours 8`. Candidate sources: a JSON list (`--list-url`, default nostr.watch, often down), a CSV (`--csv-url`, default the bitchat project's
+relay list), NIP-66 monitor events from a few relays (`--nip66 wss://…`, default damus/oxtr/snort), `seed-relays.txt` and
+`--file PATH`. Other options, `--urls a,b` restricts probe/soak to given relays, `--top N` caps how many survivors are soaked.
 
 ## What it checks
 

@@ -7,7 +7,7 @@ import { report } from './report.mjs';
 import { log } from './lib/util.mjs';
 
 const [cmd = 'help', ...rest] = process.argv.slice(2);
-const flags = { listUrl: [], file: [] };
+const flags = { listUrl: [], csvUrl: [], nip66: [], file: [] };
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
   if (!a.startsWith('--')) continue;
@@ -20,10 +20,10 @@ const urls = typeof flags.urls === 'string' ? flags.urls.split(',').map((s) => s
 
 switch (cmd) {
   case 'discover':
-    await discover({ listUrls: flags.listUrl.length ? flags.listUrl : undefined, files: flags.file, max: num(flags.max, 300) });
+    await discover({ listUrls: flags.listUrl.length ? flags.listUrl : undefined, csvUrls: flags.csvUrl.length ? flags.csvUrl : undefined, nip66Relays: flags.nip66.length ? flags.nip66 : undefined, files: flags.file, max: num(flags.max, 400) });
     break;
   case 'probe':
-    await probe({ concurrency: num(flags.concurrency, 6), limit: num(flags.limit, Infinity), urls });
+    await probe({ concurrency: num(flags.concurrency, 10), limit: num(flags.limit, Infinity), urls });
     break;
   case 'soak':
     await soak({ hours: num(flags.hours, 8), top: num(flags.top, 40), urls });
@@ -32,15 +32,15 @@ switch (cmd) {
     await report({ pool: num(flags.pool, 20) });
     break;
   case 'all': {
-    await discover({ listUrls: flags.listUrl.length ? flags.listUrl : undefined, files: flags.file, max: num(flags.max, 300) });
-    await probe({ concurrency: num(flags.concurrency, 6) });
+    await discover({ listUrls: flags.listUrl.length ? flags.listUrl : undefined, csvUrls: flags.csvUrl.length ? flags.csvUrl : undefined, nip66Relays: flags.nip66.length ? flags.nip66 : undefined, files: flags.file, max: num(flags.max, 400) });
+    await probe({ concurrency: num(flags.concurrency, 10) });
     await soak({ hours: num(flags.hours, 8), top: num(flags.top, 40) });
     await report({ pool: num(flags.pool, 20) });
     break;
   }
   default:
     console.log(`usage: node survey.mjs <command> [options]
-  discover [--list-url URL]... [--file PATH]... [--max N]   build out/candidates.json
+  discover [--list-url URL]... [--csv-url URL]... [--nip66 WSS]... [--file PATH]... [--max N]   build out/candidates.json
   probe    [--concurrency 6] [--limit N] [--urls a,b]        quick check of every candidate -> out/survivors.json
   soak     [--hours 8] [--top 40] [--urls a,b]                hold connections and send heartbeat-like load
   report   [--pool 20]                                        rank everything -> out/report.md
