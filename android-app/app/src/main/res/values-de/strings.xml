@@ -74,6 +74,10 @@
     <string name="pairing_confirmTitle">Mit %1$s koppeln?</string>
     <string name="pairing_confirmSubtitle">Beide Seiten haben dieselbe Phrase eingegeben.</string>
     <string name="pairing_confirmButton">Bestätigen</string>
+    <string name="pairing_phasePreparing">Wird vorbereitet…</string>
+    <string name="pairing_phaseConnecting">Verbindung zu den Relays…</string>
+    <string name="pairing_phaseFound">Gerät gefunden – wird überprüft…</string>
+    <string name="pairing_progressDetail">%1$s von %2$s Relays verbunden · %3$s s · noch %4$s</string>
     <string name="call_callingLabel">Anruf läuft</string>
     <string name="call_connectingLabel">Verbindet</string>
     <string name="call_incomingCallFrom">Eingehender Anruf von</string>

@@ -543,6 +543,23 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCallPhase<'l
     )
 }
 
+/// See [`crate::call_ui::pairing_phase`]'s own doc. Returns a JSON-encoded
+/// [`crate::call_ui::PairingPhaseView`]; "preparing" on a panic.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativePairingPhase<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    has_attempt: jni::sys::jboolean,
+    relays_connected: jni::sys::jint,
+    candidate_found: jni::sys::jboolean,
+) -> jstring {
+    encode_or_fallback(
+        &mut env,
+        || r#"{"phase":"preparing","label_key":"pairing.phasePreparing"}"#.to_string(),
+        |_| Some(crate::call_ui::pairing_phase(has_attempt != 0, relays_connected.max(0) as u32, candidate_found != 0)),
+    )
+}
+
 /// See [`crate::call_ui::outcome_text`]'s own doc. `reason` is a
 /// `snake_case` [`crate::call_arbitration::CallOutcomeReason`] name,
 /// `diagnosis` a `snake_case` [`crate::ice_evidence::IceDiagnosis`] name or

@@ -190,6 +190,9 @@ object CallCoreBridge {
     private external fun nativeIceRememberDiagnosis(iceConnectionState: String)
 
     @JvmStatic
+    private external fun nativePairingPhase(hasAttempt: Boolean, relaysConnected: Int, candidateFound: Boolean): String
+
+    @JvmStatic
     private external fun nativeCallPhase(hasActiveCall: Boolean, hasOutcome: Boolean, hasRing: Boolean, acceptedIncoming: Boolean, peerConnected: Boolean): String
 
     @JvmStatic
@@ -610,6 +613,12 @@ object CallCoreBridge {
         val obj = JSONObject(nativeCallPhase(hasActiveCall, hasOutcome, hasRing, acceptedIncoming, peerConnected))
         return PhaseView(Phase.valueOf(obj.getString("phase").uppercase()), obj.getBoolean("show_accept"), obj.getBoolean("controls_pinned"))
     }
+
+    /** What the "Waiting for the other device" screen says — see the Rust crate's own `call_ui::PairingPhase` doc. */
+    enum class PairingPhase { PREPARING, CONNECTING, WAITING, FOUND }
+
+    fun pairingPhase(hasAttempt: Boolean, relaysConnected: Int, candidateFound: Boolean): PairingPhase =
+        PairingPhase.valueOf(JSONObject(nativePairingPhase(hasAttempt, relaysConnected, candidateFound)).getString("phase").uppercase())
 
     /** Which text an ended call gets — see the Rust crate's own
      * `call_ui::OutcomeText` doc. */

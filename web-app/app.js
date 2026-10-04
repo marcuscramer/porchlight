@@ -1546,6 +1546,9 @@ function render() {
   // The connection page refreshes itself while it's showing, nothing else does.
   if (screen === 'connection' && !connectionRefreshTimer) connectionRefreshTimer = setInterval(() => { if (screen === 'connection') renderConnectionScreen(); }, 1000);
   if (screen !== 'connection' && connectionRefreshTimer) { clearInterval(connectionRefreshTimer); connectionRefreshTimer = null; }
+  // The pairing progress screen counts up, so it refreshes itself while it's showing.
+  if (screen === 'pairing-progress' && !pairingRefreshTimer) pairingRefreshTimer = setInterval(() => { if (screen === 'pairing-progress') renderPairingProgressScreen(); }, 1000);
+  if (screen !== 'pairing-progress' && pairingRefreshTimer) { clearInterval(pairingRefreshTimer); pairingRefreshTimer = null; }
   if (screen === 'confirm-delete') renderConfirmDeleteScreen();
   if (screen === 'pairing-progress') renderPairingProgressScreen();
   if (screen === 'pair') renderPairScreen();
@@ -1872,11 +1875,27 @@ el('phraseSubmit').addEventListener('click', async () => {
   if (!phrase) return;
   phraseSubmitInFlight = true;
   try {
-    const pairing = await startPairing(phrase);
-    currentPairingId = pairing.id;
+    // Show the progress screen first: turning the phrase into the meeting
+    // point (Argon2id) takes a moment, noticeably longer on a phone, and
+    // blocks the page while it runs.
+    pairingPreparing = true;
+    pairingStartedAt = Date.now();
+    currentPairingId = null;
     screen = 'pairing-progress';
     render();
+    await new Promise((r) => setTimeout(r, 60));
+    const pairing = await startPairing(phrase);
+    pairingPreparing = false;
+    if (screen !== 'pairing-progress') {
+      // Cancelled while preparing.
+      removePairing(pairing.id);
+      return;
+    }
+    currentPairingId = pairing.id;
+    pairingStartedAt = Date.now();
+    render();
   } finally {
+    pairingPreparing = false;
     phraseSubmitInFlight = false;
   }
 });
@@ -1903,12 +1922,36 @@ function schedulePairingProgressAutoDismiss(pairingId) {
   }, AUTO_DISMISS_DELAY_MS);
 }
 
+let pairingPreparing = false;
+let pairingStartedAt = 0;
+let pairingRefreshTimer = null;
+
+function connectedRelayCount() {
+  return pool ? [...pool.listConnectionStatus()].filter(([, up]) => up).length : 0;
+}
+
+function formatMinutesSeconds(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
 function renderPairingProgressScreen() {
   const collided = pairingCollision.has(currentPairingId);
   const timedOut = pairingTimedOut.has(currentPairingId);
   el('progressWaiting').hidden = collided || timedOut;
   el('progressCollision').hidden = !collided;
   el('progressTimeout').hidden = !timedOut;
+  if (collided || timedOut) return;
+  // Which step this is is call-core's call (shared with Android); this only reports what it can see.
+  const pending = pendingPairingsList().find((p) => p.pairingId === currentPairingId);
+  const hasAttempt = !pairingPreparing && !!(pending && pending.rendezvousTag);
+  const connected = connectedRelayCount();
+  const view = JSON.parse(callCore.pairingPhase(hasAttempt, connected, !!(pending && pending.bootstrapTarget)));
+  el('progressTitle').textContent = t(view.label_key);
+  const elapsed = Math.max(0, Math.round((Date.now() - pairingStartedAt) / 1000));
+  el('progressDetail').textContent = view.phase === 'preparing' ? '' : t('pairing.progressDetail', {
+    connected, total: RELAYS.length, elapsed, left: formatMinutesSeconds(PAKE_LIVE_WINDOW_MS - (Date.now() - pairingStartedAt)),
+  });
 }
 function retryPairing() {
   // The attempt so far (including its unconfirmed stub) is forgotten

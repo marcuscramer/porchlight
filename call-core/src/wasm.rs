@@ -371,6 +371,16 @@ pub fn call_phase(has_active_call: bool, has_outcome: bool, has_ring: bool, acce
     .unwrap_or_else(|| r#"{"phase":"idle","show_accept":false,"controls_pinned":false,"label_key":null}"#.to_string())
 }
 
+/// See [`crate::call_ui::pairing_phase`]'s own doc. Returns a JSON-encoded
+/// [`crate::call_ui::PairingPhaseView`]; "preparing" on a panic.
+#[wasm_bindgen(js_name = pairingPhase)]
+pub fn pairing_phase(has_attempt: bool, relays_connected: u32, candidate_found: bool) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::call_ui::pairing_phase(has_attempt, relays_connected, candidate_found)).unwrap_or_default()))
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| r#"{"phase":"preparing","label_key":"pairing.phasePreparing"}"#.to_string())
+}
+
 /// See [`crate::call_ui::outcome_text`]'s own doc. `reason`/`diagnosis` are
 /// `snake_case` names (`diagnosis` empty or absent for none). Returns the
 /// `snake_case` name of the [`crate::call_ui::OutcomeText`] case, falling

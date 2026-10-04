@@ -91,7 +91,11 @@
     "tryAgainButton": "Erneut versuchen",
     "confirmTitle": "Mit {name} koppeln?",
     "confirmSubtitle": "Beide Seiten haben dieselbe Phrase eingegeben.",
-    "confirmButton": "Bestätigen"
+    "confirmButton": "Bestätigen",
+    "phasePreparing": "Wird vorbereitet…",
+    "phaseConnecting": "Verbindung zu den Relays…",
+    "phaseFound": "Gerät gefunden – wird überprüft…",
+    "progressDetail": "{connected} von {total} Relays verbunden · {elapsed} s · noch {left}"
   },
   "call": {
     "callingLabel": "Anruf läuft",

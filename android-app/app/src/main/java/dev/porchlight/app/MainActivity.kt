@@ -807,6 +807,7 @@ private fun AppRoot(
         screen is AdminScreen.PairingInProgress -> {
             PairingProgressScreen(
                 pairingId = screen.pairingId,
+                service = service,
                 contacts = state.contacts,
                 onConfirm = { id, publicKeyHex -> service?.confirmPeer(id, publicKeyHex); adminScreen = null },
                 // The attempt so far (including its unconfirmed stub) is

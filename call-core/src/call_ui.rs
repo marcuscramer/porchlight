@@ -83,6 +83,47 @@ pub fn phase(input: &PhaseInput) -> PhaseView {
     PhaseView { phase, show_accept: phase == Phase::Ringing, controls_pinned: pinned, label_key }
 }
 
+/// What the "Waiting for the other device" screen says while a pairing attempt runs. The shells report
+/// what they can see; this picks the step.
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingPhase {
+    /// The phrase is being turned into the meeting point and the key exchange (not registered yet).
+    Preparing,
+    /// The attempt is live but no relay connection is up yet.
+    Connecting,
+    /// Published and listening: nobody has answered yet.
+    Waiting,
+    /// A first message from another device was seen; the exchange is being verified.
+    Found,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct PairingPhaseView {
+    pub phase: PairingPhase,
+    /// String key of the headline.
+    pub label_key: &'static str,
+}
+
+pub fn pairing_phase(has_attempt: bool, relays_connected: u32, candidate_found: bool) -> PairingPhaseView {
+    let phase = if !has_attempt {
+        PairingPhase::Preparing
+    } else if candidate_found {
+        PairingPhase::Found
+    } else if relays_connected == 0 {
+        PairingPhase::Connecting
+    } else {
+        PairingPhase::Waiting
+    };
+    let label_key = match phase {
+        PairingPhase::Preparing => "pairing.phasePreparing",
+        PairingPhase::Connecting => "pairing.phaseConnecting",
+        PairingPhase::Waiting => "pairing.waitingForDevice",
+        PairingPhase::Found => "pairing.phaseFound",
+    };
+    PairingPhaseView { phase, label_key }
+}
+
 /// Which text an ended call gets. The shells map each case to its title and
 /// message strings (an exhaustive match, so a new case can't be forgotten).
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +222,20 @@ mod tests {
             let v = phase(&input(true, false, ring, accepted, true));
             assert_eq!(v, PhaseView { phase: Phase::Live, show_accept: false, controls_pinned: false, label_key: None });
         }
+    }
+
+    #[test]
+    fn pairing_goes_from_preparing_to_connecting_to_waiting_to_found() {
+        use PairingPhase::*;
+        assert_eq!(pairing_phase(false, 0, false).phase, Preparing);
+        // Not registered yet, whatever else looks true.
+        assert_eq!(pairing_phase(false, 5, true).phase, Preparing);
+        assert_eq!(pairing_phase(true, 0, false).phase, Connecting);
+        assert_eq!(pairing_phase(true, 1, false).phase, Waiting);
+        assert_eq!(pairing_phase(true, 5, false).label_key, "pairing.waitingForDevice");
+        // Seeing someone wins over the relay count.
+        assert_eq!(pairing_phase(true, 0, true).phase, Found);
+        assert_eq!(pairing_phase(true, 3, true).phase, Found);
     }
 
     #[test]

@@ -8,6 +8,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -89,6 +90,7 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
 @Composable
 fun PairingProgressScreen(
     pairingId: String,
+    service: CameraAgentService?,
     contacts: List<CameraAgentService.ContactState>,
     onConfirm: (pairingId: String, publicKeyHex: String) -> Unit,
     onRetry: () -> Unit,
@@ -133,16 +135,49 @@ fun PairingProgressScreen(
                 onCancel = onCancel,
             )
         }
-        else -> {
-            CenteredDialogScreen(onBack = onCancel) {
-                // Same reasoning as CallingScreen's own spinner —
-                // distinguishes "still working" from "stuck."
-                CircularProgressIndicator(color = GeneratedColor.colorActionPrimaryBackground)
-                // Bright, not dimmed — matches web's #progressWaiting h1
-                // (plain .panel h1, --color-text-primary) and this same
-                // file's other centered-dialog titles.
-                Text(stringResource(R.string.pairing_waitingForDevice), color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
-            }
+        else -> WaitingForDeviceScreen(pairingId, service, onCancel)
+    }
+}
+
+/**
+ * The step the attempt is in (preparing, connecting to relays, waiting, found a device — `call-core` decides which)
+ * plus how many relays are connected and how long is left, refreshed every second.
+ */
+@Composable
+private fun WaitingForDeviceScreen(pairingId: String, service: CameraAgentService?, onCancel: () -> Unit) {
+    val startedAt = remember { System.currentTimeMillis() }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            now = System.currentTimeMillis()
+        }
+    }
+    val relays = remember(now) { service?.signalingSnapshot()?.relays.orEmpty() }
+    val connected = relays.count { it.state != CallCoreBridge.RelayState.DOWN }
+    val pending = remember(now) { CallCoreBridge.pendingSnapshot(pairingId) }
+    val phase = CallCoreBridge.pairingPhase(hasAttempt = pending != null, relaysConnected = connected, candidateFound = pending?.candidatePubkey != null)
+    val title = when (phase) {
+        CallCoreBridge.PairingPhase.PREPARING -> R.string.pairing_phasePreparing
+        CallCoreBridge.PairingPhase.CONNECTING -> R.string.pairing_phaseConnecting
+        CallCoreBridge.PairingPhase.WAITING -> R.string.pairing_waitingForDevice
+        CallCoreBridge.PairingPhase.FOUND -> R.string.pairing_phaseFound
+    }
+    CenteredDialogScreen(onBack = onCancel) {
+        // Same reasoning as CallingScreen's own spinner — distinguishes "still working" from "stuck."
+        CircularProgressIndicator(color = GeneratedColor.colorActionPrimaryBackground)
+        // Bright, not dimmed — matches web's #progressWaiting h1 (plain .panel h1, --color-text-primary)
+        // and this same file's other centered-dialog titles.
+        Text(stringResource(title), color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
+        if (phase != CallCoreBridge.PairingPhase.PREPARING) {
+            val elapsed = ((now - startedAt) / 1000).coerceAtLeast(0)
+            val leftSeconds = ((CallCoreBridge.protocolConstants.pakeLiveWindowMs - (now - startedAt)) / 1000).coerceAtLeast(0)
+            Text(
+                stringResource(R.string.pairing_progressDetail, connected, relays.size, elapsed, "%d:%02d".format(leftSeconds / 60, leftSeconds % 60)),
+                color = GeneratedColor.colorTextDim,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }

@@ -74,6 +74,10 @@
     <string name="pairing_confirmTitle">Pair with %1$s?</string>
     <string name="pairing_confirmSubtitle">Both sides typed the same phrase.</string>
     <string name="pairing_confirmButton">Confirm</string>
+    <string name="pairing_phasePreparing">Preparing…</string>
+    <string name="pairing_phaseConnecting">Connecting to relays…</string>
+    <string name="pairing_phaseFound">Found a device — verifying…</string>
+    <string name="pairing_progressDetail">%1$s of %2$s relays connected · %3$s s · %4$s left</string>
     <string name="call_callingLabel">Calling</string>
     <string name="call_connectingLabel">Connecting</string>
     <string name="call_incomingCallFrom">Incoming call from</string>

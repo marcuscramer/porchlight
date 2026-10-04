@@ -91,7 +91,11 @@
     "tryAgainButton": "Try again",
     "confirmTitle": "Pair with {name}?",
     "confirmSubtitle": "Both sides typed the same phrase.",
-    "confirmButton": "Confirm"
+    "confirmButton": "Confirm",
+    "phasePreparing": "Preparing…",
+    "phaseConnecting": "Connecting to relays…",
+    "phaseFound": "Found a device — verifying…",
+    "progressDetail": "{connected} of {total} relays connected · {elapsed} s · {left} left"
   },
   "call": {
     "callingLabel": "Calling",

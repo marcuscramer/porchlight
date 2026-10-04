@@ -740,6 +740,27 @@ export function outcomeText(reason, diagnosis) {
 }
 
 /**
+ * See [`crate::call_ui::pairing_phase`]'s own doc. Returns a JSON-encoded
+ * [`crate::call_ui::PairingPhaseView`]; "preparing" on a panic.
+ * @param {boolean} has_attempt
+ * @param {number} relays_connected
+ * @param {boolean} candidate_found
+ * @returns {string}
+ */
+export function pairingPhase(has_attempt, relays_connected, candidate_found) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.pairingPhase(has_attempt, relays_connected, candidate_found);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * See [`crate::call_arbitration::peer_connection_closed`]'s own doc.
  * **Now returns a JSON-encoded effects array** (was `void`) — see that
  * function's own doc for why (a genuinely spontaneous WebRTC teardown can
