@@ -78,7 +78,7 @@
     <string name="pairing_phaseConnecting">Verbindung zu den Relays…</string>
     <string name="pairing_phaseFound">Gerät gefunden – wird überprüft…</string>
     <string name="pairing_progressRelays">Mit %1$s von %2$s Relays verbunden</string>
-    <string name="pairing_progressSearching">Suche seit %1$s s</string>
+    <string name="pairing_progressCancelsIn">Wird automatisch abgebrochen in %1$s</string>
     <string name="call_callingLabel">Anruf läuft</string>
     <string name="call_connectingLabel">Verbindet</string>
     <string name="call_incomingCallFrom">Eingehender Anruf von</string>

@@ -192,6 +192,11 @@ struct AppState {
     call: call_arbitration::CallState,
     dedup: nostr_protocol::DedupState,
     signal_retry: signal_retry::SignalRetryState,
+    /// Public keys of pairing attempts that were cancelled, replaced or timed out (newest last, bounded).
+    /// Some relays hand recently published "ephemeral" events to a later subscriber, so an abandoned attempt's
+    /// own `pake1` can come back to its owner's *next* attempt at the same phrase and look like another
+    /// device. Messages from these keys are ignored.
+    retired_attempt_pubkeys: Vec<String>,
     relay_log: relay_status::RelayLogState,
     ice: ice_evidence::IceState,
 }
@@ -204,6 +209,7 @@ impl AppState {
             call: call_arbitration::CallState::new(),
             dedup: nostr_protocol::DedupState::new(),
             signal_retry: signal_retry::SignalRetryState::new(),
+            retired_attempt_pubkeys: Vec::new(),
             relay_log: relay_status::RelayLogState::new(),
             ice: ice_evidence::IceState::new(),
         }
@@ -251,7 +257,10 @@ pub fn start_attempt(pairing_id: &str, own_pubkey_hex: &str, own_name: &str, raw
         stashed_remote_confirm: None,
         resolved: false,
     };
-    STATE.lock().unwrap_or_else(|p| p.into_inner()).pairing_registry.insert(pairing_id.to_string(), attempt);
+    let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(old) = app.pairing_registry.insert(pairing_id.to_string(), attempt) {
+        retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
+    }
     StartResult { rendezvous_tag, outbound_hex, generation }
 }
 
@@ -260,7 +269,33 @@ pub fn start_attempt(pairing_id: &str, own_pubkey_hex: &str, own_name: &str, raw
 /// consumed) drops automatically. A no-op if there's no live attempt for
 /// `pairing_id`.
 pub fn cancel_attempt(pairing_id: &str) {
-    STATE.lock().unwrap_or_else(|p| p.into_inner()).pairing_registry.remove(pairing_id);
+    let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(old) = app.pairing_registry.remove(pairing_id) {
+        retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
+    }
+}
+
+const MAX_RETIRED_PUBKEYS: usize = 64;
+
+#[cfg(test)]
+thread_local! {
+    /// Most pairing tests reuse the same literal public keys across tests that share this process-wide state, so
+    /// retiring keys is off for them; the tests about retiring switch it on for their own thread.
+    static RETIRE_IN_TESTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn retire(retired: &mut Vec<String>, pubkey_hex: String) {
+    #[cfg(test)]
+    if !RETIRE_IN_TESTS.with(|f| f.get()) {
+        return;
+    }
+    if retired.contains(&pubkey_hex) {
+        return;
+    }
+    if retired.len() >= MAX_RETIRED_PUBKEYS {
+        retired.remove(0);
+    }
+    retired.push(pubkey_hex);
 }
 
 /// A JSON-encoded [`PendingSnapshot`] for one live pairing attempt — what
@@ -317,6 +352,9 @@ pub struct PendingSnapshot {
 /// means* happens here.
 pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &str, payload_json: &str) -> Vec<Effect> {
     let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    if app.retired_attempt_pubkeys.iter().any(|k| k == sender_pubkey) {
+        return vec![];
+    }
     let registry = &mut app.pairing_registry;
     let Some(attempt) = registry.get_mut(pairing_id) else { return vec![] };
 
@@ -507,7 +545,9 @@ pub fn handle_timeout(pairing_id: &str, generation: u64) -> Vec<Effect> {
     if attempt.generation != generation || attempt.resolved {
         return vec![];
     }
-    registry.remove(pairing_id);
+    if let Some(old) = registry.remove(pairing_id) {
+        retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
+    }
     vec![Effect::SetTimedOut { pairing_id: pairing_id.to_string() }, Effect::KickHeartbeat]
 }
 
@@ -665,6 +705,48 @@ mod tests {
             !all.iter().any(|e| matches!(e, Effect::SetConfirmedCandidate { .. })),
             "a reflected exchange must never produce a confirmed candidate: {all:?}"
         );
+    }
+
+    /// The candidate pubkey the core currently holds for a live attempt, from its bootstrap snapshot.
+    fn candidate_of(pairing_id: &str) -> Option<String> {
+        let json = build_bootstrap_payload(pairing_id)?;
+        let v: serde_json::Value = serde_json::from_str(&json).ok()?;
+        v.get("candidate_pubkey")?.as_str().map(String::from)
+    }
+
+    #[test]
+    fn a_cancelled_attempts_own_message_never_becomes_a_candidate_of_the_next_attempt() {
+        // Some relays replay a recently published ephemeral event to a later subscriber, so after cancel + retry
+        // with the same phrase the old attempt's `pake1` comes back looking like another device.
+        RETIRE_IN_TESTS.with(|f| f.set(true));
+        let old_key = "ghost-key-cancelled-attempt";
+        let first = start_attempt(&fresh_pairing_id(), old_key, "Me", "ghost phrase one");
+        let old_id = fresh_pairing_id();
+        let _ = start_attempt(&old_id, old_key, "Me", "ghost phrase one");
+        cancel_attempt(&old_id);
+        let retry_id = fresh_pairing_id();
+        let _ = start_attempt(&retry_id, "ghost-key-retry", "Me", "ghost phrase one");
+        let effects = handle_bootstrap_message(&retry_id, old_key, "pake1", &pake1_json(&first.outbound_hex));
+        assert!(effects.is_empty(), "{effects:?}");
+        assert!(candidate_of(&retry_id).is_none(), "a ghost must not count as a device found");
+        // A real other device still does.
+        let _ = handle_bootstrap_message(&retry_id, "ghost-real-peer", "pake1", &pake1_json(&first.outbound_hex));
+        assert_eq!(candidate_of(&retry_id).as_deref(), Some("ghost-real-peer"));
+    }
+
+    #[test]
+    fn a_replaced_or_timed_out_attempts_message_is_ignored_too() {
+        RETIRE_IN_TESTS.with(|f| f.set(true));
+        let id = fresh_pairing_id();
+        let a = start_attempt(&id, "ghost-replaced", "Me", "ghost phrase two");
+        // The same pairing id started again (a retry after a collision/timeout) replaces the old attempt.
+        let b = start_attempt(&id, "ghost-replacement", "Me", "ghost phrase two");
+        assert!(handle_bootstrap_message(&id, "ghost-replaced", "pake1", &pake1_json(&a.outbound_hex)).is_empty());
+        let timed_out = handle_timeout(&id, b.generation);
+        assert!(matches!(timed_out.as_slice(), [Effect::SetTimedOut { .. }, Effect::KickHeartbeat]));
+        let next = fresh_pairing_id();
+        let _ = start_attempt(&next, "ghost-next", "Me", "ghost phrase two");
+        assert!(handle_bootstrap_message(&next, "ghost-replacement", "pake1", &pake1_json(&b.outbound_hex)).is_empty());
     }
 
     #[test]

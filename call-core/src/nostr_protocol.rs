@@ -466,6 +466,8 @@ pub struct VerifiedBootstrapEvent {
     pub sender_pubkey_hex: String,
     pub rendezvous_tag: String,
     pub payload_json: String,
+    /// The event's own `created_at` (seconds), so a stale replay can be told from a live message.
+    pub created_at: u64,
 }
 
 /// Mirrors `handleBootstrapEvent`'s verification: still calls `verify()`
@@ -481,6 +483,7 @@ pub fn verify_bootstrap_event(event_json: &str) -> Option<VerifiedBootstrapEvent
         sender_pubkey_hex: event.pubkey.to_hex(),
         rendezvous_tag,
         payload_json: event.content.clone(),
+        created_at: event.created_at.as_secs(),
     })
 }
 

@@ -1930,6 +1930,11 @@ function connectedRelayCount() {
   return pool ? [...pool.listConnectionStatus()].filter(([, up]) => up).length : 0;
 }
 
+function formatMinutesSeconds(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
 function renderPairingProgressScreen() {
   const collided = pairingCollision.has(currentPairingId);
   const timedOut = pairingTimedOut.has(currentPairingId);
@@ -1943,11 +1948,10 @@ function renderPairingProgressScreen() {
   const connected = connectedRelayCount();
   const view = JSON.parse(callCore.pairingPhase(hasAttempt, connected, !!(pending && pending.bootstrapTarget)));
   el('progressTitle').textContent = t(view.label_key);
-  const elapsed = Math.max(0, Math.round((Date.now() - pairingStartedAt) / 1000));
   // Always two short lines (non-breaking spaces while preparing), so the spinner never moves between steps.
   const preparing = view.phase === 'preparing';
   el('progressRelays').textContent = preparing ? '\u00a0' : t('pairing.progressRelays', { connected, total: RELAYS.length });
-  el('progressSearching').textContent = preparing ? '\u00a0' : t('pairing.progressSearching', { elapsed });
+  el('progressCancelsIn').textContent = preparing ? '\u00a0' : t('pairing.progressCancelsIn', { left: formatMinutesSeconds(PAKE_LIVE_WINDOW_MS - (Date.now() - pairingStartedAt)) });
 }
 function retryPairing() {
   // The attempt so far (including its unconfirmed stub) is forgotten

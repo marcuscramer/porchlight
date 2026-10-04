@@ -119,15 +119,23 @@ pub fn route_event(event_json: &str, ctx: &RouteContext, now_ms: i64) -> RouteRe
     if kind == nostr_protocol::WRAP_KIND {
         route_wrap(event_json, ctx, now_ms)
     } else if kind == nostr_protocol::SIGNAL_KIND {
-        route_bootstrap(event_json, ctx)
+        route_bootstrap(event_json, ctx, now_ms)
     } else {
         RouteResult::default()
     }
 }
 
-fn route_bootstrap(event_json: &str, ctx: &RouteContext) -> RouteResult {
+/// A pairing message older than this when it arrives is a relay replaying an old event, not the other
+/// device talking now (its messages are republished every 10 s). Generous, so a phone whose clock is a few
+/// minutes off can still pair.
+const BOOTSTRAP_MAX_AGE_SECS: u64 = 300;
+
+fn route_bootstrap(event_json: &str, ctx: &RouteContext, now_ms: i64) -> RouteResult {
     let mut result = RouteResult::default();
     let Some(verified) = nostr_protocol::verify_bootstrap_event(event_json) else { return result };
+    if (now_ms.max(0) as u64 / 1000).saturating_sub(verified.created_at) > BOOTSTRAP_MAX_AGE_SECS {
+        return result;
+    }
     let Some(pending) = ctx.pending.iter().find(|p| p.rendezvous_tag == verified.rendezvous_tag) else { return result };
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(&verified.payload_json) else { return result };
     let Some(type_) = payload.get("type").and_then(|t| t.as_str()).filter(|t| !t.trim().is_empty()) else { return result };
@@ -443,6 +451,35 @@ mod tests {
         let r = p.route(&format!(r#"{{"type":"busy","callId":"{call_id}"}}"#));
         assert_eq!(statuses(&r).last(), Some(&PresenceStatus::Busy));
         assert!(!call_arbitration::is_call_active());
+    }
+
+    fn candidate_of(pairing_id: &str) -> Option<String> {
+        let v: serde_json::Value = serde_json::from_str(&crate::build_bootstrap_payload(pairing_id)?).ok()?;
+        v.get("candidate_pubkey")?.as_str().map(String::from)
+    }
+
+    #[test]
+    fn a_stale_replayed_pairing_message_is_ignored() {
+        let _g = call_arbitration::reset_state_for_test();
+        let me = crate::start_attempt("stale-test-pairing", "stale-test-own-pubkey", "Me", "stale test phrase");
+        let peer = crate::start_attempt("stale-test-peer", "stale-test-peer-pubkey", "Peer", "stale test phrase");
+        let sender = nostr_protocol::generate_keys();
+        let sender_secret = sender.secret_key().to_secret_hex();
+        let event = nostr_protocol::build_bootstrap_event(&sender_secret, &me.rendezvous_tag, None, &format!(r#"{{"type":"pake1","outbound":"{}"}}"#, peer.outbound_hex)).unwrap();
+        let ctx = RouteContext { pending: vec![RoutePending { pairing_id: "stale-test-pairing".into(), rendezvous_tag: me.rendezvous_tag.clone() }], ..Default::default() };
+        // Seen ten minutes after it was made: a replay, nothing happens.
+        let now = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64) + 10 * 60 * 1000;
+        assert_eq!(route_event(&event, &ctx, now), RouteResult::default());
+        assert!(candidate_of("stale-test-pairing").is_none());
+        // The same event when it is fresh does register the sender.
+        // (A different sender: the very same event would be dropped as a duplicate of the stale one above.)
+        let sender2_secret = nostr_protocol::generate_keys().secret_key().to_secret_hex();
+        let event2 = nostr_protocol::build_bootstrap_event(&sender2_secret, &me.rendezvous_tag, None, &format!(r#"{{"type":"pake1","outbound":"{}"}}"#, peer.outbound_hex)).unwrap();
+        let fresh = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64) + 1000;
+        route_event(&event2, &ctx, fresh);
+        assert!(candidate_of("stale-test-pairing").is_some());
+        crate::cancel_attempt("stale-test-pairing");
+        crate::cancel_attempt("stale-test-peer");
     }
 
     #[test]

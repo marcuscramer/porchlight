@@ -96,7 +96,7 @@
     "phaseConnecting": "Connecting to relays…",
     "phaseFound": "Found a device — verifying…",
     "progressRelays": "Connected to {connected} of {total} relays",
-    "progressSearching": "Searching for {elapsed} s"
+    "progressCancelsIn": "Auto-cancelling in {left}"
   },
   "call": {
     "callingLabel": "Calling",
