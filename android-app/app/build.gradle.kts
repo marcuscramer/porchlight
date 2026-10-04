@@ -240,30 +240,46 @@ tasks.whenTaskAdded {
     }
 }
 
-// Fails the build if the native library about to be packaged doesn't export
+// Fails the build if a native library about to be packaged doesn't export
 // every JNI function `CallCoreBridge.kt` declares. A stale library (built
 // before a new `native*` function was added on the Rust side) otherwise
 // installs fine and only crashes with UnsatisfiedLinkError at the moment that
 // function is first called — which for a ring-path function is on the
 // Portal, mid-call. The fix when this fails: `./gradlew clean`, then rebuild.
 // ELF symbol names are plain strings in the file, so no extra tool is needed.
-val verifyCallCoreSymbols = tasks.register("verifyCallCoreSymbols") {
+//
+// Checked twice: the fresh cargo output, and — separately — the copy that
+// actually ends up packaged. Gradle can leave the merged copy stale even when
+// cargo produced a new one (seen after a build was interrupted midway), so the
+// first check alone isn't enough.
+val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+fun registerSymbolCheck(taskName: String, libPath: (String) -> String) = tasks.register(taskName) {
     mustRunAfter("cargoBuild")
     val bridge = file("src/main/java/dev/porchlight/app/CallCoreBridge.kt")
-    val libs = listOf("arm64-v8a", "armeabi-v7a", "x86_64").map { layout.buildDirectory.file("rustJniLibs/android/$it/libcall_core.so") }
+    val libs = abis.map { layout.buildDirectory.file(libPath(it)) }
     doLast {
         val declared = Regex("""external fun (native\w+)""").findAll(bridge.readText()).map { it.groupValues[1] }.toList()
-        check(declared.isNotEmpty()) { "verifyCallCoreSymbols: found no `external fun native*` in ${bridge.name}" }
+        check(declared.isNotEmpty()) { "$taskName: found no `external fun native*` in ${bridge.name}" }
         for (lib in libs) {
             val file = lib.get().asFile
-            check(file.exists()) { "verifyCallCoreSymbols: ${file.path} doesn't exist — the Rust build didn't produce it" }
+            check(file.exists()) { "$taskName: ${file.path} doesn't exist — the Rust build didn't produce it" }
             val text = String(file.readBytes(), Charsets.ISO_8859_1)
             val missing = declared.filter { !text.contains("Java_dev_porchlight_app_CallCoreBridge_$it") }
             check(missing.isEmpty()) {
-                "verifyCallCoreSymbols: ${file.path} is stale — it doesn't export ${missing.joinToString()}. Run `./gradlew clean` and build again."
+                "$taskName: ${file.path} is stale — it doesn't export ${missing.joinToString()}. Run `./gradlew clean` and build again."
             }
         }
     }
+}
+registerSymbolCheck("verifyCallCoreSymbols") { "rustJniLibs/android/$it/libcall_core.so" }
+for (variant in listOf("Debug", "Release")) {
+    val check = registerSymbolCheck("verifyPackaged${variant}CallCoreSymbols") {
+        "intermediates/merged_native_libs/${variant.lowercase()}/merge${variant}NativeLibs/out/lib/$it/libcall_core.so"
+    }
+    tasks.matching { it.name == "strip${variant}DebugSymbols" }.configureEach {
+        dependsOn(check)
+    }
+    check.configure { mustRunAfter("merge${variant}NativeLibs") }
 }
 
 // Ensures ../../tokens/node_modules exists before styleDictionaryBuildAndroid

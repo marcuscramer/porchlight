@@ -38,6 +38,9 @@
 //!   signal messages that missed a relay;
 //! - `ice_evidence` — ICE-candidate evidence and the "why did this call never
 //!   connect?" diagnosis;
+//! - `signal_router` — the single entry point for an incoming relay event:
+//!   dedup, unwrap/verify, parse, presence and per-message decisions, returned
+//!   as one ordered result for the shell to execute;
 //! - `wake_up` — the step-by-step decisions for getting the call screen in
 //!   front of the Portal's screensaver (Android-only feature; the logic lives
 //!   here so it runs under `cargo test`).
@@ -62,6 +65,8 @@ pub mod wake_up;
 pub mod presence;
 
 pub mod nostr_protocol;
+
+pub mod signal_router;
 
 pub mod signal_retry;
 

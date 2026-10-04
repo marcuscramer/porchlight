@@ -46,7 +46,7 @@ data class Pairing(
     // "" (not null) for both — simpler JSON round-tripping than a nullable field.
     val peerPublicKey: String = "",
     val peerName: String = "",
-    // Per-contact, off by default (see CameraAgentService.onOffer): when
+    // Per-contact, off by default (see call-core's `signal_router::RoutePeer`): when
     // true, an incoming call from this contact connects automatically after
     // a countdown instead of waiting for a manual Accept tap — a deliberate
     // per-contact choice, not a device-wide one.
@@ -55,7 +55,7 @@ data class Pairing(
     // WrapEventCandidate.lastSignalCreatedAt's own doc, CallCoreBridge.kt,
     // for why both are needed) this pairing has actually processed — 0L/""
     // for one that's never received any yet. Persisted here so
-    // CallCoreBridge.unwrapWrappedEventForAny can recognize a relay
+    // call-core's signal router can recognize a relay
     // redelivery even across a reload/app restart.
     val lastSignalCreatedAt: Long = 0L,
     val lastSignalEventId: String = "",

@@ -84,7 +84,7 @@ const ONLINE_CHECK_INTERVAL_MS = PRESENCE_TICK_INTERVAL_MS;
 // "At least 120 seconds" per the pairing design doc.
 const PAKE_LIVE_WINDOW_MS = PROTOCOL_CONSTANTS.pake_live_window_ms;
 // Sanity bounds on untrusted network input are enforced inside
-// callCore.parseSignalPayload now, not here. The relay list (and the STUN
+// call-core's signal router now, not here. The relay list (and the STUN
 // servers, auto-dismiss delay and self-view position cycle) come from
 // shared-config.js, generated from tokens/shared/shared-config.json — the one
 // source both clients read.
@@ -131,7 +131,7 @@ function loadPairings() {
     // WrapEventCandidate::last_signal_created_at's own doc, nostr_protocol.rs,
     // for why both are needed) this pairing has actually processed ("" / 0
     // for one that's never received any yet). Persisted with the rest of
-    // the pairing so handleWrapEvent can recognize a relay redelivery even
+    // the pairing so the signal router can recognize a relay redelivery even
     // across a reload.
     lastSignalCreatedAt: p.lastSignalCreatedAt || 0,
     lastSignalEventId: p.lastSignalEventId || '',
@@ -152,7 +152,7 @@ function updatePairingPeer(pairingId, peerPublicKey, peerName) {
   pairings = pairings.map((p) => (p.id === pairingId ? { ...p, peerPublicKey, peerName } : p));
   savePairings();
 }
-/** Called from handleWrapEvent right after a wrap event is actually
+/** Called from handleIncomingEvent right after a wrap event is actually
  * accepted — persists the new high-water mark immediately, not batched, so
  * it survives a reload even if the very next thing that happens is a
  * crash/close. */
@@ -342,125 +342,64 @@ function connectRelayClient() {
   scheduleHeartbeat(0);
 }
 
+/** Everything about an incoming event — dedup, unwrap and verify, parsing,
+ * presence, the per-message decisions — is call-core's signal router; this
+ * only hands it a fresh snapshot of the pairings and executes the ordered
+ * result. Mirrors NostrSignalingClient.kt's routeIncoming. */
 function handleIncomingEvent(event) {
-  if (!callCore.markSeenOrIsDuplicate(event.id)) return;
-  if (event.kind === WRAP_KIND) handleWrapEvent(event);
-  else if (event.kind === SIGNAL_KIND) handleBootstrapEvent(event);
-}
-
-/** Unwraps a gift-wrapped signal event and dispatches it to a *confirmed*
- * pairing — see publish()'s doc for the wrap's shape. The wrap's own `p`
- * tag is one of this client's per-pairing pubkeys, which directly (and
- * uniquely) identifies which pairing this is before anything is even
- * decrypted. callCore.unwrapWrappedEventForAny does that routing plus the
- * entire verify-decrypt-verify-decrypt chain (including the pinned-peer
- * identity check) — see its own doc. */
-function handleWrapEvent(event) {
-  const candidates = confirmedPeers();
-  const candidatesJson = JSON.stringify(
-    candidates.map((p) => (
+  const context = {
+    device_name: deviceName,
+    confirmed: confirmedPeers().map((p) => (
       {
         pairing_id: p.pairingId,
         own_private_key_hex: p.ownPrivateKeyHex,
         peer_public_key: p.peerPublicKey,
         last_signal_created_at: p.lastSignalCreatedAt,
         last_signal_event_id: p.lastSignalEventId,
+        // Auto-answer isn't a web feature — every incoming call rings for a
+        // manual Accept/Decline.
+        auto_answer: false,
       }
     )),
-  );
-  const routedJson = callCore.unwrapWrappedEventForAny(JSON.stringify(event), candidatesJson);
-  if (!routedJson) return;
-  const routed = JSON.parse(routedJson);
-  const peer = candidates.find((p) => p.pairingId === routed.pairing_id);
-  if (!peer) return;
-  // See WrapEventCandidate::last_signal_created_at's own doc
-  // (nostr_protocol.rs) — persist immediately, before this event is even
-  // dispatched, so a redelivery of the *same* event (or anything older) is
-  // rejected by unwrap_wrapped_event_for_any itself on any subsequent
-  // attempt, reload included.
-  updateLastSignal(routed.pairing_id, routed.signal_created_at, routed.signal_event_id);
-  // Parsing (type extraction, per-type field shape/length validation) is
-  // callCore.parseSignalPayload's job — dispatchFromConfirmedPeer still gets
-  // called even when this is undefined: a validly wrapped/decrypted/
-  // signature-verified message from a confirmed peer must still register as
-  // "this peer is alive" regardless of whether its own content parses.
-  const messageJson = callCore.parseSignalPayload(routed.payload_json);
-  dispatchFromConfirmedPeer(peer, messageJson ? JSON.parse(messageJson) : null);
+    pending: pendingPairingsList().filter((p) => p.rendezvousTag).map((p) => ({ pairing_id: p.pairingId, rendezvous_tag: p.rendezvousTag })),
+  };
+  // try/catch: this runs inside SimplePool's own onevent callback, where an
+  // uncaught throw would silently abort the event half-processed.
+  let result;
+  try {
+    result = JSON.parse(callCore.routeEvent(JSON.stringify(event), JSON.stringify(context), Date.now()));
+  } catch (err) {
+    console.warn('handleIncomingEvent: callCore.routeEvent failed, dropping event', err);
+    return;
+  }
+  // Persisted before anything else, so a redelivery of this exact event (or
+  // anything older) is rejected on any later attempt, reload included.
+  if (result.signal) updateLastSignal(result.signal.pairing_id, result.signal.created_at, result.signal.event_id);
+  applyPresenceUpdate(JSON.stringify({ presence_effects: result.presence_effects, call_effects: result.call_effects }));
+  for (const action of result.actions) applyRouteAction(action);
+  if (result.bootstrap_effects.length) applyEffects(JSON.stringify(result.bootstrap_effects));
 }
 
-/** Dispatches an unwrapped, unencrypted bootstrap-phase event — matched to
- * a pending pairing purely by its `d` tag (the passphrase-derived
- * rendezvous point), since neither side's real pubkey is known yet.
- * Signature verification is callCore.verifyBootstrapEvent's job now (see
- * its own doc) — still required even though bootstrap content is
- * plaintext. */
-function handleBootstrapEvent(event) {
-  const verifiedJson = callCore.verifyBootstrapEvent(JSON.stringify(event));
-  if (!verifiedJson) return;
-  const verified = JSON.parse(verifiedJson);
-  const pending = pendingPairingsList().find((p) => p.rendezvousTag === verified.rendezvous_tag);
-  if (!pending) return;
-  let payload;
-  try { payload = JSON.parse(verified.payload_json); } catch { return; }
-  if (!payload.type) return;
-  onPairingBootstrapMessage(pending.pairingId, verified.sender_pubkey_hex, payload.type, payload);
-}
-
-/**
- * [message] is undefined/null for an unrecognized type or a malformed
- * payload — callCore.markSeen still runs unconditionally first regardless
- * (a validly wrapped/decrypted/signature-verified message from a confirmed
- * peer means they're alive, independent of whether this client can make
- * sense of what they actually said).
- */
-function dispatchFromConfirmedPeer(peer, message) {
-  const pairingId = peer.pairingId;
-  const ownPubkeyHex = ownPubkeyHexFor(peer.ownPrivateKeyHex);
-  const peerBusy = message && message.type === 'heartbeat' && typeof message.busy === 'boolean' ? message.busy : null;
-  const peerHello = !!(message && message.type === 'heartbeat' && message.hello === true);
-  applyPresenceUpdate(callCore.markSeen(pairingId, ownPubkeyHex, peer.peerPublicKey, Date.now(), peerBusy, peerHello));
-  if (!message) return;
-  switch (message.type) {
-    case 'heartbeat':
-      if (message.name) {
-        const p = findPairing(pairingId);
-        if (p && message.name !== p.peerName) { updatePairingPeer(pairingId, p.peerPublicKey, message.name); render(); }
-      }
-      break;
-    case 'leaving':
-      applyPresenceUpdate(callCore.handleLeavingMessage(pairingId));
-      break;
-    case 'bye':
-      // Gated on callId, not just pairingId — inside callCore.handlePeerHangup:
-      // a "bye" from an attempt this client has already moved on from must
-      // not tear down a call that isn't the one it's actually about.
-      onPeerHangup(pairingId, message.callId);
-      break;
-    case 'busy':
-      // Releases this device's own claimed call slot immediately, not just
-      // waiting for the peer's next heartbeat — see
-      // callCore.handlePeerBusyReply's own doc. The busy badge itself comes
-      // from live presence status (applyPresenceUpdate's SetStatus
-      // handling), not a one-shot flag.
-      applyPresenceUpdate(callCore.handlePeerBusyReply(pairingId, ownPubkeyHex, peer.peerPublicKey, message.callId, Date.now()));
-      break;
-    case 'call': {
-      // The pubkey tie-break lives inside callCore.handleShouldOffer now —
-      // this always forwards when there's a real peer, same as every other
-      // message type.
-      const peer2 = findPairing(pairingId);
-      if (peer2) onShouldOffer(pairingId, message.callId, ownPubkeyHexFor(peer2.ownPrivateKeyHex), peer2.peerPublicKey);
+function applyRouteAction(action) {
+  switch (action.kind) {
+    case 'SendHeartbeat': {
+      const peer = confirmedPeers().find((p) => p.pairingId === action.pairing_id);
+      if (peer) sendToConfirmedPeer(peer.pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, () => action.payload_json);
       break;
     }
-    case 'offer':
-      onOfferReceived(pairingId, message.sdp, message.callId);
+    case 'UpdatePeerName': {
+      const p = findPairing(action.pairing_id);
+      if (p && action.name !== p.peerName) { updatePairingPeer(action.pairing_id, p.peerPublicKey, action.name); render(); }
       break;
-    case 'answer':
-      onAnswer(pairingId, message.sdp, message.callId);
+    }
+    case 'ApplyRemoteAnswer':
+      handleAnswer(action.sdp).catch((err) => failCallAttempt('handleAnswer failed (bad SDP?)', err));
       break;
-    case 'ice':
-      onRemoteIce(pairingId, message.callId, message);
+    case 'AddRemoteIce':
+      applyIceCandidate(action.sdp_mid, action.sdp_m_line_index, action.candidate);
       break;
+    default:
+      console.error('applyRouteAction: unknown action kind from call-core', action.kind);
   }
 }
 
@@ -481,16 +420,6 @@ function applyPresenceUpdate(json) {
         // JS enum needed.
         contactUiState.set(effect.pairing_id, { ...uiState(effect.pairing_id), status: effect.status });
         break;
-      case 'ReplyHeartbeat': {
-        // A peer that just came online said hello (see call-core's
-        // presence::mark_seen) — answer with one ordinary heartbeat right
-        // now. The build never sets `hello` here (only requestHello does),
-        // so two devices can't answer each other forever.
-        const peer = confirmedPeers().find((p) => p.pairingId === effect.pairing_id);
-        const heartbeat = callCore.buildHeartbeatPayload(deviceName, callCore.isCallActive());
-        if (peer && heartbeat) sendToConfirmedPeer(peer.pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, () => heartbeat);
-        break;
-      }
       default:
         console.error('applyPresenceUpdate: unknown presence effect kind from call-core', effect.kind);
     }
@@ -737,7 +666,7 @@ window.addEventListener('online', () => {
 
 // ---------------------------------------------------------------------------
 // Pairing (SPAKE2) — mirrors CameraAgentService.kt's PakeAttempt/
-// beginPakeAttempt/onPairingBootstrapMessage/confirmPeer. Fully symmetric,
+// beginPakeAttempt/confirmPeer. Fully symmetric,
 // no generator/enterer roles: both sides run the exact same "Enter a
 // phrase" flow (see the pairing design doc).
 // ---------------------------------------------------------------------------
@@ -842,10 +771,6 @@ function applyEffects(effectsJson) {
  * JSON.parse'd wire message (`{"type":"pake1",...}` or
  * `{"type":"pake-confirm",...}`).
  */
-function onPairingBootstrapMessage(pairingId, senderPubkey, type, payload) {
-  applyEffects(callCore.handleBootstrapMessage(pairingId, senderPubkey, type, JSON.stringify(payload)));
-}
-
 /** A human tapped "Pair with [name]?" for a candidate the SPAKE2 exchange
  * already cryptographically confirmed — mirrors
  * CameraAgentService.confirmPeer. */
@@ -870,7 +795,7 @@ function confirmPeer(pairingId, publicKeyHex) {
 // can be live at a time, mirrors CameraAgentService/WebRtcEngine).
 //
 // See call-core/src/call_arbitration.rs's module docs ("Invariants") before
-// changing onOfferReceived, onShouldOffer, hangUp, requestCall,
+// changing hangUp, requestCall,
 // acceptIncomingCall, or anything else call-arbitration-related — the single
 // write-up of the invariants that module enforces. This file is the
 // imperative shell around it: forward events in, execute whatever
@@ -1162,34 +1087,6 @@ function hangUp() {
 
 function sendBusy(pairingId, callId) { sendConfirmedOrPending(pairingId, () => callCore.buildBusyPayload(callId)); }
 
-/** See callCore.handleShouldOffer's own doc for the guard sequence (pubkey
- * tie-break first, then busy, then redelivery). This function's whole job
- * is forwarding the event in and executing whatever CallEffects come back.
- * `autoAnswer` isn't a web feature — always `false` here, same as
- * onOfferReceived. */
-function onShouldOffer(pairingId, callId, ownPubkeyHex, peerPubkeyHex) {
-  applyCallEffects(callCore.handleShouldOffer(pairingId, callId, ownPubkeyHex, peerPubkeyHex, false));
-}
-
-/**
- * See callCore.handleOffer's own doc for the full guard sequence (busy,
- * already-active redelivery, already-ringing redelivery, then the
- * pubkey-tie-break fast-path that applies immediately with no ring —
- * call_arbitration invariant #3). Auto-answer isn't a web feature — every
- * incoming call rings for a manual Accept/Decline. Mirrors
- * CameraAgentService.onOffer.
- */
-function onOfferReceived(pairingId, sdp, callId) {
-  applyCallEffects(callCore.handleOffer(pairingId, callId, sdp, false));
-}
-
-function onPeerHangup(pairingId, callId) {
-  // Gated on callId, not just pairingId — inside callCore.handlePeerHangup:
-  // a "bye" from an attempt this client has already moved on from must not
-  // tear down a call that isn't the one it's actually about.
-  applyCallEffects(callCore.handlePeerHangup(pairingId, callId));
-}
-
 // ICE-candidate evidence for the current PeerConnection, and the "why did this
 // call never connect?" diagnosis ('no_direct_path' | 'udp_blocked' | undefined)
 // drawn from it, live in call-core's ice_evidence module (shared with Android's
@@ -1281,26 +1178,16 @@ async function handleOffer(pairingId, callId, sdp) {
 // async work actually completes, leaving a window where a near-simultaneous
 // duplicate (redelivery is real under relay load) could pass a
 // signalingState-only check too. A *second*, independent guard from
-// callCore.shouldApplyAnswer's own pairingId/callId check below: this one
-// is about *this call's own negotiation state*, that one's about *which
-// call* — call-core has no visibility into pc, so it can't replace this
-// half.
+// call-core's own pairingId/callId check (done by its signal router before an
+// answer ever reaches here): this one is about *this call's own negotiation
+// state*, that one's about *which call* — call-core has no visibility into
+// pc, so it can't replace this half.
 let answerApplied = false;
 
 async function handleAnswer(sdp) {
   if (!pc || pc.signalingState !== 'have-local-offer' || answerApplied) return;
   answerApplied = true;
   await pc.setRemoteDescription({ type: 'answer', sdp });
-}
-
-/** Mirrors CameraAgentService.onAnswer: the *which call* guard
- * (call-core's own answer_applied flag) lives in
- * callCore.shouldApplyAnswer; handleAnswer's own answerApplied flag above
- * is the *second*, independent WebRTC-signalingState-level guard. */
-async function onAnswer(pairingId, sdp, callId) {
-  if (callCore.shouldApplyAnswer(pairingId, callId)) {
-    await handleAnswer(sdp).catch((err) => failCallAttempt('handleAnswer failed (bad SDP?)', err));
-  }
 }
 
 function applyIceCandidate(sdpMid, sdpMLineIndex, candidate) {
@@ -1311,24 +1198,6 @@ function applyIceCandidate(sdpMid, sdpMLineIndex, candidate) {
   if (!pc) return;
   callCore.iceNoteRemoteCandidate(candidate);
   pc.addIceCandidate({ candidate, sdpMid, sdpMLineIndex }).catch((err) => console.warn('bad ice payload or candidate arrived before remote description', err));
-}
-
-/** See callCore.handleRemoteIce's own doc — folds the id/callId gating into
- * one call-core decision: buffer if it matches the pending ring, apply if
- * it matches the active call, drop silently otherwise. try/catch, not a
- * bare call: this is one of the few call-core exports that can genuinely
- * throw — without it, a malformed/corrupted ICE payload from a confirmed
- * peer could throw uncaught inside SimplePool's own onevent callback,
- * silently aborting dispatchFromConfirmedPeer mid-message. */
-function onRemoteIce(pairingId, callId, payload) {
-  let outcome;
-  try {
-    outcome = JSON.parse(callCore.handleRemoteIce(pairingId, callId, payload.sdpMid ?? null, payload.sdpMLineIndex, payload.candidate));
-  } catch (err) {
-    console.warn('onRemoteIce: callCore.handleRemoteIce failed, dropping candidate', err);
-    return;
-  }
-  if (outcome.outcome === 'Apply') applyIceCandidate(outcome.sdp_mid, outcome.sdp_m_line_index, outcome.candidate);
 }
 
 /**

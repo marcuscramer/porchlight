@@ -61,9 +61,9 @@ data class CandidatePeer(val publicKey: String, val name: String)
  *   possible yet — neither side knows the other's pubkey until this
  *   exchange itself reveals it — and none is needed: a SPAKE2 blinded
  *   message is safe to publish in the open by construction. See
- *   [Listener.onPairingBootstrapMessage] — the actual SPAKE2 state machine
- *   lives in `CameraAgentService`/`call-core`, not here; this class only
- *   transports and dispatches the raw messages.
+ *   `call-core`'s signal router hands these to `CameraAgentService`, which
+ *   executes the resulting pairing effects — the actual SPAKE2 state machine
+ *   lives in `call-core`, not here; this class only transports them.
  * - **Confirmed** (heartbeat/call/offer/answer/ice/bye/busy): every message
  *   is gift-wrapped (see [publish]'s doc) — the pubkey a relay actually
  *   sees is a fresh random one-time key per message, never either side's
@@ -110,61 +110,19 @@ class NostrSignalingClient(
          * [CallCoreBridge.PresenceUpdateResult.callEffects] the same way it
          * already applies every other `CallEffect` list. */
         fun onPresenceUpdate(result: CallCoreBridge.PresenceUpdateResult)
-        /** A wrap event for [pairingId] was just accepted (routed, verified,
-         * decrypted, and newer than — or a different event sharing the same
-         * second as — that pairing's own previous
-         * [ConfirmedPeer.lastSignalCreatedAt]/[ConfirmedPeer.lastSignalEventId])
-         * — the listener must persist [createdAt]/[eventId] as that
-         * pairing's new `lastSignalCreatedAt`/`lastSignalEventId`
-         * immediately (see [Config.Pairing.lastSignalCreatedAt]'s own doc),
-         * not batched with some later save, so a redelivery of this exact
-         * event is still rejected even if the app crashes/closes right
-         * after this call. */
-        fun onSignalProcessed(pairingId: String, createdAt: Long, eventId: String)
-        /** [callId] identifies which call attempt is ending — the listener
-         * must ignore this if it doesn't match whatever attempt it thinks is
-         * currently active, since a "bye" from an already-abandoned attempt
-         * can otherwise race a fresh one to the same pairing. */
-        fun onPeerHangup(pairingId: String, callId: String)
-        /** [callId] identifies which of our own call attempts this busy
-         * reply is about — see [onPeerHangup]'s own doc for why: a busy
-         * about an attempt this device has already moved on from must not
-         * tear down a different, later one. [ownPubkeyHex]/[peerPubkeyHex]:
-         * same tie-break inputs [onPresenceUpdate]'s own `markSeen` call
-         * takes — see [CallCoreBridge.handlePeerBusyReply]'s own doc for why
-         * this needs them too now. */
-        fun onPeerBusy(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, callId: String)
+        /** One relay event, routed by `call-core` (see
+         * [CallCoreBridge.routeEvent]). The listener executes, in this order:
+         * persist [CallCoreBridge.RouteResult.signal] (immediately, not
+         * batched, so a redelivery of that exact event is still rejected even
+         * if the app dies right after), apply `update`, run `actions`, then
+         * `bootstrapEffects`. A heartbeat answer is already sent by this
+         * class and not among the actions. */
+        fun onRouted(result: CallCoreBridge.RouteResult)
         /** One [monitor] sweep's worth of [CallCoreBridge.checkCallTimeout]
          * effects — the listener applies these the same way it already
          * applies every other `CallEffect` list. Usually empty; non-empty
          * only when a claimed-but-never-connected call slot just expired. */
         fun onCallTimeoutCheck(effects: List<CallCoreBridge.CallEffect>)
-        fun onPeerNameUpdated(pairingId: String, name: String)
-        /**
-         * A raw, verified-signature bootstrap message arrived for a pending
-         * pairing attempt — [type] is `"pake1"` (the peer's outbound SPAKE2
-         * blinded message) or `"pake-confirm"` (the peer's key-confirmation
-         * HMAC tag plus their device name, sealed under keys only the other
-         * side of a successful exchange has). [senderPubkey] is this
-         * message's sender — already signature-verified, but *not yet*
-         * trusted as the pairing's real peer. The listener forwards this
-         * straight into `CallCoreBridge`/`call-core`, which owns the entire
-         * state machine now.
-         */
-        fun onPairingBootstrapMessage(pairingId: String, senderPubkey: String, type: String, payload: JSONObject)
-        /** [callId] is this call attempt's correlation id — the listener
-         * must remember it and echo it on every message it sends for this
-         * attempt (offer/answer/ice/bye), and reject anything it receives
-         * for this pairing tagged with a different one.
-         * [ownPubkeyHex]/[peerPubkeyHex]: the pubkey tie-break that decides
-         * whether this side should actually offer now lives inside
-         * `CallCoreBridge.handleShouldOffer` itself — this method is called
-         * unconditionally on every `"call"` message from a confirmed peer,
-         * same as every other message type. */
-        fun onShouldOffer(pairingId: String, callId: String, ownPubkeyHex: String, peerPubkeyHex: String)
-        fun onOffer(pairingId: String, sdp: String, callId: String)
-        fun onAnswer(pairingId: String, sdp: String, callId: String)
-        fun onRemoteIce(pairingId: String, sdpMid: String?, sdpMLineIndex: Int, candidate: String, callId: String)
     }
 
     /** Confirmed peer, keyed by pairing. [ownPrivateKeyHex] is *this side's*
@@ -179,6 +137,7 @@ class NostrSignalingClient(
         val peerPublicKey: String,
         val lastSignalCreatedAt: Long,
         val lastSignalEventId: String,
+        val autoAnswer: Boolean,
     )
 
     /**
@@ -458,13 +417,7 @@ class NostrSignalingClient(
                 // safeExecute: this is NostrClient's own event-delivery
                 // thread, which can hand us one more buffered/in-flight
                 // event racing teardown.
-                executor.safeExecute {
-                    if (!CallCoreBridge.markSeenOrIsDuplicate(event.id)) return@safeExecute
-                    when (event.kind) {
-                        WRAP_KIND -> handleWrapEvent(event)
-                        SIGNAL_KIND -> handleBootstrapEvent(event)
-                    }
-                }
+                executor.safeExecute { routeIncoming(event) }
             }
             // A relay actively terminating our REQ (NIP-01 CLOSED — rate
             // limiting, auth required, PoW required on the filter, etc.)
@@ -497,95 +450,21 @@ class NostrSignalingClient(
     }
 
     /**
-     * Unwraps a gift-wrapped signal event and dispatches it to a *confirmed*
-     * pairing — see [publish]'s doc for the wrap's shape. The wrap's own `p`
-     * tag is one of this device's per-pairing pubkeys, which directly (and
-     * uniquely — each pairing's own key is freshly generated, never shared)
-     * identifies which pairing this is *before* anything is even decrypted.
-     * `CallCoreBridge.unwrapWrappedEventForAny` does that routing plus the
-     * entire verify-decrypt-verify-decrypt chain (including the
-     * pinned-peer identity check) — see its own doc.
+     * Everything about an incoming event — dedup, unwrap and verify,
+     * parsing, presence, the per-message decisions — is `call-core`'s
+     * `signal_router`; this only hands it a fresh snapshot of the pairings,
+     * sends the heartbeat answer it asks for, and passes the rest on.
      */
-    private fun handleWrapEvent(event: Event) {
-        val confirmedPeers = resolver.confirmedPeers()
-        val candidates = confirmedPeers.map {
-            CallCoreBridge.WrapEventCandidate(it.pairingId, it.ownPrivateKeyHex, it.peerPublicKey, it.lastSignalCreatedAt, it.lastSignalEventId)
+    private fun routeIncoming(event: Event) {
+        val confirmed = resolver.confirmedPeers().map {
+            CallCoreBridge.RoutePeer(it.pairingId, it.ownPrivateKeyHex, it.peerPublicKey, it.lastSignalCreatedAt, it.lastSignalEventId, it.autoAnswer)
         }
-        val routed = CallCoreBridge.unwrapWrappedEventForAny(event.toJson(), candidates) ?: return
-        val pairing = confirmedPeers.find { it.pairingId == routed.pairingId } ?: return
-        // See Listener.onSignalProcessed's own doc — persisted before this
-        // is even dispatched, so a redelivery of this exact event (or
-        // anything older) is rejected by unwrapWrappedEventForAny itself on
-        // any subsequent attempt, reload/restart included.
-        listener.onSignalProcessed(routed.pairingId, routed.signalCreatedAt, routed.signalEventId)
-        // Parsing (type extraction, per-type field shape/length validation)
-        // is CallCoreBridge.parseSignalPayload's job — dispatchFromConfirmedPeer
-        // still gets called even when this is null: a validly wrapped/
-        // decrypted/signature-verified message from a confirmed peer must
-        // still register as "this peer is alive" for presence purposes
-        // regardless of whether its own content parses.
-        dispatchFromConfirmedPeer(pairing, CallCoreBridge.parseSignalPayload(routed.payloadJson))
-    }
-
-    /**
-     * Dispatches an unwrapped, unencrypted bootstrap-phase event (see the
-     * class doc) — matched to a pending pairing purely by its `d` tag
-     * (the passphrase-derived rendezvous point), since neither side's real
-     * pubkey is known yet. Signature verification is
-     * `CallCoreBridge.verifyBootstrapEvent`'s job now (see its own doc) —
-     * still required even though bootstrap content is plaintext.
-     */
-    private fun handleBootstrapEvent(event: Event) {
-        val verified = CallCoreBridge.verifyBootstrapEvent(event.toJson()) ?: return
-        val pairingId = resolver.pendingPairings().find { it.rendezvousTag == verified.rendezvousTag }?.pairingId ?: return
-        val payload = runCatching { JSONObject(verified.payloadJson) }.getOrNull() ?: return
-        val type = payload.optString("type").ifBlank { return }
-        listener.onPairingBootstrapMessage(pairingId, verified.senderPubkeyHex, type, payload)
-    }
-
-    /**
-     * [message] is `null` for an unrecognized type or a malformed payload —
-     * `markSeen` still runs unconditionally first regardless (a validly
-     * wrapped/decrypted/signature-verified message from a confirmed peer
-     * means they're alive, independent of whether this device can make
-     * sense of what they actually said).
-     */
-    private fun dispatchFromConfirmedPeer(pairing: ConfirmedPeer, message: CallCoreBridge.SignalMessage?) {
-        val pairingId = pairing.pairingId
-        val ownPubkeyHex = ownPubkeyHexFor(pairing.ownPrivateKeyHex)
-        val heartbeat = message as? CallCoreBridge.SignalMessage.Heartbeat
-        val presence = CallCoreBridge.markSeen(pairingId, ownPubkeyHex, pairing.peerPublicKey, System.currentTimeMillis(), heartbeat?.busy, heartbeat?.hello == true)
-        // A peer that just came online asked for an immediate answer (see
-        // CallCoreBridge.PresenceEffect.ReplyHeartbeat) — a signaling-layer
-        // matter, so it's handled here and never reaches the UI listener.
-        if (presence.presenceEffects.any { it is CallCoreBridge.PresenceEffect.ReplyHeartbeat && it.pairingId == pairingId }) {
-            sendHeartbeatTo(pairing, CallCoreBridge.isCallActive())
+        val pending = resolver.pendingPairings().mapNotNull { p -> p.rendezvousTag?.let { CallCoreBridge.RoutePending(p.pairingId, it) } }
+        val result = CallCoreBridge.routeEvent(event.toJson(), resolver.deviceName(), confirmed, pending, System.currentTimeMillis())
+        for (action in result.actions) {
+            if (action is CallCoreBridge.RouteAction.SendHeartbeat) sendConfirmedOrPending(action.pairingId) { action.payloadJson }
         }
-        listener.onPresenceUpdate(presence.copy(presenceEffects = presence.presenceEffects.filterNot { it is CallCoreBridge.PresenceEffect.ReplyHeartbeat }))
-        message ?: return
-        when (message) {
-            is CallCoreBridge.SignalMessage.Heartbeat -> {
-                if (message.name.isNotBlank()) listener.onPeerNameUpdated(pairingId, message.name)
-            }
-            is CallCoreBridge.SignalMessage.Leaving -> listener.onPresenceUpdate(CallCoreBridge.handleLeavingMessage(pairingId))
-            is CallCoreBridge.SignalMessage.Bye -> listener.onPeerHangup(pairingId, message.callId)
-            is CallCoreBridge.SignalMessage.Busy -> listener.onPeerBusy(pairingId, ownPubkeyHex, pairing.peerPublicKey, message.callId)
-            is CallCoreBridge.SignalMessage.Call -> {
-                // .find, not .first: confirmedPeers() re-reads Config fresh
-                // every call, so a concurrent removePairing/reconnect
-                // between handleWrapEvent's own lookup and this one is a
-                // real possibility, not just theoretical — must degrade to
-                // a no-op, not throw.
-                val peer = resolver.confirmedPeers().find { it.pairingId == pairingId }
-                if (peer != null) {
-                    listener.onShouldOffer(pairingId, message.callId, ownPubkeyHexFor(peer.ownPrivateKeyHex), peer.peerPublicKey)
-                }
-            }
-            is CallCoreBridge.SignalMessage.Offer -> listener.onOffer(pairingId, message.sdp, message.callId)
-            is CallCoreBridge.SignalMessage.Answer -> listener.onAnswer(pairingId, message.sdp, message.callId)
-            is CallCoreBridge.SignalMessage.Ice ->
-                listener.onRemoteIce(pairingId, message.sdpMid, message.sdpMLineIndex, message.candidate, message.callId)
-        }
+        listener.onRouted(result.copy(actions = result.actions.filterNot { it is CallCoreBridge.RouteAction.SendHeartbeat }))
     }
 
     private fun heartbeatTick() {
@@ -710,10 +589,6 @@ class NostrSignalingClient(
      * `hello`. Deliberately a fresh build: [CallCoreBridge.buildHeartbeatPayload]
      * only sets `hello` once per [CallCoreBridge.requestHello], never here
      * (that would make two devices answer each other forever). */
-    private fun sendHeartbeatTo(peer: ConfirmedPeer, busy: Boolean) {
-        sendToConfirmedPeer(peer) { CallCoreBridge.buildHeartbeatPayload(resolver.deviceName(), busy) }
-    }
-
     private fun sendConfirmedOrPending(pairingId: String, buildPayload: () -> String?) {
         val peer = resolver.confirmedPeers().find { it.pairingId == pairingId } ?: return
         sendToConfirmedPeer(peer, buildPayload)
@@ -730,8 +605,7 @@ class NostrSignalingClient(
     /**
      * Sends one more bootstrap-phase message for an in-progress pairing
      * attempt — used by `CameraAgentService` to publish its own
-     * `pake-confirm` the moment it's computed (see
-     * [Listener.onPairingBootstrapMessage]). [targetPubkeyHex] is the
+     * `pake-confirm` the moment it's computed. [targetPubkeyHex] is the
      * candidate's pubkey, already known by this point (this is only ever
      * called *after* their `pake1` arrived) — tagging directly at them
      * alongside the rendezvous `d` tag means a relay doesn't have to

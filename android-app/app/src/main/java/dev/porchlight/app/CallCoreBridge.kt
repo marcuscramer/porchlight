@@ -3,17 +3,6 @@ package dev.porchlight.app
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** JNI has no clean nullable primitive, so an `Option<bool>` crossing that
- * boundary (see [CallCoreBridge.markSeen]'s `peerBusy` param) uses the same
- * sentinel-value convention this project already applies to nullable
- * strings there (e.g. `sdpMid`'s empty-string-means-null): `-1` for `null`,
- * `0`/`1` for `false`/`true`. */
-private fun Boolean?.toSentinelInt(): Int = when (this) {
-    null -> -1
-    false -> 0
-    true -> 1
-}
-
 /**
  * Kotlin wrapper over the `call-core` Rust crate's pairing-bootstrap state
  * machine. Replaces `CameraAgentService`'s own hand-written
@@ -53,9 +42,6 @@ object CallCoreBridge {
     private external fun nativeBuildBootstrapPayload(pairingId: String): String?
 
     @JvmStatic
-    private external fun nativeHandleBootstrapMessage(pairingId: String, senderPubkey: String, type: String, payloadJson: String): String
-
-    @JvmStatic
     private external fun nativeHandleTimeout(pairingId: String, generation: Long): String
 
     @JvmStatic
@@ -69,27 +55,6 @@ object CallCoreBridge {
     private external fun nativeRequestCall(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, peerOnline: Boolean, nowMs: Long): String?
 
     @JvmStatic
-    private external fun nativeHandleShouldOffer(
-        pairingId: String,
-        callId: String,
-        ownPubkeyHex: String,
-        peerPubkeyHex: String,
-        autoAnswer: Boolean,
-    ): String
-
-    @JvmStatic
-    private external fun nativeHandleOffer(pairingId: String, callId: String, sdp: String, autoAnswer: Boolean): String
-
-    @JvmStatic
-    private external fun nativeShouldApplyAnswer(pairingId: String, callId: String): Boolean
-
-    // sdpMid: "" means null (see call-core/src/android.rs's own note) —
-    // sidesteps JNI's null-JString handling; a real ICE sdpMid is never
-    // itself an empty string.
-    @JvmStatic
-    private external fun nativeHandleRemoteIce(pairingId: String, callId: String, sdpMid: String, sdpMLineIndex: Int, candidate: String): String
-
-    @JvmStatic
     private external fun nativeAcceptIncomingCall(nowMs: Long): String?
 
     @JvmStatic
@@ -100,9 +65,6 @@ object CallCoreBridge {
 
     @JvmStatic
     private external fun nativeCheckCallTimeout(nowMs: Long): String
-
-    @JvmStatic
-    private external fun nativeHandlePeerHangup(pairingId: String, callId: String): String
 
     @JvmStatic
     private external fun nativeHandlePeerBusy(pairingId: String, callId: String): String
@@ -126,26 +88,17 @@ object CallCoreBridge {
     // call-core/src/android.rs's own note on why: no native JNI string
     // array support, unlike wasm-bindgen's `Vec<String>` on the web side). ---
 
-    // peerBusy: tri-state (-1/0/1 for unknown/false/true) — see the Rust
-    // crate's own `nativeMarkSeen` doc for why JNI needs a sentinel here
-    // instead of a real nullable boolean.
     @JvmStatic
-    private external fun nativeMarkSeen(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, nowMs: Long, peerBusy: Int, peerHello: Boolean): String
+    private external fun nativeRouteEvent(eventJson: String, contextJson: String, nowMs: Long): String
 
     @JvmStatic
     private external fun nativeRequestHello()
-
-    @JvmStatic
-    private external fun nativeHandleLeavingMessage(pairingId: String): String
 
     @JvmStatic
     private external fun nativeCheckOnlineTimeouts(nowMs: Long): String
 
     @JvmStatic
     private external fun nativeIsOnline(pairingId: String): Boolean
-
-    @JvmStatic
-    private external fun nativeHandlePeerBusyReply(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, callId: String, nowMs: Long): String
 
     @JvmStatic
     private external fun nativeIsPeerBusy(pairingId: String): Boolean
@@ -173,16 +126,7 @@ object CallCoreBridge {
     private external fun nativeBuildWrappedEvent(ownPrivateKeyHex: String, targetPubkeyHex: String, payloadJson: String): String?
 
     @JvmStatic
-    private external fun nativeUnwrapWrappedEventForAny(wrapEventJson: String, candidatesJson: String): String?
-
-    @JvmStatic
     private external fun nativeBuildBootstrapEvent(ownPrivateKeyHex: String, rendezvousTag: String, targetPubkeyHex: String, payloadJson: String): String?
-
-    @JvmStatic
-    private external fun nativeVerifyBootstrapEvent(eventJson: String): String?
-
-    @JvmStatic
-    private external fun nativeMarkSeenOrIsDuplicate(eventId: String): Boolean
 
     @JvmStatic
     private external fun nativeBuildRelayFilters(confirmedOwnPubkeysJson: String, pendingRendezvousTagsJson: String): String
@@ -214,9 +158,6 @@ object CallCoreBridge {
 
     @JvmStatic
     private external fun nativeBuildIcePayload(sdpMid: String, sdpMLineIndex: Int, candidate: String, callId: String): String?
-
-    @JvmStatic
-    private external fun nativeParseSignalPayload(payloadJson: String): String?
 
     @JvmStatic
     private external fun nativeProtocolConstants(): String?
@@ -339,13 +280,6 @@ object CallCoreBridge {
         data class CreateOffer(val pairingId: String, val callId: String) : AcceptOutcome
     }
 
-    /** See the Rust crate's own `IceOutcome` doc. */
-    sealed interface IceOutcome {
-        data object Buffered : IceOutcome
-        data class Apply(val sdpMid: String?, val sdpMLineIndex: Int, val candidate: String) : IceOutcome
-        data object Dropped : IceOutcome
-    }
-
     /** See the Rust crate's own `TickOutcome` doc. */
     sealed interface TickOutcome {
         data object Stale : TickOutcome
@@ -412,13 +346,6 @@ object CallCoreBridge {
         )
     }
 
-    /** Drives the entire SPAKE2 pairing state machine for one incoming
-     * bootstrap message — see the Rust crate's own doc. [type] and
-     * [payload] mirror the wire message's own shape exactly (as already
-     * parsed by the caller from the relay event). */
-    fun handleBootstrapMessage(pairingId: String, senderPubkey: String, type: String, payload: JSONObject): List<Effect> =
-        parseEffects(nativeHandleBootstrapMessage(pairingId, senderPubkey, type, payload.toString()))
-
     /** The live-window timeout fired for [pairingId] — see the Rust crate's
      * own doc for why [generation] (from [StartResult]) matters: a no-op
      * unless it's still the same, unresolved attempt this timeout was
@@ -449,32 +376,6 @@ object CallCoreBridge {
             effects = parseCallEffects(obj.getJSONArray("effects").toString()),
         )
     }
-
-    /** See the Rust crate's own `handle_should_offer` doc — the pubkey
-     * tie-break check now lives inside that function itself, so the caller
-     * just forwards both pubkeys through unconditionally like every other
-     * message type already does. [autoAnswer] is looked up by the caller
-     * (its own contacts list), same as [handleOffer]. */
-    fun handleShouldOffer(pairingId: String, callId: String, ownPubkeyHex: String, peerPubkeyHex: String, autoAnswer: Boolean): List<CallEffect> =
-        parseCallEffects(nativeHandleShouldOffer(pairingId, callId, ownPubkeyHex, peerPubkeyHex, autoAnswer))
-
-    /** See the Rust crate's own `handle_offer` doc. [autoAnswer] is looked
-     * up by the caller (its own contacts list) — `call-core` doesn't own
-     * contacts. No longer takes a `hasActivePeerConnection` flag: dropped
-     * from the Rust signature once found to be provably redundant with
-     * `offer_applied`, state `call-core` already owned itself. */
-    fun handleOffer(pairingId: String, callId: String, sdp: String, autoAnswer: Boolean): List<CallEffect> =
-        parseCallEffects(nativeHandleOffer(pairingId, callId, sdp, autoAnswer))
-
-    /** See the Rust crate's own `should_apply_answer` doc — `true` at most
-     * once per call; a redelivered answer returns `false`. The real WebRTC
-     * `signalingState` check stays a *second*, independent guard inside
-     * [WebRtcEngine.handleRemoteAnswer], not replaced by this. */
-    fun shouldApplyAnswer(pairingId: String, callId: String): Boolean = nativeShouldApplyAnswer(pairingId, callId)
-
-    /** See the Rust crate's own `handle_remote_ice` doc. */
-    fun handleRemoteIce(pairingId: String, callId: String, sdpMid: String?, sdpMLineIndex: Int, candidate: String): IceOutcome =
-        parseIceOutcome(nativeHandleRemoteIce(pairingId, callId, sdpMid ?: "", sdpMLineIndex, candidate))
 
     /** `null` if there's no live pending ring (e.g. a stray UI tap after
      * the call already resolved some other way) — see the Rust crate's own
@@ -516,9 +417,6 @@ object CallCoreBridge {
      * same periodic tick that already drives [checkOnlineTimeouts]. */
     fun checkCallTimeout(nowMs: Long): List<CallEffect> = parseCallEffects(nativeCheckCallTimeout(nowMs))
 
-    /** See the Rust crate's own `handle_peer_hangup` doc. */
-    fun handlePeerHangup(pairingId: String, callId: String): List<CallEffect> = parseCallEffects(nativeHandlePeerHangup(pairingId, callId))
-
     /** See the Rust crate's own `handle_peer_busy` doc. */
     fun handlePeerBusy(pairingId: String, callId: String): List<CallEffect> = parseCallEffects(nativeHandlePeerBusy(pairingId, callId))
 
@@ -546,37 +444,10 @@ object CallCoreBridge {
 
     // --- Presence / adaptive heartbeat ---
 
-    /** Mirrors `markSeen`+`setOnline`'s online branch fused together — see
-     * the Rust crate's own `presence::mark_seen` doc. Call unconditionally
-     * for every dispatched message from a confirmed peer, before even
-     * looking at its type. [peerBusy] is the sender's own self-reported
-     * "am I on a call" status — `null` for every message type except
-     * `"heartbeat"` (the only payload that actually carries this field);
-     * pass whatever was parsed (or wasn't found) straight through rather
-     * than branching on message type at the call site. */
-    fun markSeen(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, nowMs: Long, peerBusy: Boolean?, peerHello: Boolean): PresenceUpdateResult =
-        parsePresenceUpdateResult(nativeMarkSeen(pairingId, ownPubkeyHex, peerPubkeyHex, nowMs, peerBusy.toSentinelInt(), peerHello))
-
     /** See the Rust crate's own `presence::request_hello` doc: the next
      * heartbeat built asks every peer for an immediate reply. Call when
      * signaling connectivity returns. */
     fun requestHello() = nativeRequestHello()
-
-    /** See the Rust crate's own `presence::handle_leaving_message` doc —
-     * call for the `"leaving"` wire-message case. */
-    fun handleLeavingMessage(pairingId: String): PresenceUpdateResult = parsePresenceUpdateResult(nativeHandleLeavingMessage(pairingId))
-
-    /** Mirrors receiving a `"busy"` reply to our own outgoing call attempt
-     * — see the Rust crate's own `presence::handle_peer_busy_reply` doc.
-     * Fuses what used to be two separate calls this class had to remember
-     * to make together (mark the peer busy immediately, and release this
-     * device's own claimed call slot) into one. [ownPubkeyHex]/
-     * [peerPubkeyHex]: the same tie-break inputs [markSeen] takes — this
-     * call now performs its own online transition rather than assuming the
-     * caller already ran [markSeen] for this same message (see the Rust
-     * doc for why that assumption was a real gap, not just style). */
-    fun handlePeerBusyReply(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, callId: String, nowMs: Long): PresenceUpdateResult =
-        parsePresenceUpdateResult(nativeHandlePeerBusyReply(pairingId, ownPubkeyHex, peerPubkeyHex, callId, nowMs))
 
     /** See the Rust crate's own `presence::is_peer_busy` doc — used to seed
      * a contact's initial UI state (e.g. after [restartAgent] rebuilds the
@@ -610,10 +481,6 @@ object CallCoreBridge {
 
     // --- Nostr protocol ---
 
-    /** Everything a verified bootstrap event hands back — see the Rust
-     * crate's own `nostr_protocol::VerifiedBootstrapEvent` doc. */
-    data class VerifiedBootstrapEvent(val senderPubkeyHex: String, val rendezvousTag: String, val payloadJson: String)
-
     /** One relay filter's worth of data — see the Rust crate's own
      * `nostr_protocol::FilterSpec` doc for why this is deliberately not a
      * richer `Filter` type: the caller translates this into whatever its
@@ -632,75 +499,65 @@ object CallCoreBridge {
     fun buildWrappedEvent(ownPrivateKeyHex: String, targetPubkeyHex: String, payloadJson: String): String? =
         nativeBuildWrappedEvent(ownPrivateKeyHex, targetPubkeyHex, payloadJson)
 
-    /** One confirmed pairing's routing-and-decryption keys — see the Rust
-     * crate's own `nostr_protocol::WrapEventCandidate` doc, including for
-     * why [lastSignalCreatedAt]/[lastSignalEventId] (mirror
-     * [Config.Pairing.lastSignalCreatedAt]/[Config.Pairing.lastSignalEventId])
-     * are here now — *both*, not just the timestamp: Nostr `created_at` is
-     * whole seconds, so two different, legitimately back-to-back messages
-     * (a `"call"` immediately followed by its own `"offer"`) routinely
-     * share one, and only the id actually disambiguates them. */
-    data class WrapEventCandidate(
+    /** One confirmed pairing as the router needs it — see the Rust crate's
+     * own `signal_router::RoutePeer`. [autoAnswer] is the contact's setting
+     * at this moment. */
+    data class RoutePeer(
         val pairingId: String,
         val ownPrivateKeyHex: String,
         val peerPublicKey: String,
         val lastSignalCreatedAt: Long,
         val lastSignalEventId: String,
+        val autoAnswer: Boolean,
     )
 
-    /** What a successfully routed-and-decrypted wrap event hands back —
-     * see the Rust crate's own `nostr_protocol::RoutedSignalPayload` doc.
-     * [signalCreatedAt]/[signalEventId]: the caller must persist both as
-     * that pairing's new `lastSignalCreatedAt`/`lastSignalEventId` (see
-     * those fields' own doc). */
-    data class RoutedSignalPayload(val pairingId: String, val payloadJson: String, val signalCreatedAt: Long, val signalEventId: String)
+    /** A pairing attempt still in progress, found by its rendezvous tag. */
+    data class RoutePending(val pairingId: String, val rendezvousTag: String)
 
-    /** Mirrors `handleWrapEvent`'s full `p`-tag routing + verify-decrypt-
-     * verify-decrypt chain — see the Rust crate's own
-     * `nostr_protocol::unwrap_wrapped_event_for_any` doc. Replaces this
-     * class's own hand-rolled `event.tags.find { it[0] == "p" }` +
-     * `confirmedPeers.find { ownPubkeyHexFor(...) == recipientPubkeyHex }`
-     * linear search — the caller now just hands over every confirmed
-     * peer's own routing/decryption keys and gets back which one (if any)
-     * actually matched, already decrypted. `null` if the event doesn't
-     * route to any of [candidates], is strictly older than (or the exact
-     * same event as) that candidate's own
-     * [WrapEventCandidate.lastSignalCreatedAt]/[WrapEventCandidate.lastSignalEventId]
-     * (a relay redelivering something already processed — see that field's
-     * own doc), fails to decrypt/verify once routed, or a panic. */
-    fun unwrapWrappedEventForAny(wrapEventJson: String, candidates: List<WrapEventCandidate>): RoutedSignalPayload? {
-        val candidatesJson = JSONArray(
-            candidates.map {
-                JSONObject()
-                    .put("pairing_id", it.pairingId)
-                    .put("own_private_key_hex", it.ownPrivateKeyHex)
-                    .put("peer_public_key", it.peerPublicKey)
-                    .put("last_signal_created_at", it.lastSignalCreatedAt)
-                    .put("last_signal_event_id", it.lastSignalEventId)
-            },
-        )
-        val json = nativeUnwrapWrappedEventForAny(wrapEventJson, candidatesJson.toString()) ?: return null
-        val obj = JSONObject(json)
-        return RoutedSignalPayload(obj.getString("pairing_id"), obj.getString("payload_json"), obj.getLong("signal_created_at"), obj.getString("signal_event_id"))
+    /** The pairing's new "last processed signal" — persist it before doing
+     * anything else with the result. */
+    data class ProcessedSignal(val pairingId: String, val createdAt: Long, val eventId: String)
+
+    /** What the shell does with a routed event beyond presence and call
+     * effects — see the Rust crate's own `signal_router::RouteAction`. */
+    sealed interface RouteAction {
+        data class SendHeartbeat(val pairingId: String, val payloadJson: String) : RouteAction
+        data class UpdatePeerName(val pairingId: String, val name: String) : RouteAction
+        data class ApplyRemoteAnswer(val pairingId: String, val sdp: String) : RouteAction
+        data class AddRemoteIce(val pairingId: String, val sdpMid: String?, val sdpMLineIndex: Int, val candidate: String) : RouteAction
     }
 
-    /** One signaling message exchanged between confirmed peers — see the
-     * Rust crate's own `nostr_protocol::SignalMessage` doc. Used to be six
-     * independently hand-built `JSONObject`s on the send side
-     * (`NostrSignalingClient.hangUp`/`sendBusy`/`sendCall`/`sendOffer`/
-     * `sendAnswer`/`sendIce`) and one hand-parsed `when` on the receive
-     * side (`dispatchFromConfirmedPeer`'s own per-type extraction) — both
-     * now go through [buildHeartbeatPayload]/etc. and [parseSignalPayload]
-     * instead. */
-    sealed interface SignalMessage {
-        data class Heartbeat(val name: String, val busy: Boolean?, val hello: Boolean) : SignalMessage
-        data object Leaving : SignalMessage
-        data class Bye(val callId: String) : SignalMessage
-        data class Busy(val callId: String) : SignalMessage
-        data class Call(val callId: String) : SignalMessage
-        data class Offer(val sdp: String, val callId: String) : SignalMessage
-        data class Answer(val sdp: String, val callId: String) : SignalMessage
-        data class Ice(val sdpMid: String?, val sdpMLineIndex: Int, val candidate: String, val callId: String) : SignalMessage
+    /** The ordered result of one relay event: persist [signal], apply
+     * [update], run [actions], then [bootstrapEffects]. */
+    data class RouteResult(
+        val signal: ProcessedSignal?,
+        val update: PresenceUpdateResult,
+        val actions: List<RouteAction>,
+        val bootstrapEffects: List<Effect>,
+    )
+
+    /** The single entry point for an incoming relay event: dedup, unwrap and
+     * verify, parse, presence and per-message handling all happen in
+     * `call-core`'s `signal_router`. [deviceName] answers a peer's `hello`. */
+    fun routeEvent(eventJson: String, deviceName: String, confirmed: List<RoutePeer>, pending: List<RoutePending>, nowMs: Long): RouteResult {
+        val context = JSONObject()
+            .put("device_name", deviceName)
+            .put(
+                "confirmed",
+                JSONArray(
+                    confirmed.map {
+                        JSONObject()
+                            .put("pairing_id", it.pairingId)
+                            .put("own_private_key_hex", it.ownPrivateKeyHex)
+                            .put("peer_public_key", it.peerPublicKey)
+                            .put("last_signal_created_at", it.lastSignalCreatedAt)
+                            .put("last_signal_event_id", it.lastSignalEventId)
+                            .put("auto_answer", it.autoAnswer)
+                    },
+                ),
+            )
+            .put("pending", JSONArray(pending.map { JSONObject().put("pairing_id", it.pairingId).put("rendezvous_tag", it.rendezvousTag) }))
+        return parseRouteResult(nativeRouteEvent(eventJson, context.toString(), nowMs))
     }
 
     /** Mirrors `publishBootstrap`'s plain (unencrypted) self-signed event —
@@ -709,22 +566,6 @@ object CallCoreBridge {
      * known. `null` return on any failure. */
     fun buildBootstrapEvent(ownPrivateKeyHex: String, rendezvousTag: String, targetPubkeyHex: String?, payloadJson: String): String? =
         nativeBuildBootstrapEvent(ownPrivateKeyHex, rendezvousTag, targetPubkeyHex ?: "", payloadJson)
-
-    /** Mirrors `handleBootstrapEvent`'s verification exactly — see the
-     * Rust crate's own `nostr_protocol::verify_bootstrap_event` doc. `null`
-     * if the signature is invalid, there's no `d` tag, or a panic. */
-    fun verifyBootstrapEvent(eventJson: String): VerifiedBootstrapEvent? {
-        val json = nativeVerifyBootstrapEvent(eventJson) ?: return null
-        val obj = JSONObject(json)
-        return VerifiedBootstrapEvent(obj.getString("sender_pubkey_hex"), obj.getString("rendezvous_tag"), obj.getString("payload_json"))
-    }
-
-    /** The `seenEventIds` dedup — see the Rust crate's own
-     * `nostr_protocol::mark_seen_or_is_duplicate` doc. `true` for a
-     * genuinely new [eventId] (process it); `false` if already seen (drop
-     * it silently). Falls back to `true` on a panic — see that function's
-     * own doc for why this one deliberately fails *open*. */
-    fun markSeenOrIsDuplicate(eventId: String): Boolean = nativeMarkSeenOrIsDuplicate(eventId)
 
     /** See the Rust crate's own `call_arbitration::can_place_call` doc —
      * whether a contact's Call button is offered. */
@@ -853,35 +694,6 @@ object CallCoreBridge {
      * `nostr_protocol::build_ice_payload` doc. */
     fun buildIcePayload(sdpMid: String?, sdpMLineIndex: Int, candidate: String, callId: String): String? =
         nativeBuildIcePayload(sdpMid ?: "", sdpMLineIndex, candidate, callId)
-
-    /** Mirrors `dispatchFromConfirmedPeer`'s full per-type extraction and
-     * validation — see the Rust crate's own `nostr_protocol::parse_signal_payload`
-     * doc. `null` for an unrecognized type, a malformed shape, a blank/
-     * oversized `sdp`/`candidate`, or a panic — the caller drops the
-     * message silently, same as every other message this device can't
-     * safely interpret. A `heartbeat`'s [SignalMessage.Heartbeat.name]
-     * comes back already capped and sanitized — the caller no longer needs
-     * to do either itself. */
-    fun parseSignalPayload(payloadJson: String): SignalMessage? {
-        val json = nativeParseSignalPayload(payloadJson) ?: return null
-        val obj = JSONObject(json)
-        return when (val type = obj.getString("type")) {
-            "heartbeat" -> SignalMessage.Heartbeat(obj.getString("name"), if (obj.has("busy")) obj.getBoolean("busy") else null, obj.optBoolean("hello", false))
-            "leaving" -> SignalMessage.Leaving
-            "bye" -> SignalMessage.Bye(obj.getString("callId"))
-            "busy" -> SignalMessage.Busy(obj.getString("callId"))
-            "call" -> SignalMessage.Call(obj.getString("callId"))
-            "offer" -> SignalMessage.Offer(obj.getString("sdp"), obj.getString("callId"))
-            "answer" -> SignalMessage.Answer(obj.getString("sdp"), obj.getString("callId"))
-            "ice" -> SignalMessage.Ice(
-                if (obj.has("sdpMid")) obj.getString("sdpMid") else null,
-                obj.optInt("sdpMLineIndex"),
-                obj.getString("candidate"),
-                obj.getString("callId"),
-            )
-            else -> error("CallCoreBridge: unknown signal message type from native layer: $type")
-        }
-    }
 
     /** Protocol-level constants both platforms must use identically — see
      * the Rust crate's own `ProtocolConstants` doc. Read this instead of
@@ -1013,16 +825,6 @@ object CallCoreBridge {
         }
     }
 
-    private fun parseIceOutcome(json: String): IceOutcome {
-        val obj = JSONObject(json)
-        return when (val outcome = obj.getString("outcome")) {
-            "Buffered" -> IceOutcome.Buffered
-            "Apply" -> IceOutcome.Apply(if (obj.isNull("sdp_mid")) null else obj.getString("sdp_mid"), obj.getInt("sdp_m_line_index"), obj.getString("candidate"))
-            "Dropped" -> IceOutcome.Dropped
-            else -> error("CallCoreBridge: unknown ice outcome from native layer: $outcome")
-        }
-    }
-
     private fun parseTickOutcome(json: String): TickOutcome {
         val obj = JSONObject(json)
         return when (val outcome = obj.getString("outcome")) {
@@ -1031,6 +833,28 @@ object CallCoreBridge {
             "ShouldAccept" -> TickOutcome.ShouldAccept
             else -> error("CallCoreBridge: unknown tick outcome from native layer: $outcome")
         }
+    }
+
+    private fun parseRouteResult(json: String): RouteResult {
+        val obj = JSONObject(json)
+        val signal = if (obj.isNull("signal")) null else obj.getJSONObject("signal").let { ProcessedSignal(it.getString("pairing_id"), it.getLong("created_at"), it.getString("event_id")) }
+        val actionArray = obj.getJSONArray("actions")
+        val actions = (0 until actionArray.length()).map { i ->
+            val a = actionArray.getJSONObject(i)
+            when (val kind = a.getString("kind")) {
+                "SendHeartbeat" -> RouteAction.SendHeartbeat(a.getString("pairing_id"), a.getString("payload_json"))
+                "UpdatePeerName" -> RouteAction.UpdatePeerName(a.getString("pairing_id"), a.getString("name"))
+                "ApplyRemoteAnswer" -> RouteAction.ApplyRemoteAnswer(a.getString("pairing_id"), a.getString("sdp"))
+                "AddRemoteIce" -> RouteAction.AddRemoteIce(
+                    a.getString("pairing_id"),
+                    if (a.isNull("sdp_mid")) null else a.getString("sdp_mid"),
+                    a.getInt("sdp_m_line_index"),
+                    a.getString("candidate"),
+                )
+                else -> error("CallCoreBridge: unknown route action kind from native layer: $kind")
+            }
+        }
+        return RouteResult(signal, parsePresenceUpdateResult(json), actions, parseEffects(obj.getJSONArray("bootstrap_effects").toString()))
     }
 
     private fun parsePresenceUpdateResult(json: String): PresenceUpdateResult {

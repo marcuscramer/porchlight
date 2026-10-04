@@ -169,7 +169,7 @@ impl PresenceUpdateResult {
         PresenceUpdateResult::default()
     }
 
-    fn extend(&mut self, other: PresenceUpdateResult) {
+    pub(crate) fn extend(&mut self, other: PresenceUpdateResult) {
         self.presence_effects.extend(other.presence_effects);
         self.call_effects.extend(other.call_effects);
     }

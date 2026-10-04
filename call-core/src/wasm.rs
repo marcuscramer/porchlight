@@ -102,18 +102,6 @@ pub fn build_bootstrap_payload(pairing_id: &str) -> Option<String> {
     catch_unwind(std::panic::AssertUnwindSafe(|| crate::build_bootstrap_payload(pairing_id))).ok().flatten()
 }
 
-/// See [`crate::handle_bootstrap_message`]'s own doc. Returns a
-/// JSON-encoded array of [`crate::Effect`] — always a valid JSON array
-/// (possibly empty, `[]`), never `undefined`, including on a panic.
-#[wasm_bindgen(js_name = handleBootstrapMessage)]
-pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &str, payload_json: &str) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let effects = crate::handle_bootstrap_message(pairing_id, sender_pubkey, type_, payload_json);
-        serde_json::to_string(&effects).unwrap_or_else(|_| empty_effects_json())
-    }))
-    .unwrap_or_else(|_| empty_effects_json())
-}
-
 /// See [`crate::handle_timeout`]'s own doc. `generation` must be exactly
 /// the value returned in `startAttempt`'s JSON result (see this module's
 /// own doc for why it's `u32` here, not `u64`).
@@ -164,57 +152,6 @@ pub fn request_call(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &st
     .unwrap_or_else(|_| Err(JsValue::from_str("call-core panicked in requestCall")))
 }
 
-/// See [`crate::call_arbitration::handle_should_offer`]'s own doc — the
-/// pubkey tie-break lives inside that function itself, so the shell just
-/// forwards both pubkeys through unconditionally like every other message
-/// type. `auto_answer` isn't a web feature (see `handleOffer`'s own doc/
-/// `onOfferReceived`'s call site) — `app.js` always passes `false` here
-/// too, for the same reason.
-#[wasm_bindgen(js_name = handleShouldOffer)]
-pub fn handle_should_offer(pairing_id: &str, call_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, auto_answer: bool) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let effects = crate::call_arbitration::handle_should_offer(pairing_id, call_id, own_pubkey_hex, peer_pubkey_hex, auto_answer);
-        serde_json::to_string(&effects).unwrap_or_else(|_| empty_effects_json())
-    }))
-    .unwrap_or_else(|_| empty_effects_json())
-}
-
-/// See [`crate::call_arbitration::handle_offer`]'s own doc — no longer
-/// takes a `has_active_peer_connection` flag (dropped from the Rust
-/// signature once found to be provably redundant with `offer_applied`).
-#[wasm_bindgen(js_name = handleOffer)]
-pub fn handle_offer(pairing_id: &str, call_id: &str, sdp: &str, auto_answer: bool) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let effects = crate::call_arbitration::handle_offer(pairing_id, call_id, sdp, auto_answer);
-        serde_json::to_string(&effects).unwrap_or_else(|_| empty_effects_json())
-    }))
-    .unwrap_or_else(|_| empty_effects_json())
-}
-
-/// See [`crate::call_arbitration::should_apply_answer`]'s own doc. Returns
-/// `false` on a panic, matching `nativeShouldApplyAnswer`'s own fail-closed
-/// default (don't apply an answer this module couldn't safely reason
-/// about).
-#[wasm_bindgen(js_name = shouldApplyAnswer)]
-pub fn should_apply_answer(pairing_id: &str, call_id: &str) -> bool {
-    catch_unwind(std::panic::AssertUnwindSafe(|| crate::call_arbitration::should_apply_answer(pairing_id, call_id))).unwrap_or(false)
-}
-
-/// See [`crate::call_arbitration::handle_remote_ice`]'s own doc. Returns a
-/// JSON-encoded [`crate::call_arbitration::IceOutcome`], falling back to
-/// `Dropped` on a panic — matches `nativeHandleRemoteIce`'s own reasoning
-/// (silently discarding one ICE candidate is harmless, trickle ICE sends
-/// several; applying/buffering one from state that couldn't even be read
-/// safely is not worth the risk).
-#[wasm_bindgen(js_name = handleRemoteIce)]
-pub fn handle_remote_ice(pairing_id: &str, call_id: &str, sdp_mid: Option<String>, sdp_m_line_index: i32, candidate: &str) -> Result<String, JsValue> {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let outcome = crate::call_arbitration::handle_remote_ice(pairing_id, call_id, sdp_mid.as_deref(), sdp_m_line_index, candidate);
-        serde_json::to_string(&outcome).map_err(|e| JsValue::from_str(&e.to_string()))
-    }))
-    .unwrap_or_else(|_| Ok("{\"outcome\":\"Dropped\"}".to_string()))
-}
-
 /// See [`crate::call_arbitration::accept_incoming_call`]'s own doc. Returns
 /// a JSON-encoded, tagged [`crate::call_arbitration::AcceptOutcome`] (`kind:
 /// "ApplyOffer" | "CreateOffer"`), or `undefined` (not an empty string) if
@@ -257,16 +194,6 @@ pub fn hang_up() -> String {
         serde_json::to_string(&effects).unwrap_or_else(|_| empty_effects_json())
     }))
     .unwrap_or_else(|_| "[{\"kind\":\"ClosePeerConnection\"}]".to_string())
-}
-
-/// See [`crate::call_arbitration::handle_peer_hangup`]'s own doc.
-#[wasm_bindgen(js_name = handlePeerHangup)]
-pub fn handle_peer_hangup(pairing_id: &str, call_id: &str) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let effects = crate::call_arbitration::handle_peer_hangup(pairing_id, call_id);
-        serde_json::to_string(&effects).unwrap_or_else(|_| empty_effects_json())
-    }))
-    .unwrap_or_else(|_| empty_effects_json())
 }
 
 /// See [`crate::call_arbitration::check_call_timeout`]'s own doc. Falls back
@@ -371,21 +298,6 @@ pub fn request_hello() {
     let _ = catch_unwind(crate::presence::request_hello);
 }
 
-/// See [`crate::presence::handle_peer_busy_reply`]'s own doc. Falls back to
-/// an empty result on a panic, same reasoning as [`mark_seen`] above. Takes
-/// the same `own_pubkey_hex`/`peer_pubkey_hex` tie-break inputs [`mark_seen`]
-/// does — this function now performs its own online transition rather than
-/// relying on the caller having already called `markSeen` first, so it
-/// needs the same two pieces of context that transition requires.
-#[wasm_bindgen(js_name = handlePeerBusyReply)]
-pub fn handle_peer_busy_reply(pairing_id: &str, own_pubkey_hex: &str, peer_pubkey_hex: &str, call_id: &str, now_ms: f64) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let update = crate::presence::handle_peer_busy_reply(pairing_id, own_pubkey_hex, peer_pubkey_hex, call_id, now_ms as i64);
-        serde_json::to_string(&update).unwrap_or_else(|_| empty_presence_result_json())
-    }))
-    .unwrap_or_else(|_| empty_presence_result_json())
-}
-
 /// See [`crate::presence::is_peer_busy`]'s own doc. Returns `false` on a
 /// panic, matching [`is_online`]'s own "never seen" sentinel.
 #[wasm_bindgen(js_name = isPeerBusy)]
@@ -401,16 +313,6 @@ pub fn is_peer_busy(pairing_id: &str) -> bool {
 #[wasm_bindgen(js_name = isCallActive)]
 pub fn is_call_active() -> bool {
     catch_unwind(std::panic::AssertUnwindSafe(crate::call_arbitration::is_call_active)).unwrap_or(true)
-}
-
-/// See [`crate::presence::handle_leaving_message`]'s own doc.
-#[wasm_bindgen(js_name = handleLeavingMessage)]
-pub fn handle_leaving_message(pairing_id: &str) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let update = crate::presence::handle_leaving_message(pairing_id);
-        serde_json::to_string(&update).unwrap_or_else(|_| empty_presence_result_json())
-    }))
-    .unwrap_or_else(|_| empty_presence_result_json())
 }
 
 /// See [`crate::presence::check_online_timeouts`]'s own doc. `now_ms`: see
@@ -471,26 +373,6 @@ pub fn build_wrapped_event(own_private_key_hex: &str, target_pubkey_hex: &str, p
         .flatten()
 }
 
-/// See [`crate::nostr_protocol::unwrap_wrapped_event_for_any`]'s own doc.
-/// `candidates_json` is a JSON array of
-/// [`crate::nostr_protocol::WrapEventCandidate`] (this client's confirmed
-/// peers — `pairing_id`/`own_private_key_hex`/`peer_public_key` each).
-/// Returns a JSON-encoded [`crate::nostr_protocol::RoutedSignalPayload`],
-/// or `undefined` if the event doesn't route to any of `candidates`, fails
-/// to decrypt/verify once routed, is malformed, or on a panic — same
-/// fail-closed posture as every other "a confirmed peer's message this
-/// client can't safely interpret" case in this file.
-#[wasm_bindgen(js_name = unwrapWrappedEventForAny)]
-pub fn unwrap_wrapped_event_for_any(wrap_event_json: &str, candidates_json: &str) -> Option<String> {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let candidates: Vec<crate::nostr_protocol::WrapEventCandidate> = serde_json::from_str(candidates_json).ok()?;
-        let routed = crate::nostr_protocol::unwrap_wrapped_event_for_any(wrap_event_json, &candidates)?;
-        serde_json::to_string(&routed).ok()
-    }))
-    .ok()
-    .flatten()
-}
-
 /// See [`crate::nostr_protocol::build_bootstrap_event`]'s own doc.
 #[wasm_bindgen(js_name = buildBootstrapEvent)]
 pub fn build_bootstrap_event(own_private_key_hex: &str, rendezvous_tag: &str, target_pubkey_hex: Option<String>, payload_json: &str) -> Option<String> {
@@ -501,28 +383,16 @@ pub fn build_bootstrap_event(own_private_key_hex: &str, rendezvous_tag: &str, ta
     .flatten()
 }
 
-/// See [`crate::nostr_protocol::verify_bootstrap_event`]'s own doc.
-/// Returns a JSON-encoded [`crate::nostr_protocol::VerifiedBootstrapEvent`],
-/// or `undefined` if verification fails or on a panic — same sentinel
-/// either way, matching `nativeVerifyBootstrapEvent`'s own convention.
-#[wasm_bindgen(js_name = verifyBootstrapEvent)]
-pub fn verify_bootstrap_event(event_json: &str) -> Option<String> {
+/// See [`crate::signal_router::route_event`]'s own doc. `context_json` is a
+/// JSON-encoded [`crate::signal_router::RouteContext`]. Returns a JSON-encoded
+/// [`crate::signal_router::RouteResult`]; a panic routes nothing.
+#[wasm_bindgen(js_name = routeEvent)]
+pub fn route_event(event_json: &str, context_json: &str, now_ms: f64) -> String {
     catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let verified = crate::nostr_protocol::verify_bootstrap_event(event_json)?;
-        serde_json::to_string(&verified).ok()
+        let result = crate::signal_router::route_event_json(event_json, context_json, now_ms as i64);
+        serde_json::to_string(&result).unwrap_or_else(|_| crate::signal_router::empty_result_json())
     }))
-    .ok()
-    .flatten()
-}
-
-/// See [`crate::nostr_protocol::mark_seen_or_is_duplicate`]'s own doc.
-/// Returns `true` (treat as a duplicate, i.e. drop it) on a panic, matching
-/// `nativeMarkSeenOrIsDuplicate`'s own fail-closed default — safer to
-/// silently drop one relay-redelivered event than to risk reprocessing
-/// something this module couldn't safely reason about.
-#[wasm_bindgen(js_name = markSeenOrIsDuplicate)]
-pub fn mark_seen_or_is_duplicate(event_id: &str) -> bool {
-    catch_unwind(std::panic::AssertUnwindSafe(|| crate::nostr_protocol::mark_seen_or_is_duplicate(event_id))).unwrap_or(true)
+    .unwrap_or_else(|_| crate::signal_router::empty_result_json())
 }
 
 /// See [`crate::nostr_protocol::build_relay_filters`]'s own doc. Returns a
@@ -587,21 +457,6 @@ pub fn build_answer_payload(sdp: &str, call_id: &str) -> Option<String> {
 pub fn build_ice_payload(sdp_mid: Option<String>, sdp_m_line_index: i32, candidate: &str, call_id: &str) -> Option<String> {
     catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::nostr_protocol::build_ice_payload(sdp_mid.as_deref(), sdp_m_line_index, candidate, call_id)
-    }))
-    .ok()
-    .flatten()
-}
-
-/// See [`crate::nostr_protocol::parse_signal_payload`]'s own doc. Returns
-/// a JSON-encoded [`crate::nostr_protocol::SignalMessage`] (`{"type":...,
-/// ...}`, same tag/field names as the wire format itself), or `undefined`
-/// if the payload doesn't parse as a recognized message or on a panic —
-/// same fail-closed posture as `unwrapWrappedEvent`.
-#[wasm_bindgen(js_name = parseSignalPayload)]
-pub fn parse_signal_payload(payload_json: &str) -> Option<String> {
-    catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let message = crate::nostr_protocol::parse_signal_payload(payload_json)?;
-        serde_json::to_string(&message).ok()
     }))
     .ok()
     .flatten()

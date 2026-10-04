@@ -151,29 +151,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeBuildBootstr
     })
 }
 
-/// See [`crate::handle_bootstrap_message`]'s own doc. Returns a
-/// JSON-encoded array of [`crate::Effect`] — always a valid JSON array
-/// (possibly empty, `[]`), never `null`, including on a panic, so the
-/// Kotlin side never needs a separate null-check path here the way the
-/// other functions in this file do.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHandleBootstrapMessage<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    sender_pubkey: JString<'local>,
-    type_: JString<'local>,
-    payload_json: JString<'local>,
-) -> jstring {
-    encode_or_fallback(&mut env, empty_effects_json, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let sender_pubkey = get_string(env, &sender_pubkey)?;
-        let type_ = get_string(env, &type_)?;
-        let payload_json = get_string(env, &payload_json)?;
-        Some(crate::handle_bootstrap_message(&pairing_id, &sender_pubkey, &type_, &payload_json))
-    })
-}
-
 /// See [`crate::handle_timeout`]'s own doc. `generation` must be exactly
 /// the value returned in `nativeStartAttempt`'s JSON result — same
 /// always-a-JSON-array contract as `nativeHandleBootstrapMessage`.
@@ -249,96 +226,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRequestCall<
     })
 }
 
-/// See [`crate::call_arbitration::handle_should_offer`]'s own doc — the
-/// pubkey tie-break lives inside that function itself, so the shell just
-/// forwards both pubkeys through unconditionally like every other message
-/// type. `auto_answer` is looked up by the caller (its own contacts list)
-/// the same way `nativeHandleOffer`'s already is.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHandleShouldOffer<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    call_id: JString<'local>,
-    own_pubkey_hex: JString<'local>,
-    peer_pubkey_hex: JString<'local>,
-    auto_answer: jni::sys::jboolean,
-) -> jstring {
-    encode_or_fallback(&mut env, empty_effects_json, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let call_id = get_string(env, &call_id)?;
-        let own_pubkey_hex = get_string(env, &own_pubkey_hex)?;
-        let peer_pubkey_hex = get_string(env, &peer_pubkey_hex)?;
-        Some(crate::call_arbitration::handle_should_offer(&pairing_id, &call_id, &own_pubkey_hex, &peer_pubkey_hex, auto_answer != 0))
-    })
-}
-
-/// See [`crate::call_arbitration::handle_offer`]'s own doc — no longer
-/// takes a `has_active_peer_connection` flag (dropped from the Rust
-/// signature once found to be provably redundant with `offer_applied`).
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHandleOffer<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    call_id: JString<'local>,
-    sdp: JString<'local>,
-    auto_answer: jni::sys::jboolean,
-) -> jstring {
-    encode_or_fallback(&mut env, empty_effects_json, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let call_id = get_string(env, &call_id)?;
-        let sdp = get_string(env, &sdp)?;
-        Some(crate::call_arbitration::handle_offer(&pairing_id, &call_id, &sdp, auto_answer != 0))
-    })
-}
-
-/// See [`crate::call_arbitration::should_apply_answer`]'s own doc. Returns
-/// `false` (not just "unknown") on a panic, matching this function's own
-/// fail-closed posture elsewhere — an unapplied answer just means the call
-/// silently sits at `have-local-offer` a little longer, not a security or
-/// correctness problem the way applying a bogus one would be.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeShouldApplyAnswer<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    call_id: JString<'local>,
-) -> jni::sys::jboolean {
-    encode_bool(&mut env, false, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let call_id = get_string(env, &call_id)?;
-        Some(crate::call_arbitration::should_apply_answer(&pairing_id, &call_id))
-    })
-}
-
-/// See [`crate::call_arbitration::handle_remote_ice`]'s own doc. `sdp_mid`:
-/// see this section's own top-of-file note — an empty string means `null`.
-/// Returns a JSON-encoded [`crate::call_arbitration::IceOutcome`], falling
-/// back to `Dropped` on a panic (fail-closed: silently discarding one ICE
-/// candidate is harmless — trickle ICE sends several — applying/buffering
-/// one from a call state that couldn't even be read safely is not worth
-/// the risk).
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHandleRemoteIce<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    call_id: JString<'local>,
-    sdp_mid: JString<'local>,
-    sdp_m_line_index: jni::sys::jint,
-    candidate: JString<'local>,
-) -> jstring {
-    encode_or_fallback(&mut env, || "{\"outcome\":\"Dropped\"}".to_string(), |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let call_id = get_string(env, &call_id)?;
-        let sdp_mid = get_string(env, &sdp_mid)?;
-        let sdp_mid = if sdp_mid.is_empty() { None } else { Some(sdp_mid.as_str()) };
-        let candidate = get_string(env, &candidate)?;
-        Some(crate::call_arbitration::handle_remote_ice(&pairing_id, &call_id, sdp_mid, sdp_m_line_index, &candidate))
-    })
-}
-
 /// See [`crate::call_arbitration::accept_incoming_call`]'s own doc. Returns
 /// a JSON-encoded, tagged [`crate::call_arbitration::AcceptOutcome`] (`kind:
 /// "ApplyOffer" | "CreateOffer"`), or `null` if there's nothing pending (or
@@ -388,21 +275,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHangUp<'loca
 #[no_mangle]
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCheckCallTimeout<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>, now_ms: jlong) -> jstring {
     encode_or_fallback(&mut env, empty_effects_json, |_env| Some(crate::call_arbitration::check_call_timeout(now_ms)))
-}
-
-/// See [`crate::call_arbitration::handle_peer_hangup`]'s own doc.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHandlePeerHangup<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    call_id: JString<'local>,
-) -> jstring {
-    encode_or_fallback(&mut env, empty_effects_json, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let call_id = get_string(env, &call_id)?;
-        Some(crate::call_arbitration::handle_peer_hangup(&pairing_id, &call_id))
-    })
 }
 
 /// See [`crate::call_arbitration::handle_peer_busy`]'s own doc.
@@ -488,67 +360,10 @@ fn empty_presence_result_json() -> String {
     "{\"presence_effects\":[],\"call_effects\":[]}".to_string()
 }
 
-/// See [`crate::presence::mark_seen`]'s own doc. Returns a JSON-encoded
-/// [`crate::presence::PresenceUpdateResult`], falling back to an empty one
-/// on a panic (fail-closed: no UI transition, no call effect — safer than
-/// guessing). `peer_busy`: JNI has no clean nullable primitive, so this
-/// crosses as a tri-state `jint` — `-1` means "no info" (`None`, every
-/// non-heartbeat message type), `0`/`1` mean `Some(false)`/`Some(true)` —
-/// same sentinel-value convention this file already uses elsewhere for a
-/// nullable value crossing the JNI boundary (e.g. `sdpMid`'s empty-string-
-/// means-`None`), rather than a second parameter pair.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeMarkSeen<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    own_pubkey_hex: JString<'local>,
-    peer_pubkey_hex: JString<'local>,
-    now_ms: jlong,
-    peer_busy: jni::sys::jint,
-    peer_hello: jni::sys::jboolean,
-) -> jstring {
-    encode_or_fallback(&mut env, empty_presence_result_json, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let own_pubkey_hex = get_string(env, &own_pubkey_hex)?;
-        let peer_pubkey_hex = get_string(env, &peer_pubkey_hex)?;
-        let peer_busy = match peer_busy {
-            0 => Some(false),
-            1 => Some(true),
-            _ => None,
-        };
-        Some(crate::presence::mark_seen(&pairing_id, &own_pubkey_hex, &peer_pubkey_hex, now_ms, peer_busy, peer_hello != 0))
-    })
-}
-
 /// See [`crate::presence::request_hello`]'s own doc. No return value.
 #[no_mangle]
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRequestHello<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) {
     run_catching(&mut env, |_env| crate::presence::request_hello());
-}
-
-/// See [`crate::presence::handle_peer_busy_reply`]'s own doc. Takes the same
-/// `own_pubkey_hex`/`peer_pubkey_hex` tie-break inputs `nativeMarkSeen`
-/// does — this function now performs its own online transition rather than
-/// relying on the shell having already called `markSeen` first, so it needs
-/// the same two pieces of context that transition requires.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHandlePeerBusyReply<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    own_pubkey_hex: JString<'local>,
-    peer_pubkey_hex: JString<'local>,
-    call_id: JString<'local>,
-    now_ms: jlong,
-) -> jstring {
-    encode_or_fallback(&mut env, empty_presence_result_json, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let own_pubkey_hex = get_string(env, &own_pubkey_hex)?;
-        let peer_pubkey_hex = get_string(env, &peer_pubkey_hex)?;
-        let call_id = get_string(env, &call_id)?;
-        Some(crate::presence::handle_peer_busy_reply(&pairing_id, &own_pubkey_hex, &peer_pubkey_hex, &call_id, now_ms))
-    })
 }
 
 /// See [`crate::presence::is_peer_busy`]'s own doc. Returns `false` on a
@@ -573,19 +388,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIsPeerBusy<'
 #[no_mangle]
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIsCallActive<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) -> jni::sys::jboolean {
     encode_bool(&mut env, true, |_env| Some(crate::call_arbitration::is_call_active()))
-}
-
-/// See [`crate::presence::handle_leaving_message`]'s own doc.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeHandleLeavingMessage<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    pairing_id: JString<'local>,
-) -> jstring {
-    encode_or_fallback(&mut env, empty_presence_result_json, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        Some(crate::presence::handle_leaving_message(&pairing_id))
-    })
 }
 
 /// See [`crate::presence::check_online_timeouts`]'s own doc.
@@ -679,31 +481,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeBuildWrapped
     })
 }
 
-/// See [`crate::nostr_protocol::unwrap_wrapped_event_for_any`]'s own doc.
-/// `candidates_json` is a JSON array of
-/// [`crate::nostr_protocol::WrapEventCandidate`] (this device's confirmed
-/// peers — `pairing_id`/`own_private_key_hex`/`peer_public_key` each).
-/// Returns a JSON-encoded [`crate::nostr_protocol::RoutedSignalPayload`],
-/// or `null` if the event doesn't route to any of `candidates`, fails to
-/// decrypt/verify once routed, is malformed, or on a panic — same
-/// fail-closed posture as every other "a confirmed peer's message this
-/// device can't safely interpret" case in this file.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeUnwrapWrappedEventForAny<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    wrap_event_json: JString<'local>,
-    candidates_json: JString<'local>,
-) -> jstring {
-    encode_nullable(&mut env, |env| {
-        let wrap_event_json = get_string(env, &wrap_event_json)?;
-        let candidates_json = get_string(env, &candidates_json)?;
-        let candidates: Vec<crate::nostr_protocol::WrapEventCandidate> = serde_json::from_str(&candidates_json).ok()?;
-        let routed = crate::nostr_protocol::unwrap_wrapped_event_for_any(&wrap_event_json, &candidates)?;
-        serde_json::to_string(&routed).ok()
-    })
-}
-
 /// See [`crate::nostr_protocol::build_bootstrap_event`]'s own doc.
 /// `target_pubkey_hex`: see this section's own top-of-file note — an
 /// empty string means `null` (no candidate pubkey known yet).
@@ -726,41 +503,23 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeBuildBootstr
     })
 }
 
-/// See [`crate::nostr_protocol::verify_bootstrap_event`]'s own doc.
-/// Returns a JSON-encoded [`crate::nostr_protocol::VerifiedBootstrapEvent`],
-/// or `null` if verification fails (or on a panic — same sentinel either
-/// way, matching that function's own `Option` return).
+/// See [`crate::signal_router::route_event`]'s own doc. `context_json` is a
+/// JSON-encoded [`crate::signal_router::RouteContext`]. Returns a
+/// JSON-encoded [`crate::signal_router::RouteResult`]; a panic routes
+/// nothing (an event that could not be processed is dropped, same as one
+/// that fails verification).
 #[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeVerifyBootstrapEvent<'local>(
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRouteEvent<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     event_json: JString<'local>,
+    context_json: JString<'local>,
+    now_ms: jlong,
 ) -> jstring {
-    encode_nullable(&mut env, |env| {
+    encode_or_fallback(&mut env, crate::signal_router::empty_result_json, |env| {
         let event_json = get_string(env, &event_json)?;
-        let verified = crate::nostr_protocol::verify_bootstrap_event(&event_json)?;
-        serde_json::to_string(&verified).ok()
-    })
-}
-
-/// See [`crate::nostr_protocol::mark_seen_or_is_duplicate`]'s own doc.
-/// Falls back to `true` (treat as new, let it through) on a panic —
-/// deliberately fail-*open* here, unlike most of this file: a redelivered
-/// message wrongly let through a second time is already guarded downstream
-/// (`call_arbitration`'s own busy/redelivery checks, invariant #7 —
-/// re-processing an already-seen offer/call is idempotent by design), but
-/// a dedup check that panicked and then defaulted to "always a duplicate"
-/// would silently and permanently block every future message on this
-/// connection — a far worse outcome than one possible double-process.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeMarkSeenOrIsDuplicate<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    event_id: JString<'local>,
-) -> jni::sys::jboolean {
-    encode_bool(&mut env, true, |env| {
-        let event_id = get_string(env, &event_id)?;
-        Some(crate::nostr_protocol::mark_seen_or_is_duplicate(&event_id))
+        let context_json = get_string(env, &context_json)?;
+        Some(crate::signal_router::route_event_json(&event_json, &context_json, now_ms))
     })
 }
 
@@ -896,26 +655,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeBuildIcePayl
         let candidate = get_string(env, &candidate)?;
         let call_id = get_string(env, &call_id)?;
         crate::nostr_protocol::build_ice_payload(sdp_mid, sdp_m_line_index, &candidate, &call_id)
-    })
-}
-
-/// See [`crate::nostr_protocol::parse_signal_payload`]'s own doc. Returns
-/// a JSON-encoded [`crate::nostr_protocol::SignalMessage`] (`{"type":...,
-/// ...}`, same tag/field names as the wire format itself — this is a
-/// decoded value, not a fresh envelope), or `null` if the payload doesn't
-/// parse as a recognized message (or on a panic — same fail-closed
-/// posture as `nativeUnwrapWrappedEvent`: a message this device can't
-/// safely interpret is dropped silently, not guessed at).
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeParseSignalPayload<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    payload_json: JString<'local>,
-) -> jstring {
-    encode_nullable(&mut env, |env| {
-        let payload_json = get_string(env, &payload_json)?;
-        let message = crate::nostr_protocol::parse_signal_payload(&payload_json)?;
-        serde_json::to_string(&message).ok()
     })
 }
 

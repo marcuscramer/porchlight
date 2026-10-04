@@ -429,86 +429,6 @@ export function forgetPairing(pairing_id) {
 }
 
 /**
- * See [`crate::handle_bootstrap_message`]'s own doc. Returns a
- * JSON-encoded array of [`crate::Effect`] — always a valid JSON array
- * (possibly empty, `[]`), never `undefined`, including on a panic.
- * @param {string} pairing_id
- * @param {string} sender_pubkey
- * @param {string} type_
- * @param {string} payload_json
- * @returns {string}
- */
-export function handleBootstrapMessage(pairing_id, sender_pubkey, type_, payload_json) {
-    let deferred5_0;
-    let deferred5_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(sender_pubkey, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(type_, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(payload_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.handleBootstrapMessage(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-        deferred5_0 = ret[0];
-        deferred5_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
-    }
-}
-
-/**
- * See [`crate::presence::handle_leaving_message`]'s own doc.
- * @param {string} pairing_id
- * @returns {string}
- */
-export function handleLeavingMessage(pairing_id) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.handleLeavingMessage(ptr0, len0);
-        deferred2_0 = ret[0];
-        deferred2_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
-    }
-}
-
-/**
- * See [`crate::call_arbitration::handle_offer`]'s own doc — no longer
- * takes a `has_active_peer_connection` flag (dropped from the Rust
- * signature once found to be provably redundant with `offer_applied`).
- * @param {string} pairing_id
- * @param {string} call_id
- * @param {string} sdp
- * @param {boolean} auto_answer
- * @returns {string}
- */
-export function handleOffer(pairing_id, call_id, sdp, auto_answer) {
-    let deferred4_0;
-    let deferred4_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(sdp, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.handleOffer(ptr0, len0, ptr1, len1, ptr2, len2, auto_answer);
-        deferred4_0 = ret[0];
-        deferred4_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
-    }
-}
-
-/**
  * See [`crate::call_arbitration::handle_peer_busy`]'s own doc.
  * @param {string} pairing_id
  * @param {string} call_id
@@ -528,140 +448,6 @@ export function handlePeerBusy(pairing_id, call_id) {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
-    }
-}
-
-/**
- * See [`crate::presence::handle_peer_busy_reply`]'s own doc. Falls back to
- * an empty result on a panic, same reasoning as [`mark_seen`] above. Takes
- * the same `own_pubkey_hex`/`peer_pubkey_hex` tie-break inputs [`mark_seen`]
- * does — this function now performs its own online transition rather than
- * relying on the caller having already called `markSeen` first, so it
- * needs the same two pieces of context that transition requires.
- * @param {string} pairing_id
- * @param {string} own_pubkey_hex
- * @param {string} peer_pubkey_hex
- * @param {string} call_id
- * @param {number} now_ms
- * @returns {string}
- */
-export function handlePeerBusyReply(pairing_id, own_pubkey_hex, peer_pubkey_hex, call_id, now_ms) {
-    let deferred5_0;
-    let deferred5_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(own_pubkey_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(peer_pubkey_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.handlePeerBusyReply(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, now_ms);
-        deferred5_0 = ret[0];
-        deferred5_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
-    }
-}
-
-/**
- * See [`crate::call_arbitration::handle_peer_hangup`]'s own doc.
- * @param {string} pairing_id
- * @param {string} call_id
- * @returns {string}
- */
-export function handlePeerHangup(pairing_id, call_id) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.handlePeerHangup(ptr0, len0, ptr1, len1);
-        deferred3_0 = ret[0];
-        deferred3_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
-    }
-}
-
-/**
- * See [`crate::call_arbitration::handle_remote_ice`]'s own doc. Returns a
- * JSON-encoded [`crate::call_arbitration::IceOutcome`], falling back to
- * `Dropped` on a panic — matches `nativeHandleRemoteIce`'s own reasoning
- * (silently discarding one ICE candidate is harmless, trickle ICE sends
- * several; applying/buffering one from state that couldn't even be read
- * safely is not worth the risk).
- * @param {string} pairing_id
- * @param {string} call_id
- * @param {string | null | undefined} sdp_mid
- * @param {number} sdp_m_line_index
- * @param {string} candidate
- * @returns {string}
- */
-export function handleRemoteIce(pairing_id, call_id, sdp_mid, sdp_m_line_index, candidate) {
-    let deferred6_0;
-    let deferred6_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        var ptr2 = isLikeNone(sdp_mid) ? 0 : passStringToWasm0(sdp_mid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(candidate, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.handleRemoteIce(ptr0, len0, ptr1, len1, ptr2, len2, sdp_m_line_index, ptr3, len3);
-        var ptr5 = ret[0];
-        var len5 = ret[1];
-        if (ret[3]) {
-            ptr5 = 0; len5 = 0;
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        deferred6_0 = ptr5;
-        deferred6_1 = len5;
-        return getStringFromWasm0(ptr5, len5);
-    } finally {
-        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
-    }
-}
-
-/**
- * See [`crate::call_arbitration::handle_should_offer`]'s own doc — the
- * pubkey tie-break lives inside that function itself, so the shell just
- * forwards both pubkeys through unconditionally like every other message
- * type. `auto_answer` isn't a web feature (see `handleOffer`'s own doc/
- * `onOfferReceived`'s call site) — `app.js` always passes `false` here
- * too, for the same reason.
- * @param {string} pairing_id
- * @param {string} call_id
- * @param {string} own_pubkey_hex
- * @param {string} peer_pubkey_hex
- * @param {boolean} auto_answer
- * @returns {string}
- */
-export function handleShouldOffer(pairing_id, call_id, own_pubkey_hex, peer_pubkey_hex, auto_answer) {
-    let deferred5_0;
-    let deferred5_1;
-    try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(own_pubkey_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(peer_pubkey_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.handleShouldOffer(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, auto_answer);
-        deferred5_0 = ret[0];
-        deferred5_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
     }
 }
 
@@ -879,43 +665,6 @@ export function markSeen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms, pe
 }
 
 /**
- * See [`crate::nostr_protocol::mark_seen_or_is_duplicate`]'s own doc.
- * Returns `true` (treat as a duplicate, i.e. drop it) on a panic, matching
- * `nativeMarkSeenOrIsDuplicate`'s own fail-closed default — safer to
- * silently drop one relay-redelivered event than to risk reprocessing
- * something this module couldn't safely reason about.
- * @param {string} event_id
- * @returns {boolean}
- */
-export function markSeenOrIsDuplicate(event_id) {
-    const ptr0 = passStringToWasm0(event_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.markSeenOrIsDuplicate(ptr0, len0);
-    return ret !== 0;
-}
-
-/**
- * See [`crate::nostr_protocol::parse_signal_payload`]'s own doc. Returns
- * a JSON-encoded [`crate::nostr_protocol::SignalMessage`] (`{"type":...,
- * ...}`, same tag/field names as the wire format itself), or `undefined`
- * if the payload doesn't parse as a recognized message or on a panic —
- * same fail-closed posture as `unwrapWrappedEvent`.
- * @param {string} payload_json
- * @returns {string | undefined}
- */
-export function parseSignalPayload(payload_json) {
-    const ptr0 = passStringToWasm0(payload_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.parseSignalPayload(ptr0, len0);
-    let v2;
-    if (ret[0] !== 0) {
-        v2 = getStringFromWasm0(ret[0], ret[1]);
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    }
-    return v2;
-}
-
-/**
  * See [`crate::call_arbitration::peer_connection_closed`]'s own doc.
  * **Now returns a JSON-encoded effects array** (was `void`) — see that
  * function's own doc for why (a genuinely spontaneous WebRTC teardown can
@@ -1074,6 +823,32 @@ export function requestHello() {
 }
 
 /**
+ * See [`crate::signal_router::route_event`]'s own doc. `context_json` is a
+ * JSON-encoded [`crate::signal_router::RouteContext`]. Returns a JSON-encoded
+ * [`crate::signal_router::RouteResult`]; a panic routes nothing.
+ * @param {string} event_json
+ * @param {string} context_json
+ * @param {number} now_ms
+ * @returns {string}
+ */
+export function routeEvent(event_json, context_json, now_ms) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(event_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(context_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.routeEvent(ptr0, len0, ptr1, len1, now_ms);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * See [`crate::sanitize_name`]'s own doc — exposed standalone too, so
  * `app.js`'s own `sanitizeName` (used for own-device name entry/rename,
  * not just the pairing flow) can be replaced by this single
@@ -1100,24 +875,6 @@ export function sanitizeName(name) {
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
-}
-
-/**
- * See [`crate::call_arbitration::should_apply_answer`]'s own doc. Returns
- * `false` on a panic, matching `nativeShouldApplyAnswer`'s own fail-closed
- * default (don't apply an answer this module couldn't safely reason
- * about).
- * @param {string} pairing_id
- * @param {string} call_id
- * @returns {boolean}
- */
-export function shouldApplyAnswer(pairing_id, call_id) {
-    const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.shouldApplyAnswer(ptr0, len0, ptr1, len1);
-    return ret !== 0;
 }
 
 /**
@@ -1207,54 +964,6 @@ export function tickIncomingCallCountdown(pairing_id, call_id) {
     } finally {
         wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
-}
-
-/**
- * See [`crate::nostr_protocol::unwrap_wrapped_event_for_any`]'s own doc.
- * `candidates_json` is a JSON array of
- * [`crate::nostr_protocol::WrapEventCandidate`] (this client's confirmed
- * peers — `pairing_id`/`own_private_key_hex`/`peer_public_key` each).
- * Returns a JSON-encoded [`crate::nostr_protocol::RoutedSignalPayload`],
- * or `undefined` if the event doesn't route to any of `candidates`, fails
- * to decrypt/verify once routed, is malformed, or on a panic — same
- * fail-closed posture as every other "a confirmed peer's message this
- * client can't safely interpret" case in this file.
- * @param {string} wrap_event_json
- * @param {string} candidates_json
- * @returns {string | undefined}
- */
-export function unwrapWrappedEventForAny(wrap_event_json, candidates_json) {
-    const ptr0 = passStringToWasm0(wrap_event_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(candidates_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.unwrapWrappedEventForAny(ptr0, len0, ptr1, len1);
-    let v3;
-    if (ret[0] !== 0) {
-        v3 = getStringFromWasm0(ret[0], ret[1]);
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    }
-    return v3;
-}
-
-/**
- * See [`crate::nostr_protocol::verify_bootstrap_event`]'s own doc.
- * Returns a JSON-encoded [`crate::nostr_protocol::VerifiedBootstrapEvent`],
- * or `undefined` if verification fails or on a panic — same sentinel
- * either way, matching `nativeVerifyBootstrapEvent`'s own convention.
- * @param {string} event_json
- * @returns {string | undefined}
- */
-export function verifyBootstrapEvent(event_json) {
-    const ptr0 = passStringToWasm0(event_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.verifyBootstrapEvent(ptr0, len0);
-    let v2;
-    if (ret[0] !== 0) {
-        v2 = getStringFromWasm0(ret[0], ret[1]);
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    }
-    return v2;
 }
 function __wbg_get_imports() {
     const import0 = {

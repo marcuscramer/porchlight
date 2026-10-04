@@ -47,6 +47,11 @@ pub(crate) const WRAP_KIND: u16 = 20336;
 /// Must match both platforms' `MAX_SEEN_EVENT_IDS` exactly.
 const MAX_SEEN_EVENT_IDS: usize = 500;
 
+/// The public key (hex) belonging to a private key (hex).
+pub(crate) fn public_key_hex(secret_key_hex: &str) -> Option<String> {
+    Some(keys_from_hex(secret_key_hex)?.public_key().to_hex())
+}
+
 fn keys_from_hex(secret_key_hex: &str) -> Option<Keys> {
     let sk = SecretKey::from_hex(secret_key_hex).ok()?;
     Some(Keys::new(sk))
@@ -61,7 +66,7 @@ fn pubkey_from_hex(hex: &str) -> Option<PublicKey> {
 /// Deliberately not `nostr`'s own `Keys::generate()` (gated behind its
 /// `rand`/`os-rng` feature, not enabled here): sourced from `getrandom`,
 /// the same RNG every other module in this crate uses.
-fn generate_keys() -> Keys {
+pub(crate) fn generate_keys() -> Keys {
     let mut bytes = [0u8; 32];
     let secret_key = loop {
         getrandom::getrandom(&mut bytes).expect("OS RNG must be available");
@@ -334,6 +339,13 @@ fn ensure_call_id(call_id: String) -> String {
 /// tick and sends that same payload to every peer.
 pub fn build_heartbeat_payload(name: &str, busy: bool) -> Option<String> {
     build_heartbeat_payload_with(name, busy, crate::presence::take_hello())
+}
+
+/// A heartbeat that answers a peer's `hello`: never carries one itself (two
+/// devices would answer each other forever) and leaves this device's own
+/// pending `hello` for its next scheduled heartbeat.
+pub(crate) fn build_heartbeat_reply_payload(name: &str, busy: bool) -> Option<String> {
+    build_heartbeat_payload_with(name, busy, false)
 }
 
 fn build_heartbeat_payload_with(name: &str, busy: bool, hello: bool) -> Option<String> {

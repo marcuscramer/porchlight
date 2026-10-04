@@ -40,7 +40,7 @@ import org.webrtc.VideoSink
  * when the app is backgrounded, with a persistent notification while active.
  *
  * See `call-core/src/call_arbitration.rs`'s module docs ("Invariants") before
- * changing `onOffer`, `onShouldOffer`, `hangUp`, `requestCall`,
+ * changing `hangUp`, `requestCall`,
  * `acceptIncomingCall`, or anything else call-arbitration-related — the
  * single write-up of the invariants that module enforces. This
  * class is the imperative shell around it, forwarding events in and
@@ -108,7 +108,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         val pairingCandidates: List<CandidatePeer> = emptyList(),
         // True if a second, distinct sender showed up at this pending
         // pairing's rendezvous point before it resolved — see
-        // onPairingBootstrapMessage's doc. Cleared the next time a fresh
+        // call-core's `handle_bootstrap_message` doc. Cleared the next time a fresh
         // attempt starts for this same contact.
         val pairingCollision: Boolean = false,
         // True if a pending pairing's live window elapsed with no
@@ -556,7 +556,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     /**
      * A human tapped "Pair with [name]?" for a candidate the SPAKE2
      * exchange already cryptographically confirmed (see
-     * [onPairingBootstrapMessage]) — the one remaining manual step, a cheap
+     * [onRouted]) — the one remaining manual step, a cheap
      * final sanity check rather than a heavy fingerprint ceremony. Looks
      * the candidate up from the currently-published state rather than
      * asking NostrSignalingClient to track it separately — the same data
@@ -988,7 +988,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         override fun confirmedPeers(): List<NostrSignalingClient.ConfirmedPeer> =
             Config.load(this@CameraAgentService).pairings
                 .filter { it.isConfirmed }
-                .map { NostrSignalingClient.ConfirmedPeer(it.id, it.ownPrivateKeyHex, it.peerPublicKey, it.lastSignalCreatedAt, it.lastSignalEventId) }
+                .map { NostrSignalingClient.ConfirmedPeer(it.id, it.ownPrivateKeyHex, it.peerPublicKey, it.lastSignalCreatedAt, it.lastSignalEventId, it.autoAnswer) }
 
         override fun pendingPairings(): List<NostrSignalingClient.PendingPairing> =
             Config.load(this@CameraAgentService).pairings
@@ -1011,14 +1011,30 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
 
     // Required overrides, but nothing in this app currently needs to react
     // to relay-connection transitions specifically (as opposed to a real
-    // signal actually being processed, which onSignalProcessed below does
+    // signal actually being processed, which onRouted below does
     // drive UI from).
     override fun onSignalingConnected() {}
 
     override fun onSignalingDisconnected() {}
 
-    override fun onSignalProcessed(pairingId: String, createdAt: Long, eventId: String) {
-        Config.updateLastSignal(this, pairingId, createdAt, eventId)
+    /**
+     * One relay event, already decided by `call-core`'s signal router: the
+     * watermark is persisted first, then presence and call effects, then the
+     * remaining actions, then any pairing-attempt effects.
+     */
+    override fun onRouted(result: CallCoreBridge.RouteResult) {
+        result.signal?.let { Config.updateLastSignal(this, it.pairingId, it.createdAt, it.eventId) }
+        onPresenceUpdate(result.update)
+        for (action in result.actions) {
+            when (action) {
+                is CallCoreBridge.RouteAction.UpdatePeerName -> updatePeerName(action.pairingId, action.name)
+                is CallCoreBridge.RouteAction.ApplyRemoteAnswer -> engine?.handleRemoteAnswer(action.sdp)
+                is CallCoreBridge.RouteAction.AddRemoteIce -> engine?.addRemoteIce(action.sdpMid, action.sdpMLineIndex, action.candidate)
+                // Sent by NostrSignalingClient before this is called.
+                is CallCoreBridge.RouteAction.SendHeartbeat -> Unit
+            }
+        }
+        if (result.bootstrapEffects.isNotEmpty()) applyEffects(result.bootstrapEffects)
     }
 
     /**
@@ -1044,87 +1060,17 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         applyCallEffects(result.callEffects)
     }
 
-    override fun onPeerHangup(pairingId: String, callId: String) {
-        // Gated on callId, not just pairingId — see CallCoreBridge.
-        // handle_peer_hangup's own doc: a "bye" from an attempt this device
-        // has already moved on from must not tear down a call that isn't
-        // the one it's actually about. Peer is still there, just not in a
-        // call anymore — leave `online` alone. Also the caller-cancelled-
-        // before-we-answered path: a "bye" arriving while still ringing/
-        // counting down must cancel that too.
-        applyCallEffects(CallCoreBridge.handlePeerHangup(pairingId, callId))
-    }
-
-    /**
-     * Mirrors receiving a `"busy"` reply to our own outgoing call attempt —
-     * see [CallCoreBridge.handlePeerBusyReply]'s own doc. The busy badge is
-     * a live presence status now (see [onPresenceUpdate]'s own `SetStatus`
-     * handling), continuously correct for as long as the peer's own
-     * heartbeats keep reporting it. This call still matters for its own
-     * sake: immediate feedback (don't wait for the peer's next heartbeat)
-     * plus releasing our own slot.
-     */
-    override fun onPeerBusy(pairingId: String, ownPubkeyHex: String, peerPubkeyHex: String, callId: String) {
-        onPresenceUpdate(CallCoreBridge.handlePeerBusyReply(pairingId, ownPubkeyHex, peerPubkeyHex, callId, System.currentTimeMillis()))
-    }
-
     override fun onCallTimeoutCheck(effects: List<CallCoreBridge.CallEffect>) {
         applyCallEffects(effects)
     }
 
-    override fun onPeerNameUpdated(pairingId: String, name: String) {
+    private fun updatePeerName(pairingId: String, name: String) {
         // The key that matched to get here is still whatever's already
         // pinned for this pairing — only the display label changed.
-        val currentKey = Config.load(this).pairings.find { it.id == pairingId }?.peerPublicKey
-        if (currentKey.isNullOrBlank()) return
-        Config.updatePairingPeer(this, pairingId, currentKey, name)
+        val pairing = Config.load(this).pairings.find { it.id == pairingId } ?: return
+        if (pairing.peerPublicKey.isBlank() || pairing.peerName == name) return
+        Config.updatePairingPeer(this, pairingId, pairing.peerPublicKey, name)
         updateContact(pairingId) { it.copy(name = name) }
-    }
-
-    /**
-     * Drives the entire SPAKE2 pairing state machine for one attempt — now
-     * entirely `call-core`'s decision to make. [NostrSignalingClient] only
-     * transports and verifies the signature of these messages; this
-     * function's entire job is forwarding the event in and executing
-     * whatever [CallCoreBridge.Effect]s come back.
-     */
-    override fun onPairingBootstrapMessage(pairingId: String, senderPubkey: String, type: String, payload: JSONObject) {
-        applyEffects(CallCoreBridge.handleBootstrapMessage(pairingId, senderPubkey, type, payload))
-    }
-
-    /**
-     * See `CallCoreBridge.handleShouldOffer`'s own doc for the guard
-     * sequence (pubkey tie-break first, then busy, then redelivery) — this
-     * function's whole job is forwarding the event in and executing
-     * whatever `CallEffect`s come back, same shape as
-     * [onPairingBootstrapMessage] above.
-     */
-    override fun onShouldOffer(pairingId: String, callId: String, ownPubkeyHex: String, peerPubkeyHex: String) {
-        val autoAnswer = pairings[pairingId]?.autoAnswer == true
-        applyCallEffects(CallCoreBridge.handleShouldOffer(pairingId, callId, ownPubkeyHex, peerPubkeyHex, autoAnswer))
-    }
-
-    /**
-     * See `CallCoreBridge.handleOffer`'s own doc for the full guard
-     * sequence. This function's own job is just looking up
-     * [Pairing.autoAnswer] (a snapshot taken now, not re-read later — see
-     * [IncomingCall]'s doc; `call-core` doesn't own contacts) and
-     * forwarding the rest.
-     */
-    override fun onOffer(pairingId: String, sdp: String, callId: String) {
-        val autoAnswer = pairings[pairingId]?.autoAnswer == true
-        applyCallEffects(CallCoreBridge.handleOffer(pairingId, callId, sdp, autoAnswer))
-    }
-
-    override fun onAnswer(pairingId: String, sdp: String, callId: String) {
-        if (CallCoreBridge.shouldApplyAnswer(pairingId, callId)) engine?.handleRemoteAnswer(sdp)
-    }
-
-    override fun onRemoteIce(pairingId: String, sdpMid: String?, sdpMLineIndex: Int, candidate: String, callId: String) {
-        when (val outcome = CallCoreBridge.handleRemoteIce(pairingId, callId, sdpMid, sdpMLineIndex, candidate)) {
-            is CallCoreBridge.IceOutcome.Apply -> engine?.addRemoteIce(outcome.sdpMid, outcome.sdpMLineIndex, outcome.candidate)
-            CallCoreBridge.IceOutcome.Buffered, CallCoreBridge.IceOutcome.Dropped -> {}
-        }
     }
 
     // --- WebRtcEngine.Listener (shared across every pairing) -----------------
@@ -1337,7 +1283,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         private val PAKE_LIVE_WINDOW_MS = CallCoreBridge.protocolConstants.pakeLiveWindowMs
 
         // AUTO_ANSWER_COUNTDOWN_SECONDS moved into call-core (see
-        // CallCoreBridge.handleOffer's StartRinging effect, which carries
+        // call-core's StartRinging effect, which carries
         // its own secondsRemaining) — this class no longer picks it.
 
         // Once at startAgent() and every 12h after (re-armed by
