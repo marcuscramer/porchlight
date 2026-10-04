@@ -237,6 +237,10 @@ tasks.whenTaskAdded {
     if (name == "mergeDebugJniLibFolders" || name == "mergeReleaseJniLibFolders") {
         dependsOn("cargoBuild")
         dependsOn("verifyCallCoreSymbols")
+        // Without this the merge was left up to date after cargo rebuilt the
+        // library, packaging the previous one (the packaged-library check
+        // below caught it every time a native function was added).
+        inputs.dir(layout.buildDirectory.dir("rustJniLibs/android")).withPropertyName("rustJniLibs")
     }
 }
 

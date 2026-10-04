@@ -825,6 +825,9 @@ let pcCallId = null;
  * web — always a manual Accept/Decline choice.
  */
 let pendingIncomingCall = null;
+/** The person accepted the incoming call and the media isn't up yet — one of
+ * the inputs to call-core's call phase. Reset with the call controls. */
+let acceptedIncoming = false;
 let incomingCallTickHandle = null;
 // True from the moment StartRinging fires until acquireLocalStream()'s
 // promise for *this* incoming call settles — disables Accept/Decline for
@@ -864,6 +867,8 @@ async function acceptIncomingCall() {
   if (!json) return;
   const result = JSON.parse(json);
   clearIncomingCall();
+  acceptedIncoming = true;
+  render();
   activePairingId = result.pairing_id;
   if (result.kind === 'ApplyOffer') {
     await handleOffer(result.pairing_id, result.call_id, result.sdp).catch((err) => failCallAttempt('handleOffer failed (bad SDP?)', err));
@@ -1371,6 +1376,7 @@ let callControlsVisible = false;
  * overlay open (it stays open once connected until dismissed), undoing
  * whatever a previous call left them at. */
 function resetCallControls() {
+  acceptedIncoming = false;
   previewPositionIndex = 0;
   applyPreviewPositionClass();
   audioEnabled = true;
@@ -1885,7 +1891,10 @@ function startCallingUi(pairingId) {
  * whether the centered message shows, and whether Accept is on the controls. */
 let lastCallMode = null;
 function renderCallScreen() {
-  const mode = screen === 'call' ? 'connected' : screen === 'calling' ? 'calling' : 'incoming';
+  // Which phase the call is in is call-core's decision (shared with Android);
+  // this only maps it onto the page's three layouts.
+  const view = JSON.parse(callCore.callPhase(true, false, !!pendingIncomingCall, acceptedIncoming, screen === 'call' || callActive));
+  const mode = view.phase === 'live' ? 'connected' : view.phase === 'ringing' ? 'incoming' : 'calling';
   const section = el('screenCall');
   for (const m of ['calling', 'incoming', 'connected']) section.classList.toggle(`mode-${m}`, m === mode);
 
@@ -1894,7 +1903,7 @@ function renderCallScreen() {
   const ringing = mode !== 'connected';
   el('callMessage').hidden = !ringing;
   el('callSpinner').hidden = mode !== 'calling';
-  el('callLabel').textContent = t(mode === 'incoming' ? 'call.incomingCallFrom' : 'call.callingLabel');
+  if (view.label_key) el('callLabel').textContent = t(view.label_key);
   el('callName').textContent = name;
   el('callName').title = name;
 
@@ -1931,23 +1940,22 @@ el('incomingAccept').addEventListener('click', () => { acceptIncomingCall(); });
 // themselves. The "why did this call end" decision itself is made once in
 // call-core (see CallOutcomeReason's own doc there), not re-derived here.
 
+// Which text an ended call gets (including the ICE refinement of "never
+// connected") is call-core's decision; this maps each case to its strings.
 const CALL_OUTCOME_COPY = {
-  peer_ended: (name) => [t('call.outcome.peerEndedTitle'), t('call.outcome.peerEndedMessage', { name })],
-  never_connected: (name) => [t('call.outcome.neverConnectedTitle'), t('call.outcome.neverConnectedMessage', { name })],
-  dropped: (name) => [t('call.outcome.droppedTitle'), t('call.outcome.droppedMessage', { name })],
+  peer_ended: ['call.outcome.peerEndedTitle', 'call.outcome.peerEndedMessage'],
+  never_connected: ['call.outcome.neverConnectedTitle', 'call.outcome.neverConnectedMessage'],
+  udp_blocked: ['call.outcome.neverConnectedTitle', 'call.outcome.udpBlockedMessage'],
+  no_direct_path: ['call.outcome.neverConnectedTitle', 'call.outcome.noDirectPathMessage'],
+  dropped: ['call.outcome.droppedTitle', 'call.outcome.droppedMessage'],
 };
 
 function renderCallOutcomeScreen() {
   const pairing = findPairing(pendingCallOutcome && pendingCallOutcome.pairingId);
   const name = (pairing && pairing.peerName) || t('common.unnamedContact');
-  let [title, message] = CALL_OUTCOME_COPY[pendingCallOutcome.reason](name);
-  // Refines the generic "never connected" copy when ICE evidence says why
-  // (see call-core's ice_evidence) — a network problem the user can actually act on.
-  const iceDiagnosis = callCore.iceLastDiagnosis();
-  if (pendingCallOutcome.reason === 'never_connected' && iceDiagnosis) {
-    const key = iceDiagnosis === 'udp_blocked' ? 'call.outcome.udpBlockedMessage' : 'call.outcome.noDirectPathMessage';
-    message = t(key, { name });
-  }
+  const [titleKey, messageKey] = CALL_OUTCOME_COPY[callCore.outcomeText(pendingCallOutcome.reason, callCore.iceLastDiagnosis() ?? null)];
+  const title = t(titleKey);
+  const message = t(messageKey, { name });
   el('callOutcomeTitle').textContent = title;
   el('callOutcomeMessage').textContent = message;
 }

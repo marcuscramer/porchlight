@@ -395,6 +395,33 @@ pub fn route_event(event_json: &str, context_json: &str, now_ms: f64) -> String 
     .unwrap_or_else(|_| crate::signal_router::empty_result_json())
 }
 
+/// See [`crate::call_ui::phase`]'s own doc. Returns a JSON-encoded
+/// [`crate::call_ui::PhaseView`]; a panic reads as "no call".
+#[wasm_bindgen(js_name = callPhase)]
+pub fn call_phase(has_active_call: bool, has_outcome: bool, has_ring: bool, accepted_incoming: bool, peer_connected: bool) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let view = crate::call_ui::phase(&crate::call_ui::PhaseInput { has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected });
+        serde_json::to_string(&view).unwrap_or_default()
+    }))
+    .ok()
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| r#"{"phase":"idle","show_accept":false,"controls_pinned":false,"label_key":null}"#.to_string())
+}
+
+/// See [`crate::call_ui::outcome_text`]'s own doc. `reason`/`diagnosis` are
+/// `snake_case` names (`diagnosis` empty or absent for none). Returns the
+/// `snake_case` name of the [`crate::call_ui::OutcomeText`] case, falling
+/// back to `never_connected`.
+#[wasm_bindgen(js_name = outcomeText)]
+pub fn outcome_text(reason: &str, diagnosis: Option<String>) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::call_ui::outcome_text_from_names(reason, diagnosis.as_deref().unwrap_or(""))
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "never_connected".to_string())
+}
+
 /// See [`crate::nostr_protocol::build_relay_filters`]'s own doc. Returns a
 /// JSON-encoded [`crate::nostr_protocol::RelayFilters`], falling back to
 /// `{"wrap_filter":null,"bootstrap_filter":null}` on a panic — same

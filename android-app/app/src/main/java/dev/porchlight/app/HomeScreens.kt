@@ -262,6 +262,13 @@ internal fun HomeScreen(
     val activeContact = state.contacts.find { it.id == state.activePairingId }
     val peerConnectedOk = activeContact?.connected == true
     val incoming = state.incomingCall
+    val call = CallCoreBridge.callPhase(
+        hasActiveCall = activeContact != null,
+        hasOutcome = state.pendingCallOutcome != null,
+        hasRing = incoming != null,
+        acceptedIncoming = state.acceptedIncoming,
+        peerConnected = peerConnectedOk,
+    )
 
     // Hoisted up here (not `remember`ed inside the connected branch below)
     // so this screen's own BackHandler, registered once at this level, can
@@ -296,16 +303,16 @@ internal fun HomeScreen(
             activeContact == null -> {}
             // Calling or ringing: Back cancels / declines, as ever. The
             // controls are always up on those screens.
-            !peerConnectedOk -> service?.hangUp()
+            call.controlsPinned -> service?.hangUp()
             showCallControls -> showCallControls = false
             else -> service?.hangUp()
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        when {
-            state.pendingCallOutcome != null -> {
-                val outcome = state.pendingCallOutcome
+        when (call.phase) {
+            CallCoreBridge.Phase.OUTCOME -> {
+                val outcome = checkNotNull(state.pendingCallOutcome)
                 val unnamedContact = stringResource(R.string.common_unnamedContact)
                 val name = state.contacts.find { it.id == outcome.pairingId }?.name?.ifBlank { unnamedContact } ?: unnamedContact
                 CallOutcomeScreen(
@@ -315,7 +322,7 @@ internal fun HomeScreen(
                     onDismiss = { service?.dismissCallOutcome() },
                 )
             }
-            activeContact == null -> {
+            CallCoreBridge.Phase.IDLE -> {
                 // No SurfaceView at all while waiting — a small corner
                 // self-view alongside plain Compose UI (with no full-screen
                 // SurfaceView to go with it) blanks that UI on this
@@ -330,19 +337,19 @@ internal fun HomeScreen(
                     onToggleAutoAnswer = onToggleAutoAnswer,
                 )
             }
-            incoming != null && !peerConnectedOk -> IncomingCallScreen(
-                contactName = activeContact.name,
-                info = incoming,
+            CallCoreBridge.Phase.RINGING -> IncomingCallScreen(
+                contactName = activeContact?.name.orEmpty(),
+                info = checkNotNull(incoming),
                 service = service,
                 capturing = state.capturing,
             )
-            !peerConnectedOk -> CallingScreen(
-                contactName = activeContact.name,
+            CallCoreBridge.Phase.CALLING, CallCoreBridge.Phase.CONNECTING -> CallingScreen(
+                contactName = activeContact?.name.orEmpty(),
                 service = service,
                 capturing = state.capturing,
-                label = stringResource(if (state.acceptedIncoming) R.string.call_connectingLabel else R.string.call_callingLabel),
+                label = stringResource(if (call.phase == CallCoreBridge.Phase.CONNECTING) R.string.call_connectingLabel else R.string.call_callingLabel),
             )
-            else -> {
+            CallCoreBridge.Phase.LIVE -> {
                 // Full remote video, plus local self-view. Rectangular, not
                 // rounded: SurfaceViewRenderer's video content is a
                 // hardware overlay that ignores Compose's clip() entirely,
@@ -421,13 +428,12 @@ internal fun HomeScreen(
         // One controls row for the whole call — calling, ringing, connected — so
         // it stays put (and Accept can slide away) as the call progresses. Up
         // from the start; once connected it stays until dismissed with Back.
-        if (state.pendingCallOutcome == null && activeContact != null && (!peerConnectedOk || showCallControls)) {
-            val ringing = incoming != null && !state.acceptedIncoming && !peerConnectedOk
+        if (call.controlsPinned || (call.phase == CallCoreBridge.Phase.LIVE && showCallControls)) {
             CallControlsOverlay(
                 previewCorner = config.previewCorner,
                 audioEnabled = state.audioEnabled,
                 videoEnabled = state.videoEnabled,
-                onAccept = if (ringing) ({ service?.acceptIncomingCall() }) else null,
+                onAccept = if (call.showAccept) ({ service?.acceptIncomingCall() }) else null,
                 onCyclePreviewPosition = onCyclePreviewPosition,
                 onToggleAudio = { service?.setAudioEnabled(!state.audioEnabled) },
                 onToggleVideo = { service?.setVideoEnabled(!state.videoEnabled) },
@@ -731,20 +737,16 @@ private fun CallOutcomeScreen(
     onDismiss: () -> Unit,
 ) {
     val name = contactName.ifBlank { stringResource(R.string.common_unnamedContact) }
-    val (title, message) = when (reason) {
-        CallCoreBridge.CallOutcomeReason.PEER_ENDED ->
+    val (title, message) = when (CallCoreBridge.outcomeText(reason, iceDiagnosis)) {
+        CallCoreBridge.OutcomeText.PEER_ENDED ->
             stringResource(R.string.call_outcome_peerEndedTitle) to stringResource(R.string.call_outcome_peerEndedMessage, name)
-        // Refined when ICE evidence says why (WebRtcEngine.iceDiagnosis) — a
-        // network problem the person can actually act on.
-        CallCoreBridge.CallOutcomeReason.NEVER_CONNECTED -> stringResource(R.string.call_outcome_neverConnectedTitle) to stringResource(
-            when (iceDiagnosis) {
-                CallCoreBridge.IceDiagnosis.UDP_BLOCKED -> R.string.call_outcome_udpBlockedMessage
-                CallCoreBridge.IceDiagnosis.NO_DIRECT_PATH -> R.string.call_outcome_noDirectPathMessage
-                null -> R.string.call_outcome_neverConnectedMessage
-            },
-            name,
-        )
-        CallCoreBridge.CallOutcomeReason.DROPPED ->
+        CallCoreBridge.OutcomeText.NEVER_CONNECTED ->
+            stringResource(R.string.call_outcome_neverConnectedTitle) to stringResource(R.string.call_outcome_neverConnectedMessage, name)
+        CallCoreBridge.OutcomeText.UDP_BLOCKED ->
+            stringResource(R.string.call_outcome_neverConnectedTitle) to stringResource(R.string.call_outcome_udpBlockedMessage, name)
+        CallCoreBridge.OutcomeText.NO_DIRECT_PATH ->
+            stringResource(R.string.call_outcome_neverConnectedTitle) to stringResource(R.string.call_outcome_noDirectPathMessage, name)
+        CallCoreBridge.OutcomeText.DROPPED ->
             stringResource(R.string.call_outcome_droppedTitle) to stringResource(R.string.call_outcome_droppedMessage, name)
     }
     // Purely informational — nothing left to decide here, so leaving it up

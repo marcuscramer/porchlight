@@ -29,7 +29,7 @@ use std::collections::HashSet;
 
 /// Why a call that never connected most likely failed at the network level.
 /// Serialized as its `snake_case` name, which both shells compare/map from.
-#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum IceDiagnosis {
     NoDirectPath,

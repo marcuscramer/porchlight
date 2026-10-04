@@ -41,6 +41,8 @@
 //! - `signal_router` — the single entry point for an incoming relay event:
 //!   dedup, unwrap/verify, parse, presence and per-message decisions, returned
 //!   as one ordered result for the shell to execute;
+//! - `call_ui` — which phase a call is in (ringing/calling/connecting/live/
+//!   outcome) and which text an ended call gets;
 //! - `wake_up` — the step-by-step decisions for getting the call screen in
 //!   front of the Portal's screensaver (Android-only feature; the logic lives
 //!   here so it runs under `cargo test`).
@@ -67,6 +69,8 @@ pub mod presence;
 pub mod nostr_protocol;
 
 pub mod signal_router;
+
+pub mod call_ui;
 
 pub mod signal_retry;
 

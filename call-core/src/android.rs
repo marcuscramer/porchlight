@@ -523,6 +523,54 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRouteEvent<'
     })
 }
 
+/// See [`crate::call_ui::phase`]'s own doc. Returns a JSON-encoded
+/// [`crate::call_ui::PhaseView`]; a panic reads as "no call" (the contact
+/// list), the screen that can always be shown.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCallPhase<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    has_active_call: jni::sys::jboolean,
+    has_outcome: jni::sys::jboolean,
+    has_ring: jni::sys::jboolean,
+    accepted_incoming: jni::sys::jboolean,
+    peer_connected: jni::sys::jboolean,
+) -> jstring {
+    encode_or_fallback(
+        &mut env,
+        || r#"{"phase":"idle","show_accept":false,"controls_pinned":false,"label_key":null}"#.to_string(),
+        |_| {
+            Some(crate::call_ui::phase(&crate::call_ui::PhaseInput {
+                has_active_call: has_active_call != 0,
+                has_outcome: has_outcome != 0,
+                has_ring: has_ring != 0,
+                accepted_incoming: accepted_incoming != 0,
+                peer_connected: peer_connected != 0,
+            }))
+        },
+    )
+}
+
+/// See [`crate::call_ui::outcome_text`]'s own doc. `reason` is a
+/// `snake_case` [`crate::call_arbitration::CallOutcomeReason`] name,
+/// `diagnosis` a `snake_case` [`crate::ice_evidence::IceDiagnosis`] name or
+/// empty for none. Returns the [`crate::call_ui::OutcomeText`] case's
+/// `snake_case` name as a JSON string (so wrapped in quotes); falls back to
+/// `"never_connected"`.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeOutcomeText<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    reason: JString<'local>,
+    diagnosis: JString<'local>,
+) -> jstring {
+    encode_or_fallback(&mut env, || "\"never_connected\"".to_string(), |env| {
+        let reason = get_string(env, &reason)?;
+        let diagnosis = get_string(env, &diagnosis)?;
+        crate::call_ui::outcome_text_from_names(&reason, &diagnosis)
+    })
+}
+
 /// See [`crate::nostr_protocol::build_relay_filters`]'s own doc.
 /// `confirmed_own_pubkeys_json`/`pending_rendezvous_tags_json` are each a
 /// JSON array of strings. Returns a JSON-encoded

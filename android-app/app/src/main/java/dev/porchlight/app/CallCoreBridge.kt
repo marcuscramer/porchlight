@@ -190,6 +190,12 @@ object CallCoreBridge {
     private external fun nativeIceRememberDiagnosis(iceConnectionState: String)
 
     @JvmStatic
+    private external fun nativeCallPhase(hasActiveCall: Boolean, hasOutcome: Boolean, hasRing: Boolean, acceptedIncoming: Boolean, peerConnected: Boolean): String
+
+    @JvmStatic
+    private external fun nativeOutcomeText(reason: String, diagnosis: String): String
+
+    @JvmStatic
     private external fun nativeIceLastDiagnosis(): String?
 
     @JvmStatic
@@ -576,6 +582,27 @@ object CallCoreBridge {
     /** Why a call that never connected most likely failed at the network
      * level — see the Rust crate's own `ice_evidence` doc. */
     enum class IceDiagnosis { NO_DIRECT_PATH, UDP_BLOCKED }
+
+    /** See the Rust crate's own `call_ui::Phase` doc. */
+    enum class Phase { IDLE, OUTCOME, RINGING, CALLING, CONNECTING, LIVE }
+
+    /** What the call screens show — see the Rust crate's own
+     * `call_ui::PhaseView` doc. The label is picked per [phase] from the
+     * app's own strings. */
+    data class PhaseView(val phase: Phase, val showAccept: Boolean, val controlsPinned: Boolean)
+
+    /** Which phase a call is in, decided once in `call-core` for both shells. */
+    fun callPhase(hasActiveCall: Boolean, hasOutcome: Boolean, hasRing: Boolean, acceptedIncoming: Boolean, peerConnected: Boolean): PhaseView {
+        val obj = JSONObject(nativeCallPhase(hasActiveCall, hasOutcome, hasRing, acceptedIncoming, peerConnected))
+        return PhaseView(Phase.valueOf(obj.getString("phase").uppercase()), obj.getBoolean("show_accept"), obj.getBoolean("controls_pinned"))
+    }
+
+    /** Which text an ended call gets — see the Rust crate's own
+     * `call_ui::OutcomeText` doc. */
+    enum class OutcomeText { PEER_ENDED, NEVER_CONNECTED, UDP_BLOCKED, NO_DIRECT_PATH, DROPPED }
+
+    fun outcomeText(reason: CallOutcomeReason, diagnosis: IceDiagnosis?): OutcomeText =
+        OutcomeText.valueOf(nativeOutcomeText(reason.name.lowercase(), diagnosis?.name?.lowercase() ?: "").trim('"').uppercase())
 
     /** A new `PeerConnection` begins: forget the previous one's evidence. */
     fun iceReset() = nativeIceReset()

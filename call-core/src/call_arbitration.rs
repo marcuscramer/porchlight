@@ -336,7 +336,7 @@ pub enum CallEffect {
 /// teardown path emits this (`hang_up`/`forget_pairing` never do).
 /// `PeerEnded` is the one case with an explicit signal (a real `"bye"`);
 /// the other two are distinguished only by `ActiveCall::connected_once`.
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum CallOutcomeReason {
     PeerEnded,

@@ -285,6 +285,29 @@ export function buildWrappedEvent(own_private_key_hex, target_pubkey_hex, payloa
 }
 
 /**
+ * See [`crate::call_ui::phase`]'s own doc. Returns a JSON-encoded
+ * [`crate::call_ui::PhaseView`]; a panic reads as "no call".
+ * @param {boolean} has_active_call
+ * @param {boolean} has_outcome
+ * @param {boolean} has_ring
+ * @param {boolean} accepted_incoming
+ * @param {boolean} peer_connected
+ * @returns {string}
+ */
+export function callPhase(has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.callPhase(has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * See [`crate::call_arbitration::can_place_call`]'s own doc. `false` (no
  * Call button) on a panic — the fail-closed choice.
  * @param {boolean} is_paired
@@ -661,6 +684,32 @@ export function markSeen(pairing_id, own_pubkey_hex, peer_pubkey_hex, now_ms, pe
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
+ * See [`crate::call_ui::outcome_text`]'s own doc. `reason`/`diagnosis` are
+ * `snake_case` names (`diagnosis` empty or absent for none). Returns the
+ * `snake_case` name of the [`crate::call_ui::OutcomeText`] case, falling
+ * back to `never_connected`.
+ * @param {string} reason
+ * @param {string | null} [diagnosis]
+ * @returns {string}
+ */
+export function outcomeText(reason, diagnosis) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(reason, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(diagnosis) ? 0 : passStringToWasm0(diagnosis, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.outcomeText(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
     }
 }
 
