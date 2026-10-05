@@ -120,20 +120,35 @@ jobs:
           git commit -m "Relay survey $(date -u +%F)" || echo "nothing new to save"
           git push origin relay-survey-data
 
-      - name: Open a pull request for the new list
+      # One fixed branch and one open pull request: each run refreshes the proposal with the current data, so a
+      # pull request nobody has merged yet does not make the next run fail or pile up copies.
+      - name: Open or update the pull request for the new list
         if: env.DRY_RUN != 'true' && steps.survey.outputs.changed == 'true'
         env:
           NEW_VERSION: ${{ steps.survey.outputs.new_version }}
         run: |
           git config user.name "porchlight-relay-survey"
           git config user.email "relay-survey@users.noreply.github.com"
-          branch="relay-list-v${NEW_VERSION}"
+          branch="relay-list-update"
           git checkout -b "$branch"
           (cd tokens && node build-shared.mjs)
           git add web-app/relays.json web-app/shared-config.js web-app/index.html android-app/app/src/main/java/dev/porchlight/app/GeneratedSharedConfig.kt
           git commit -m "Relay list v${NEW_VERSION}"
-          git push origin "$branch"
-          gh pr create --base main --head "$branch" --title "Relay list v${NEW_VERSION}" --body-file tools/relay-survey/out/weekly-report.md
+          git push --force origin "$branch"
+          existing=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "Relay list v${NEW_VERSION}" --body-file tools/relay-survey/out/weekly-report.md
+          else
+            gh pr create --base main --head "$branch" --title "Relay list v${NEW_VERSION}" --body-file tools/relay-survey/out/weekly-report.md
+          fi
+
+      - name: Close an open pull request that is no longer needed
+        if: env.DRY_RUN != 'true' && steps.survey.outputs.changed != 'true' && steps.survey.outputs.aborted != 'true'
+        run: |
+          existing=$(gh pr list --head relay-list-update --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr close "$existing" --delete-branch --comment "The latest survey ($(date -u +%F)) no longer proposes a change, so this pull request is closed."
+          fi
 
       - name: Open an issue if the survey could not be trusted
         if: env.DRY_RUN != 'true' && steps.survey.outputs.aborted == 'true'

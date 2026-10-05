@@ -65,7 +65,7 @@ ranks them with the same gates as before, and applies the policy in `lib/select.
 
 `history.json` is the results of earlier runs (the last eight); the file committed here is the starting point, and
 the workflow keeps the running copy on the `relay-survey-data` branch so a week without a change leaves `main`
-alone. A changed list becomes a pull request: `web-app/relays.json` with the version raised by one, plus the files
+alone. A changed list becomes a pull request on one fixed branch, `relay-list-update`, refreshed on every run (an unmerged one is updated, and closed with a note once a survey no longer proposes a change): `web-app/relays.json` with the version raised by one, plus the files
 `npm run build:shared` generates from it. A person reads the report and merges it; Pages then serves the new list.
 
 One setting is needed once: Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests".
