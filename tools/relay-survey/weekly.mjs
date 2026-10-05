@@ -6,7 +6,7 @@
 // (--urls restricts the candidates, for a targeted run; --min-probed lowers the sanity check's floor to match.)
 // Environment, for tests: RELAYS_FILE and RELAY_HISTORY_FILE point at copies of web-app/relays.json and history.json.
 //
-// Writes out/weekly-report.md (what a pull request shows) and out/proposal.json. Unless --dry-run, a changed list is
+// Writes out/weekly-report.md (what a pull request shows) and out/proposal.json. Unless --dry-run (or --urls), a changed list is
 // written to web-app/relays.json (version + 1) and the run is added to history (tools/relay-survey/history.json).
 // Exits 0 whatever the outcome; `changed`, `aborted` and `proposal` are also written to $GITHUB_OUTPUT when set.
 import { readFileSync, writeFileSync, existsSync, rmSync, appendFileSync } from 'node:fs';
@@ -27,7 +27,9 @@ const historyFile = process.env.RELAY_HISTORY_FILE || path.join(here, 'history.j
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(`--${name}`);
 const opt = (name, dflt) => { const i = args.indexOf(`--${name}`); return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : dflt; };
-const dryRun = flag('dry-run');
+// A targeted run (--urls) only sees the relays it was given: its results are not a survey, so it never writes.
+const targeted = !!opt('urls', '');
+const dryRun = flag('dry-run') || targeted;
 const soakHours = Number(opt('soak-hours', 3));
 const soakTop = Number(opt('soak-top', 40));
 const size = Number(opt('size', DEFAULTS.size));
@@ -44,7 +46,7 @@ if (!current.relays.length) throw new Error(`${relaysFile} has no relays`);
 ensureOut();
 for (const f of ['probe.jsonl', 'soak.jsonl', 'survivors.json', 'candidates.json', 'ranked.json', 'report.md']) rmSync(outFile(f), { force: true });
 
-log(`weekly survey: list v${current.version} (${current.relays.length} relays), soak ${soakHours} h on the best ${soakTop}, size ${size}${dryRun ? ', DRY RUN' : ''}`);
+log(`weekly survey: list v${current.version} (${current.relays.length} relays), soak ${soakHours} h on the best ${soakTop}, size ${size}${dryRun ? (targeted ? ', TARGETED RUN (nothing is written)' : ', DRY RUN') : ''}`);
 
 // 1. candidates: what discovery finds, plus today's list so it is always measured
 if (urlsOverride) writeFileSync(outFile('candidates.json'), JSON.stringify(urlsOverride));
@@ -112,7 +114,7 @@ if (!dryRun) {
     log(`web-app/relays.json -> v${current.version + 1}`);
   }
 }
-setOutput('changed', proposal.changed ? 'true' : 'false');
-setOutput('aborted', proposal.aborted ? 'true' : 'false');
+setOutput('changed', proposal.changed && !dryRun ? 'true' : 'false');
+setOutput('aborted', proposal.aborted && !dryRun ? 'true' : 'false');
 setOutput('new_version', current.version + 1);
 process.exit(0);

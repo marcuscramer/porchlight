@@ -45,7 +45,7 @@ relay list), NIP-66 monitor events from a few relays (`--nip66 wss://…`, defau
 
 ```
 node weekly.mjs --dry-run                       # locally: discover, probe, soak 3 h, report, decide
-node weekly.mjs --dry-run --soak-hours 0.05 --urls a,b,... --min-probed 5    # a quick targeted run
+node weekly.mjs --dry-run --soak-hours 0.05 --urls a,b,... --min-probed 5    # a quick targeted run (--urls never writes anything)
 npm test                                        # the selection policy's unit tests
 ```
 
