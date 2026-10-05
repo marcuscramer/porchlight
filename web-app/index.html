@@ -143,24 +143,36 @@
     <!-- Mirrors PairingProgressScreen — shown from the moment a phrase is
          submitted until the attempt resolves: a candidate appears (jumps to
          screenPair below), a collision is detected, or the live window
-         times out. -->
+         times out. After the person confirms on screenPair it comes back
+         here to wait for the other person, and ends in either the contact
+         or "not completed" (the other cancelled or never confirmed). Every pairing screen (this one's three states and
+         screenPair) has the same slots in the same order — title, .pair-text,
+         .pair-action (spinner or the one action), Cancel — each with a fixed
+         minimum height, so nothing moves between them. -->
     <section id="screenPairingProgress" class="screen centered" hidden>
       <div class="panel">
         <div id="progressWaiting">
-          <div class="spinner" aria-hidden="true"></div>
           <h1 id="progressTitle">Waiting for the other device…</h1>
-          <p id="progressRelays" class="muted">&nbsp;</p>
-          <p id="progressCancelsIn" class="muted">&nbsp;</p>
+          <div class="pair-text">
+            <p id="progressRelays" class="muted">&nbsp;</p>
+            <p id="progressCancelsIn" class="muted">&nbsp;</p>
+          </div>
+          <div class="pair-action"><div class="spinner" aria-hidden="true"></div></div>
         </div>
         <div id="progressCollision" hidden>
           <h1 role="alert" data-i18n="pairing.collisionTitle">Multiple pairing attempts detected</h1>
-          <p class="muted" data-i18n="pairing.collisionMessage">More than one other device responded to that phrase at once. This may just be a coincidence (or someone else guessing the same words) — try again with a fresh phrase only the two of you would pick.</p>
-          <button id="progressRetryCollision" class="tv-button" data-i18n="pairing.tryAgainButton">Try again</button>
+          <div class="pair-text"><p class="muted" data-i18n="pairing.collisionMessage">More than one other device responded to that phrase at once. This may just be a coincidence (or someone else guessing the same words) — try again with a fresh phrase only the two of you would pick.</p></div>
+          <div class="pair-action"><button id="progressRetryCollision" class="tv-button" data-i18n="pairing.tryAgainButton">Try again</button></div>
         </div>
         <div id="progressTimeout" hidden>
           <h1 role="alert" data-i18n="pairing.timeoutTitle">No response</h1>
-          <p class="muted" data-i18n="pairing.timeoutMessage">Nobody answered that phrase in time. Check that the other device is on this same screen and typed the exact same phrase, then try again.</p>
-          <button id="progressRetryTimeout" class="tv-button" data-i18n="pairing.tryAgainButton">Try again</button>
+          <div class="pair-text"><p class="muted" data-i18n="pairing.timeoutMessage">Nobody answered that phrase in time. Check that the other device is on this same screen and typed the exact same phrase, then try again.</p></div>
+          <div class="pair-action"><button id="progressRetryTimeout" class="tv-button" data-i18n="pairing.tryAgainButton">Try again</button></div>
+        </div>
+        <div id="progressNotConfirmed" hidden>
+          <h1 role="alert" data-i18n="pairing.notConfirmedTitle">Pairing not completed</h1>
+          <div class="pair-text"><p class="muted" data-i18n="pairing.notConfirmedMessage">The other person cancelled or didn't confirm in time. Nothing was saved on either device. Start again with a fresh phrase.</p></div>
+          <div class="pair-action"><button id="progressRetryNotConfirmed" class="tv-button" data-i18n="pairing.tryAgainButton">Try again</button></div>
         </div>
         <button id="progressCancel" class="tv-button secondary" data-i18n="common.cancel">Cancel</button>
       </div>
@@ -173,9 +185,9 @@
          attempt outright rather than leaving it to surface again later. -->
     <section id="screenPair" class="screen centered" hidden>
       <div class="panel">
-        <div class="pair-title" id="pairTitle">Pair with this device?</div>
-        <p class="pair-muted" data-i18n="pairing.confirmSubtitle">Both sides typed the same phrase.</p>
-        <button id="pairConfirm" class="tv-button" data-i18n="pairing.confirmButton">Confirm</button>
+        <h1 id="pairTitle">Pair with this device?</h1>
+        <div class="pair-text"><p class="muted" data-i18n="pairing.confirmSubtitle">Both sides typed the same phrase.</p></div>
+        <div class="pair-action"><button id="pairConfirm" class="tv-button" data-i18n="pairing.confirmButton">Confirm</button></div>
         <button id="pairCancel" class="tv-button secondary" data-i18n="common.cancel">Cancel</button>
       </div>
     </section>

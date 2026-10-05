@@ -31,9 +31,9 @@ enum class PreviewCorner {
  * brand-new [id] each time; see CameraAgentService.startPairing), not an
  * in-place update of this same record.
  *
- * A `Pairing` only exists once a person has confirmed the match: a pairing
- * attempt lives in `call-core`'s memory and is handed back, finished, by
- * `CallCoreBridge.confirmAttempt` (see CameraAgentService.confirmPeer).
+ * A `Pairing` only exists once both people have confirmed the match: a pairing
+ * attempt lives in `call-core`'s memory and is handed back, finished, as
+ * `CallCoreBridge.Effect.PairingComplete` (see CameraAgentService.confirmPeer).
  *
  * [ownPrivateKeyHex] is *this device's own* permanent Nostr identity for
  * *this one relationship* — generated fresh when the pairing attempt starts

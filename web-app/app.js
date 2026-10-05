@@ -731,8 +731,10 @@ window.addEventListener('online', () => {
 /** The one pairing attempt in progress, or null. It exists only in memory — nothing is saved until a person
  * confirms the match — and `call-core` owns the protocol state; this is what the screens show.
  * `status`: 'preparing' (turning the phrase into the meeting point), 'waiting', 'matched' (the exchange confirmed
- * `candidate`, awaiting the "Pair with [name]?" tap), 'collided' or 'timedOut'. */
-let attempt = null; // { id, startedAt, status, candidate: { pubkeyHex, name } | null }
+ * `candidate`, awaiting the "Pair with [name]?" tap), 'accepted' (this side confirmed, waiting for the other person
+ * to confirm too), 'collided', 'timedOut' or 'notConfirmed' (the other person cancelled or never confirmed).
+ * `acceptedAt` is when this side confirmed. */
+let attempt = null; // { id, startedAt, status, candidate: { pubkeyHex, name } | null, acceptedAt? }
 
 // AUTO_DISMISS_DELAY_MS (imported above) applies only to pairing-progress'
 // collision/timeout screens and call-outcome — never confirm-delete or the
@@ -750,14 +752,21 @@ function startPairing(mine, passphrase) {
   mine.startedAt = Date.now();
   mine.status = 'waiting';
   kickHeartbeat();
-  // handleTimeout's own generation check makes this a no-op for an attempt that has already ended.
-  setTimeout(() => applyEffects(callCore.handleTimeout(start.pairing_id, start.generation)), PAKE_LIVE_WINDOW_MS);
+  scheduleAttemptTimer(start.pairing_id, start.generation, PAKE_LIVE_WINDOW_MS);
 }
 
-/** Gives up on the attempt in progress (cancel, retry, auto-dismiss). */
+/** Calls handleTimeout after `delayMs`; call-core's generation check makes it a no-op for an attempt that has moved
+ * on (each stage of an attempt has its own timer and generation). */
+function scheduleAttemptTimer(pairingId, generation, delayMs) {
+  setTimeout(() => applyEffects(callCore.handleTimeout(pairingId, generation)), delayMs);
+}
+
+/** Gives up on the attempt in progress (cancel, retry, auto-dismiss). A matched attempt tells the other side (a
+ * signed cancel), so its person isn't left waiting. */
 function discardAttempt() {
-  if (attempt && attempt.id) callCore.cancelAttempt(attempt.id);
+  const effects = attempt && attempt.id ? callCore.cancelAttempt(attempt.id) : '[]';
   attempt = null;
+  applyEffects(effects);
 }
 
 /**
@@ -804,6 +813,23 @@ function applyEffects(effectsJson) {
           attempt.candidate = { pubkeyHex: effect.pubkey_hex, name: effect.name };
         }
         break;
+      case 'SetWaitingForPeer':
+        if (attempt && attempt.id === effect.pairing_id) {
+          attempt.status = 'accepted';
+          attempt.acceptedAt = Date.now();
+        }
+        scheduleAttemptTimer(effect.pairing_id, effect.generation, effect.timeout_ms);
+        break;
+      case 'SetNotAccepted':
+        if (attempt && attempt.id === effect.pairing_id) {
+          attempt.status = 'notConfirmed';
+          schedulePairingProgressAutoDismiss(effect.pairing_id);
+        }
+        break;
+      case 'PairingComplete':
+        savePairedContact(effect);
+        scheduleAttemptTimer(effect.pairing_id, effect.generation, effect.linger_ms);
+        break;
       default:
         console.error('applyEffects: unknown effect kind from call-core', effect.kind);
     }
@@ -820,15 +846,17 @@ function applyEffects(effectsJson) {
  * JSON.parse'd wire message (`{"type":"pake1",...}` or
  * `{"type":"pake-confirm",...}`).
  */
-/** A human tapped "Pair with [name]?" for the candidate the SPAKE2 exchange already cryptographically confirmed —
- * mirrors CameraAgentService.confirmPeer. call-core ends the attempt and hands back the finished contact, which is
- * saved here for the first time. */
+/** A human tapped Confirm on "Pair with [name]?" for the candidate the SPAKE2 exchange already cryptographically
+ * confirmed — mirrors CameraAgentService.confirmPeer. Pairing needs both people to confirm: call-core answers with
+ * a waiting state until the other side has too, then hands back the finished contact (PairingComplete). */
 function confirmPeer() {
   if (!attempt || !attempt.candidate) return;
-  const json = callCore.confirmAttempt(attempt.id, attempt.candidate.pubkeyHex);
+  applyEffects(callCore.acceptAttempt(attempt.id, attempt.candidate.pubkeyHex));
+}
+
+/** Both people confirmed: save the contact and go back to the waiting screen. */
+function savePairedContact(confirmed) {
   attempt = null;
-  if (!json) return; // the attempt ended in the meantime; render() bails back
-  const confirmed = JSON.parse(json);
   addOrUpdatePairing({
     id: confirmed.pairing_id,
     ownPrivateKeyHex: confirmed.own_private_key_hex,
@@ -840,7 +868,6 @@ function confirmPeer() {
   kickHeartbeat();
   applyPresenceUpdate(callCore.markSeen(confirmed.pairing_id, ownPubkeyHexFor(confirmed.own_private_key_hex), confirmed.peer_public_key, Date.now(), null, false));
   screen = 'waiting';
-  render();
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,7 +1137,7 @@ function applyCallEffects(effectsJson) {
         screen = 'incoming-call';
         break;
       case 'SendBye':
-        sendConfirmedOrPending(effect.pairing_id, () => callCore.buildByePayload(effect.call_id));
+        sendConfirmedOrPending(effect.pairing_id, () => callCore.buildByePayload(effect.call_id, !!effect.media_failed));
         break;
       case 'ClosePeerConnection':
         closePeerConnection();
@@ -1966,20 +1993,24 @@ function renderPairingProgressScreen() {
   if (!attempt) return;
   const collided = attempt.status === 'collided';
   const timedOut = attempt.status === 'timedOut';
-  el('progressWaiting').hidden = collided || timedOut;
+  const notConfirmed = attempt.status === 'notConfirmed';
+  el('progressWaiting').hidden = collided || timedOut || notConfirmed;
   el('progressCollision').hidden = !collided;
   el('progressTimeout').hidden = !timedOut;
-  if (collided || timedOut) return;
+  el('progressNotConfirmed').hidden = !notConfirmed;
+  if (collided || timedOut || notConfirmed) return;
   // Which step this is is call-core's call (shared with Android); this only reports what it can see.
   const pending = pendingPairingsList().find((p) => p.pairingId === attempt.id);
   const hasAttempt = attempt.status !== 'preparing' && !!(pending && pending.rendezvousTag);
   const connected = connectedRelayCount();
-  const view = JSON.parse(callCore.pairingPhase(hasAttempt, connected, !!(pending && pending.bootstrapTarget)));
-  el('progressTitle').textContent = t(view.label_key);
+  const accepted = attempt.status === 'accepted';
+  const view = JSON.parse(callCore.pairingPhase(hasAttempt, connected, !!(pending && pending.bootstrapTarget), accepted));
+  const waitingFor = (attempt.candidate && attempt.candidate.name) || t('common.thisDevice');
+  el('progressTitle').textContent = t(view.label_key, { name: waitingFor });
   // Always two short lines (non-breaking spaces while preparing), so the spinner never moves between steps.
   const preparing = view.phase === 'preparing';
   el('progressRelays').textContent = preparing ? '\u00a0' : t('pairing.progressRelays', { connected, total: RELAYS.length });
-  el('progressCancelsIn').textContent = preparing ? '\u00a0' : t('pairing.progressCancelsIn', { left: formatMinutesSeconds(PAKE_LIVE_WINDOW_MS - (Date.now() - attempt.startedAt)) });
+  el('progressCancelsIn').textContent = preparing ? '\u00a0' : t('pairing.progressCancelsIn', { left: formatMinutesSeconds(PAKE_LIVE_WINDOW_MS - (Date.now() - (accepted ? attempt.acceptedAt : attempt.startedAt))) });
 }
 function retryPairing() {
   // The attempt so far is forgotten entirely, same as an explicit Cancel —
@@ -1989,6 +2020,7 @@ function retryPairing() {
 }
 el('progressRetryCollision').addEventListener('click', retryPairing);
 el('progressRetryTimeout').addEventListener('click', retryPairing);
+el('progressRetryNotConfirmed').addEventListener('click', retryPairing);
 el('progressCancel').addEventListener('click', () => { discardAttempt(); screen = 'waiting'; render(); });
 
 // --- Name confirm (mirrors NameConfirmScreen) ----------------------------
@@ -2019,7 +2051,8 @@ let lastCallMode = null;
 function renderCallScreen() {
   // Which phase the call is in is call-core's decision (shared with Android);
   // this only maps it onto the page's three layouts.
-  const view = JSON.parse(callCore.callPhase(true, false, !!pendingIncomingCall, acceptedIncoming, screen === 'call' || callActive));
+  const peerOffline = uiState(callPairingId).status === 'offline';
+  const view = JSON.parse(callCore.callPhase(true, false, !!pendingIncomingCall, acceptedIncoming, screen === 'call' || callActive, peerOffline));
   const mode = view.phase === 'live' ? 'connected' : view.phase === 'ringing' ? 'incoming' : 'calling';
   const section = el('screenCall');
   for (const m of ['calling', 'incoming', 'connected']) section.classList.toggle(`mode-${m}`, m === mode);
@@ -2032,8 +2065,10 @@ function renderCallScreen() {
   if (view.label_key) el('callLabel').textContent = t(view.label_key);
   el('callName').textContent = name;
   el('callName').title = name;
-  el('callNote').hidden = !mediaWaitNote;
-  if (mediaWaitNote) el('callNote').textContent = t('call.mediaPermissionWait');
+  // The permission wait comes from this page; the offline note from call-core's phase.
+  const note = mediaWaitNote ? t('call.mediaPermissionWait') : view.note_key ? t(view.note_key) : '';
+  el('callNote').hidden = !note;
+  el('callNote').textContent = note;
 
   // Until connected the controls can't be dismissed; afterwards they stay up
   // until the person dismisses them (see the click/keydown handlers).
@@ -2078,6 +2113,7 @@ const CALL_OUTCOME_COPY = {
   unreachable: ['call.outcome.unreachableTitle', 'call.outcome.unreachableMessage'],
   busy: ['call.outcome.busyTitle', 'call.outcome.busyMessage'],
   camera_failed: ['call.outcome.cameraFailedTitle', 'call.outcome.cameraFailedMessage'],
+  peer_media_failed: ['call.outcome.peerMediaFailedTitle', 'call.outcome.peerMediaFailedMessage'],
   never_connected: ['call.outcome.neverConnectedTitle', 'call.outcome.neverConnectedMessage'],
   udp_blocked: ['call.outcome.neverConnectedTitle', 'call.outcome.udpBlockedMessage'],
   no_direct_path: ['call.outcome.neverConnectedTitle', 'call.outcome.noDirectPathMessage'],

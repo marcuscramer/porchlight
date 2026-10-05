@@ -1,8 +1,10 @@
 package dev.porchlight.app
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
@@ -12,11 +14,13 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import dev.porchlight.app.ui.theme.Dimens
@@ -97,6 +101,21 @@ fun PairingProgressScreen(
 ) {
     val candidate = attempt?.candidate
     when {
+        attempt?.notAccepted == true -> {
+            LaunchedEffect(Unit) {
+                delay(AUTO_DISMISS_DELAY_MS)
+                onCancel()
+            }
+            OutcomeScreen(
+                title = stringResource(R.string.pairing_notConfirmedTitle),
+                message = stringResource(R.string.pairing_notConfirmedMessage),
+                actionLabel = stringResource(R.string.pairing_tryAgainButton),
+                onAction = onRetry,
+                onCancel = onCancel,
+                textLines = PAIRING_TEXT_LINES,
+            )
+        }
+        candidate != null && attempt.accepted -> WaitingForDeviceScreen(attempt.id, service, onCancel, waitingForName = candidate.name)
         candidate != null -> NameConfirmScreen(
             candidate = candidate,
             onConfirm = onConfirm,
@@ -118,6 +137,7 @@ fun PairingProgressScreen(
                 actionLabel = stringResource(R.string.pairing_tryAgainButton),
                 onAction = onRetry,
                 onCancel = onCancel,
+                textLines = PAIRING_TEXT_LINES,
             )
         }
         attempt?.timedOut == true -> {
@@ -131,19 +151,22 @@ fun PairingProgressScreen(
                 actionLabel = stringResource(R.string.pairing_tryAgainButton),
                 onAction = onRetry,
                 onCancel = onCancel,
+                textLines = PAIRING_TEXT_LINES,
             )
         }
-        else -> WaitingForDeviceScreen(attempt?.id, service, onCancel)
+        else -> WaitingForDeviceScreen(attempt?.id, service, onCancel, waitingForName = null)
     }
 }
 
 /**
- * The step the attempt is in (preparing, connecting to relays, waiting, found a device — `call-core` decides which)
- * plus how many relays are connected and how long is left, refreshed every second.
+ * The step the attempt is in (preparing, connecting to relays, waiting, found a device, or — [waitingForName] set —
+ * waiting for that person to confirm too; `call-core` decides which) plus how many relays are connected and how
+ * long is left, refreshed every second.
  */
 @Composable
-private fun WaitingForDeviceScreen(pairingId: String?, service: CameraAgentService?, onCancel: () -> Unit) {
-    val startedAt = remember { System.currentTimeMillis() }
+private fun WaitingForDeviceScreen(pairingId: String?, service: CameraAgentService?, onCancel: () -> Unit, waitingForName: String?) {
+    // Once this side has confirmed (waitingForName != null) the countdown is the wait for the other person, from now.
+    val startedAt = remember(waitingForName != null) { System.currentTimeMillis() }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -154,28 +177,28 @@ private fun WaitingForDeviceScreen(pairingId: String?, service: CameraAgentServi
     val relays = remember(now) { service?.signalingSnapshot()?.relays.orEmpty() }
     val connected = relays.count { it.state != CallCoreBridge.RelayState.DOWN }
     val pending = remember(now) { pairingId?.let(CallCoreBridge::pendingSnapshot) }
-    val phase = CallCoreBridge.pairingPhase(hasAttempt = pending != null, relaysConnected = connected, candidateFound = pending?.candidatePubkey != null)
+    val phase = CallCoreBridge.pairingPhase(
+        hasAttempt = pending != null,
+        relaysConnected = connected,
+        candidateFound = pending?.candidatePubkey != null,
+        accepted = waitingForName != null,
+    )
     val title = when (phase) {
-        CallCoreBridge.PairingPhase.PREPARING -> R.string.pairing_phasePreparing
-        CallCoreBridge.PairingPhase.CONNECTING -> R.string.pairing_phaseConnecting
-        CallCoreBridge.PairingPhase.WAITING -> R.string.pairing_waitingForDevice
-        CallCoreBridge.PairingPhase.FOUND -> R.string.pairing_phaseFound
+        CallCoreBridge.PairingPhase.PREPARING -> stringResource(R.string.pairing_phasePreparing)
+        CallCoreBridge.PairingPhase.CONNECTING -> stringResource(R.string.pairing_phaseConnecting)
+        CallCoreBridge.PairingPhase.WAITING -> stringResource(R.string.pairing_waitingForDevice)
+        CallCoreBridge.PairingPhase.FOUND -> stringResource(R.string.pairing_phaseFound)
+        CallCoreBridge.PairingPhase.WAITING_FOR_CONFIRM ->
+            stringResource(R.string.pairing_phaseWaitingForConfirm, waitingForName?.ifBlank { stringResource(R.string.common_thisDevice) }.orEmpty())
     }
-    CenteredDialogScreen(onBack = onCancel) {
+    val leftSeconds = ((CallCoreBridge.protocolConstants.pakeLiveWindowMs - (now - startedAt)) / 1000).coerceAtLeast(0)
+    // Two short lines once there is something to report, blank while preparing.
+    val status = if (phase == CallCoreBridge.PairingPhase.PREPARING) "" else
+        stringResource(R.string.pairing_progressRelays, connected, relays.size) + "\n" +
+            stringResource(R.string.pairing_progressCancelsIn, "%d:%02d".format(leftSeconds / 60, leftSeconds % 60))
+    PairingDialogScreen(title = title, text = status, onBack = onCancel) {
         // Same reasoning as CallingScreen's own spinner — distinguishes "still working" from "stuck."
         CircularProgressIndicator(color = GeneratedColor.colorActionPrimaryBackground)
-        // Bright, not dimmed — matches web's #progressWaiting h1 (plain .panel h1, --color-text-primary)
-        // and this same file's other centered-dialog titles.
-        Text(stringResource(title), color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
-        // Always two short lines (blank ones while preparing), so the spinner stays put from step to step.
-        val leftSeconds = ((CallCoreBridge.protocolConstants.pakeLiveWindowMs - (now - startedAt)) / 1000).coerceAtLeast(0)
-        val preparing = phase == CallCoreBridge.PairingPhase.PREPARING
-        for (line in listOf(
-            if (preparing) " " else stringResource(R.string.pairing_progressRelays, connected, relays.size),
-            if (preparing) " " else stringResource(R.string.pairing_progressCancelsIn, "%d:%02d".format(leftSeconds / 60, leftSeconds % 60)),
-        )) {
-            Text(line, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-        }
     }
 }
 
@@ -191,21 +214,11 @@ private fun WaitingForDeviceScreen(pairingId: String?, service: CameraAgentServi
 internal fun NameConfirmScreen(candidate: CandidatePeer, onConfirm: () -> Unit, onCancel: () -> Unit) {
     val focusRequester = remember { FocusRequester() }
     RequestFocusOnMount(focusRequester)
-    CenteredDialogScreen(onBack = onCancel) {
-        // Bright, not dimmed — matches web's #pairTitle (.pair-title,
-        // --color-text-primary) and this file's other centered-dialog
-        // titles.
-        Text(
-            stringResource(R.string.pairing_confirmTitle, candidate.name.ifBlank { stringResource(R.string.common_thisDevice) }),
-            color = GeneratedColor.colorTextPrimary,
-            style = MaterialTheme.typography.headlineSmall,
-        )
-        Text(
-            stringResource(R.string.pairing_confirmSubtitle),
-            color = GeneratedColor.colorTextDim,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-        )
+    PairingDialogScreen(
+        title = stringResource(R.string.pairing_confirmTitle, candidate.name.ifBlank { stringResource(R.string.common_thisDevice) }),
+        text = stringResource(R.string.pairing_confirmSubtitle),
+        onBack = onCancel,
+    ) {
         TvButton(onClick = onConfirm, modifier = Modifier.focusRequester(focusRequester)) { Text(stringResource(R.string.pairing_confirmButton)) }
     }
 }
@@ -215,8 +228,8 @@ internal fun NameConfirmScreen(candidate: CandidatePeer, onConfirm: () -> Unit, 
  * shape behind every non-success outcome in the app with a real decision to
  * make: pairing collision/timeout (started here) and WaitingScreen's own
  * delete confirmation (HomeScreens.kt). [CallOutcomeScreen] (HomeScreens.kt)
- * is the passive sibling — same [CenteredDialogScreen] shell, a dismiss
- * hint instead of an action button. [onCancel] is reached only via the
+ * is the passive sibling — same [CenteredDialogScreen] shell, no action
+ * button. [onCancel] is reached only via the
  * physical Back key, same as every other screen in this app — no
  * on-screen Cancel button, deliberately, even for the delete-confirmation
  * case.
@@ -229,20 +242,43 @@ internal fun OutcomeScreen(
     onAction: () -> Unit,
     onCancel: () -> Unit,
     tint: TvButtonTint = TvButtonTint.Neutral,
+    textLines: Int = 1,
 ) {
     val focusRequester = remember { FocusRequester() }
     RequestFocusOnMount(focusRequester)
-    CenteredDialogScreen(onBack = onCancel) {
-        // Bright, not dimmed — this is the one thing the screen exists
-        // to say, the same role CallingScreen's contactName/
-        // IncomingCallScreen's caller-name Text play (both
-        // colorTextPrimary), not the muted "which screen am I on"
-        // corner labels (Settings' own title, etc.). Matches web's
-        // .panel h1, which has always used --color-text-primary. No
-        // alert-red variant; every OutcomeScreen title uses this same
-        // color now, regardless of which action it leads to.
-        Text(title, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
-        Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+    PairingDialogScreen(title = title, text = message, onBack = onCancel, textLines = textLines) {
         TvButton(onClick = onAction, tint = tint, modifier = Modifier.focusRequester(focusRequester)) { Text(actionLabel) }
+    }
+}
+
+/** Lines of text every pairing dialog reserves, so the action below it sits at the same height on all of them. */
+private const val PAIRING_TEXT_LINES = 2
+
+/** Tall enough for the spinner (48 dp by default) and for a [TvButton]. */
+private val PairingActionSlotHeight = 48.dp
+
+/**
+ * The one shape behind every pairing dialog (progress, collision, timeout,
+ * confirm) and, through [OutcomeScreen], the delete confirmation: bright
+ * title, dim text, then one action slot holding the spinner or the action
+ * button. The text reserves [textLines] lines and the action slot has a fixed
+ * height, so the dialogs are all the same size — and since they are centered,
+ * the title and the action sit in the same place on each (web's `.pair-text` /
+ * `.pair-action`). Back is the only way out (there is no Cancel button).
+ */
+@Composable
+private fun PairingDialogScreen(
+    title: String,
+    text: String,
+    onBack: () -> Unit,
+    textLines: Int = PAIRING_TEXT_LINES,
+    action: @Composable () -> Unit,
+) {
+    CenteredDialogScreen(onBack = onBack) {
+        // Bright, not dimmed — the one thing the screen exists to say, the same
+        // role CallingScreen's contact name plays; matches web's `.panel h1`.
+        Text(title, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
+        Text(text, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, minLines = textLines)
+        Box(modifier = Modifier.heightIn(min = PairingActionSlotHeight), contentAlignment = Alignment.Center) { action() }
     }
 }

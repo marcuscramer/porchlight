@@ -796,10 +796,18 @@ private fun AppRoot(
             )
         }
         screen is AdminScreen.PairingInProgress -> {
+            // Both people confirmed and the contact is saved: back to the waiting screen.
+            val completed = state.pairingAttempt?.completed == true
+            LaunchedEffect(completed) {
+                if (completed) {
+                    service?.discardPairingAttempt()
+                    adminScreen = null
+                }
+            }
             PairingProgressScreen(
                 attempt = state.pairingAttempt,
                 service = service,
-                onConfirm = { service?.confirmPeer(); adminScreen = null },
+                onConfirm = { service?.confirmPeer() },
                 // The attempt so far is forgotten entirely, same as Cancel
                 // below — the next one is a new attempt with its own id and key.
                 onRetry = {

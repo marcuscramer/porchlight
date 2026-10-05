@@ -1,6 +1,29 @@
 /* @ts-self-types="./call_core.d.ts" */
 
 /**
+ * See [`crate::accept_attempt`]'s own doc. Returns a JSON array of effects (empty if there is nothing to accept).
+ * @param {string} pairing_id
+ * @param {string} candidate_pubkey
+ * @returns {string}
+ */
+export function acceptAttempt(pairing_id, candidate_pubkey) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(candidate_pubkey, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.acceptAttempt(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * See [`crate::call_arbitration::accept_incoming_call`]'s own doc. Returns
  * a JSON-encoded, tagged [`crate::call_arbitration::AcceptOutcome`] (`kind:
  * "ApplyOffer" | "CreateOffer"`), or `undefined` (not an empty string) if
@@ -144,12 +167,13 @@ export function buildBusyPayload(call_id) {
 /**
  * See [`crate::nostr_protocol::build_bye_payload`]'s own doc.
  * @param {string} call_id
+ * @param {boolean} media_failed
  * @returns {string | undefined}
  */
-export function buildByePayload(call_id) {
+export function buildByePayload(call_id, media_failed) {
     const ptr0 = passStringToWasm0(call_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.buildByePayload(ptr0, len0);
+    const ret = wasm.buildByePayload(ptr0, len0, media_failed);
     let v2;
     if (ret[0] !== 0) {
         v2 = getStringFromWasm0(ret[0], ret[1]);
@@ -312,13 +336,14 @@ export function buildWrappedEvent(own_private_key_hex, target_pubkey_hex, payloa
  * @param {boolean} has_ring
  * @param {boolean} accepted_incoming
  * @param {boolean} peer_connected
+ * @param {boolean} peer_offline
  * @returns {string}
  */
-export function callPhase(has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected) {
+export function callPhase(has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected, peer_offline) {
     let deferred1_0;
     let deferred1_1;
     try {
-        const ret = wasm.callPhase(has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected);
+        const ret = wasm.callPhase(has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected, peer_offline);
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -339,14 +364,24 @@ export function canPlaceCall(connected) {
 }
 
 /**
- * See [`crate::cancel_attempt`]'s own doc. No return value — a panic here
- * is swallowed the same way `nativeCancelAttempt` swallows one.
+ * See [`crate::cancel_attempt`]'s own doc. Returns a JSON array of effects (the signed cancel for the peer, if
+ * the exchange had matched).
  * @param {string} pairing_id
+ * @returns {string}
  */
 export function cancelAttempt(pairing_id) {
-    const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    wasm.cancelAttempt(ptr0, len0);
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.cancelAttempt(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
 }
 
 /**
@@ -389,27 +424,6 @@ export function checkOnlineTimeouts(now_ms) {
     } finally {
         wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
     }
-}
-
-/**
- * See [`crate::confirm_attempt`]'s own doc. Returns a JSON-encoded
- * [`crate::ConfirmedPairing`], or `undefined` if there is nothing to confirm.
- * @param {string} pairing_id
- * @param {string} candidate_pubkey
- * @returns {string | undefined}
- */
-export function confirmAttempt(pairing_id, candidate_pubkey) {
-    const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(candidate_pubkey, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.confirmAttempt(ptr0, len0, ptr1, len1);
-    let v3;
-    if (ret[0] !== 0) {
-        v3 = getStringFromWasm0(ret[0], ret[1]);
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    }
-    return v3;
 }
 
 /**
@@ -760,13 +774,14 @@ export function outcomeText(reason, diagnosis) {
  * @param {boolean} has_attempt
  * @param {number} relays_connected
  * @param {boolean} candidate_found
+ * @param {boolean} accepted
  * @returns {string}
  */
-export function pairingPhase(has_attempt, relays_connected, candidate_found) {
+export function pairingPhase(has_attempt, relays_connected, candidate_found, accepted) {
     let deferred1_0;
     let deferred1_1;
     try {
-        const ret = wasm.pairingPhase(has_attempt, relays_connected, candidate_found);
+        const ret = wasm.pairingPhase(has_attempt, relays_connected, candidate_found, accepted);
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

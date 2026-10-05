@@ -64,7 +64,11 @@ Please report security problems privately, not in a public issue: use
   years.
 - **You confirm who you're pairing with.** Before a pairing completes, both
   devices show the other side's self-reported name ("Pair with …?") and
-  nothing is saved until you tap Confirm. The name only arrives after the
+  nothing is saved until you tap Confirm, and a contact is only created when
+  both people have: each confirm (and each cancel) is a signed message only
+  someone who knows the phrase can produce, so one side never ends up with a
+  contact the other doesn't have (barring every relay losing the last
+  message). The name only arrives after the
   key exchange has been verified, so it can't be read by someone who merely
   watches the relays, and it can't be forged by someone who didn't take part
   in the exchange. Names are stripped of direction-override and zero-width

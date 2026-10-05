@@ -268,6 +268,7 @@ internal fun HomeScreen(
         hasRing = incoming != null,
         acceptedIncoming = state.acceptedIncoming,
         peerConnected = peerConnectedOk,
+        peerOffline = activeContact?.status == CallCoreBridge.PresenceStatus.OFFLINE,
     )
 
     // Hoisted up here (not `remember`ed inside the connected branch below)
@@ -348,6 +349,10 @@ internal fun HomeScreen(
                 service = service,
                 capturing = state.capturing,
                 label = stringResource(if (call.phase == CallCoreBridge.Phase.CONNECTING) R.string.call_connectingLabel else R.string.call_callingLabel),
+                note = when (call.noteKey) {
+                    "call.peerOfflineNote" -> stringResource(R.string.call_peerOfflineNote)
+                    else -> null
+                },
             )
             CallCoreBridge.Phase.LIVE -> {
                 // Full remote video, plus local self-view. Rectangular, not
@@ -636,7 +641,7 @@ private fun PositionSelfViewIcon(corner: PreviewCorner, modifier: Modifier = Mod
  * name stays on one line, ellipsized when too long.
  */
 @Composable
-private fun CallingScreen(contactName: String, service: CameraAgentService?, capturing: Boolean, label: String = stringResource(R.string.call_callingLabel)) {
+private fun CallingScreen(contactName: String, service: CameraAgentService?, capturing: Boolean, label: String = stringResource(R.string.call_callingLabel), note: String? = null) {
     Box(modifier = Modifier.fillMaxSize()) {
         LocalPreviewView(service = service, ready = capturing)
         Column(
@@ -663,6 +668,8 @@ private fun CallingScreen(contactName: String, service: CameraAgentService?, cap
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // Why a call to an offline contact takes a while (call-core's phase decides when).
+            if (note != null) Text(note, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
         }
     }
 }
@@ -716,13 +723,12 @@ private fun IncomingCallScreen(
 }
 
 /**
- * [CenteredDialogScreen] plus title/message/"press Back" hint — the passive
+ * [CenteredDialogScreen] plus title/message — the passive
  * sibling of [OutcomeScreen] (PassphrasePairingScreens.kt): shown whenever a
  * call ends for a reason the person didn't just cause themselves (peer hung
  * up, never connected, or dropped mid-call) — the "why did this call end"
  * decision itself is made once in call-core (see CallOutcomeReason's own
- * doc there). No action button — Back alone dismisses this, hence its
- * "Press Back to continue" hint.
+ * doc there). No action button — Back alone dismisses this.
  * Also auto-dismisses on its own after [AUTO_DISMISS_DELAY_MS] — see that
  * constant's own doc.
  */
@@ -749,6 +755,8 @@ private fun CallOutcomeScreen(
             stringResource(R.string.call_outcome_busyTitle) to stringResource(R.string.call_outcome_busyMessage, name)
         CallCoreBridge.OutcomeText.CAMERA_FAILED ->
             stringResource(R.string.call_outcome_cameraFailedTitle) to stringResource(R.string.call_outcome_cameraFailedMessage)
+        CallCoreBridge.OutcomeText.PEER_MEDIA_FAILED ->
+            stringResource(R.string.call_outcome_peerMediaFailedTitle) to stringResource(R.string.call_outcome_peerMediaFailedMessage, name)
         CallCoreBridge.OutcomeText.NEVER_CONNECTED ->
             stringResource(R.string.call_outcome_neverConnectedTitle) to stringResource(R.string.call_outcome_neverConnectedMessage, name)
         CallCoreBridge.OutcomeText.UDP_BLOCKED ->
@@ -774,7 +782,6 @@ private fun CallOutcomeScreen(
         // --color-text-primary.
         Text(title, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
         Text(message, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-        Text(stringResource(R.string.call_pressBackToContinue), color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

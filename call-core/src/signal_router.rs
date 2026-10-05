@@ -190,7 +190,9 @@ fn route_wrap(event_json: &str, ctx: &RouteContext, now_ms: i64) -> RouteResult 
             }
         }
         SignalMessage::Leaving => result.update.extend(presence::handle_leaving_message(id)),
-        SignalMessage::Bye { call_id } => result.update.call_effects.extend(call_arbitration::handle_peer_hangup(id, &call_id)),
+        SignalMessage::Bye { call_id, reason } => {
+            result.update.call_effects.extend(call_arbitration::handle_peer_hangup(id, &call_id, reason.as_deref() == Some("media")))
+        }
         SignalMessage::Busy { call_id } => {
             result.update.extend(presence::handle_peer_busy_reply(id, &own_pubkey, &peer.peer_public_key, &call_id, now_ms));
         }
@@ -416,6 +418,19 @@ mod tests {
         p.route(r#"{"type":"offer","sdp":"v=0","callId":"c1"}"#);
         assert!(p.route(r#"{"type":"bye","callId":"other"}"#).update.call_effects.is_empty());
         assert!(!p.route(r#"{"type":"bye","callId":"c1"}"#).update.call_effects.is_empty());
+    }
+
+    #[test]
+    fn a_bye_that_blames_the_camera_tells_the_caller_the_other_side_could_not_answer() {
+        let _g = call_arbitration::reset_state_for_test();
+        let p = pair(false);
+        let call_id = call_arbitration::request_call(&p.id, "zzz", "aaa", true, 0).call_id.expect("call id");
+        let r = p.route(&format!(r#"{{"type":"bye","callId":"{call_id}","reason":"media"}}"#));
+        assert!(
+            r.update.call_effects.iter().any(|e| matches!(e, CallEffect::ShowCallOutcome { reason: call_arbitration::CallOutcomeReason::PeerMediaFailed, .. })),
+            "{:?}",
+            r.update.call_effects
+        );
     }
 
     #[test]

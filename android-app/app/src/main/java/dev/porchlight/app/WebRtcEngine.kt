@@ -69,6 +69,9 @@ class WebRtcEngine(
          * call this transition is actually about, not just which pairing. */
         fun onPeerConnected(pairingId: String?, callId: String?, connected: Boolean)
         fun onCapturingChanged(capturing: Boolean)
+        /** The camera failed during a call (covered lens, taken away by something else): the call goes on with
+         * sound only, and the person can try the video again with the Video toggle. */
+        fun onVideoUnavailable()
     }
 
     data class IceServer(val urls: String, val username: String? = null, val credential: String? = null)
@@ -77,6 +80,8 @@ class WebRtcEngine(
 
     private lateinit var factory: PeerConnectionFactory
     private var videoCapturer: CameraVideoCapturer? = null
+    /** The camera failed and video is off until the person asks for it again (see [setVideoEnabled]). */
+    @Volatile private var cameraDead = false
     private var surfaceHelper: SurfaceTextureHelper? = null
     private var videoSource: VideoSource? = null
     private var audioSource: AudioSource? = null
@@ -164,6 +169,7 @@ class WebRtcEngine(
         audioSource = factory.createAudioSource(MediaConstraints())
         localAudioTrack = factory.createAudioTrack(AUDIO_ID, audioSource).apply { setEnabled(true) }
 
+        cameraDead = false
         capturing = true
         Log.i(TAG, "media acquired (camera on)")
         listener.onCapturingChanged(true)
@@ -176,7 +182,22 @@ class WebRtcEngine(
      * before acquireMedia() has run; the next acquireMedia() always starts
      * a fresh track enabled. */
     fun setAudioEnabled(enabled: Boolean) { localAudioTrack?.setEnabled(enabled) }
-    fun setVideoEnabled(enabled: Boolean) { localVideoTrack?.setEnabled(enabled) }
+    fun setVideoEnabled(enabled: Boolean) {
+        if (enabled && cameraDead) {
+            // The camera failed earlier; the person asked for video again, so try it. If it still fails the error
+            // handler below turns video off again.
+            cameraDead = false
+            try {
+                videoCapturer?.startCapture(captureW, captureH, captureFps)
+            } catch (e: Exception) {
+                Log.w(TAG, "camera restart failed", e)
+                cameraDead = true
+                listener.onVideoUnavailable()
+                return
+            }
+        }
+        localVideoTrack?.setEnabled(enabled)
+    }
 
     /**
      * A camera can be forcibly killed mid-call by something outside our
@@ -184,10 +205,9 @@ class WebRtcEngine(
      * Portal's own presence-detection screensaver taking over). Without
      * this handler, WebRTC's own PeerConnectionState never reflects that —
      * ICE/DTLS stays CONNECTED since only the camera died, not the
-     * transport — so nothing else in this class would ever notice. This
-     * treats a camera failure as a real disconnect, the same as the peer
-     * leaving, so it self-corrects instead of needing someone to notice a
-     * black screen and act.
+     * transport — so nothing else in this class would ever notice. A camera
+     * failure during a call turns video off and keeps the call going with
+     * sound ([degradeToAudioOnly]); it no longer ends the call.
      */
     private fun cameraEventsHandler() = object : CameraVideoCapturer.CameraEventsHandler {
         override fun onCameraError(errorDescription: String) = onMediaFailure("Camera error: $errorDescription")
@@ -199,36 +219,28 @@ class WebRtcEngine(
     }
 
     private fun onMediaFailure(message: String) {
-        // Logged for developer diagnostics only — no user-facing display;
-        // what matters is that a broken camera correctly ends an active
-        // call below.
         Log.e(TAG, message)
-        // Deferred onto the shared executor: this callback can fire from
-        // the capturer's own internal thread, and cleanupPeerConnection
-        // ultimately calls back into releaseMedia()/stopCapture() — better
-        // not to risk reentering the capturer's own callback machinery
-        // synchronously. safeExecute, not execute: this foreign thread has
-        // no way to know whether CameraAgentService has already shut this
-        // executor down (see ExecutorExt.kt's doc).
+        // Deferred onto the shared executor: this callback can fire from the capturer's own internal thread, and
+        // stopping or releasing the capture ultimately calls back into it — better not to risk reentering its
+        // callback machinery synchronously. safeExecute, not execute: this foreign thread has no way to know whether
+        // CameraAgentService has already shut this executor down (see ExecutorExt.kt's doc).
         executor.safeExecute {
-            // pc == null means media was only ever acquired for a
-            // self-view preview during incoming-call ringing (see
-            // CameraAgentService.onOffer) — no actual call has been
-            // negotiated yet. Tearing down the entire incoming call over a
-            // glitched preview would be wrong; just release the broken
-            // capture and leave the ring (and the human's chance to still
-            // Accept or Decline) alone. Only an *actual* in-progress call
-            // (pc != null) still ends outright — decided by call-core's own
-            // `should_end_call_on_media_failure` rather than an inline
-            // guard here, so web automatically gets the same guarantee once
-            // it grows an equivalent trigger.
-            if (CallCoreBridge.shouldEndCallOnMediaFailure(pc != null)) {
-                CallCoreBridge.noteMediaFailure()
-                closePeer()
-            } else {
-                releaseMedia()
-            }
+            // pc == null: media was only acquired for a self-view preview while an incoming call rings (see
+            // CameraAgentService.onOffer), no call has been negotiated yet. Just release the broken capture and
+            // leave the ring alone; accepting re-acquires the camera. With a call underway the call goes on
+            // without video.
+            if (pc != null) degradeToAudioOnly() else releaseMedia()
         }
+    }
+
+    /** Video off, sound on: what a covered lens or a camera something else took away costs the call. */
+    private fun degradeToAudioOnly() {
+        if (cameraDead) return
+        cameraDead = true
+        try { videoCapturer?.stopCapture() } catch (_: Exception) {}
+        localVideoTrack?.setEnabled(false)
+        Log.w(TAG, "camera unavailable: the call continues with sound only")
+        listener.onVideoUnavailable()
     }
 
     @Synchronized

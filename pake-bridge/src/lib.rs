@@ -197,6 +197,25 @@ impl PakeKeys {
         out
     }
 
+    /// The tag proving a decision ("accept" or "cancel") about this pairing was made by the side whose signing key
+    /// is `sender_pubkey_hex`: an HMAC under a key only a side that typed the same phrase has, over the decision,
+    /// the sender and the transcript. Bound to the sender so one side's tag can't be echoed back as the other's,
+    /// and to the decision so an accept can't be passed off as a cancel.
+    pub fn decision_tag_hex(&self, decision: &str, sender_pubkey_hex: &str) -> String {
+        let mut mac = <HmacSha256 as Mac>::new_from_slice(&self.derive(b"decision")).expect("HMAC accepts a key of any length");
+        mac.update(decision.as_bytes());
+        mac.update(&[0]);
+        mac.update(sender_pubkey_hex.as_bytes());
+        mac.update(&[0]);
+        mac.update(&self.transcript);
+        hex_encode(&mac.finalize().into_bytes())
+    }
+
+    /// Whether `tag_hex` is what [`PakeKeys::decision_tag_hex`] gives for this decision and sender.
+    pub fn verify_decision(&self, decision: &str, sender_pubkey_hex: &str, tag_hex: &str) -> bool {
+        verify_confirmation(&self.decision_tag_hex(decision, sender_pubkey_hex), tag_hex)
+    }
+
     fn name_cipher(&self, sender_pubkey_hex: &str) -> ChaCha20Poly1305 {
         let mut info = b"name".to_vec();
         info.extend_from_slice(sender_pubkey_hex.as_bytes());
@@ -471,5 +490,28 @@ mod tests {
     fn sealing_the_same_name_twice_gives_different_ciphertexts() {
         let (a, _) = matched_pair();
         assert_ne!(a.seal_name(KEY_A, "Alice"), a.seal_name(KEY_A, "Alice"), "nonce must be fresh per call");
+    }
+
+    #[test]
+    fn a_decision_tag_verifies_only_for_the_same_decision_sender_and_exchange() {
+        let (a, b) = matched_pair();
+        let accept = a.decision_tag_hex("accept", KEY_A);
+        assert!(b.verify_decision("accept", KEY_A, &accept), "the peer verifies what this side sent");
+        assert!(!b.verify_decision("cancel", KEY_A, &accept), "an accept is not a cancel");
+        assert!(!b.verify_decision("accept", KEY_B, &accept), "bound to the sender");
+        assert!(!a.verify_decision("accept", KEY_B, &accept), "an echo of this side's own tag is not the peer's");
+        assert!(!b.verify_decision("accept", KEY_A, ""), "empty");
+        assert!(!b.verify_decision("accept", KEY_A, "zz"), "not hex");
+        let (a2, _) = matched_pair();
+        assert!(!a2.verify_decision("accept", KEY_A, &accept), "bound to the exchange");
+    }
+
+    #[test]
+    fn a_decision_tag_from_a_mismatched_phrase_does_not_verify() {
+        let (a, _, a_out) = PakeSession::start("phrase one");
+        let (b, _, b_out) = PakeSession::start("phrase two");
+        let a_keys = a.finish(&b_out).unwrap();
+        let b_keys = b.finish(&a_out).unwrap();
+        assert!(!b_keys.verify_decision("accept", KEY_A, &a_keys.decision_tag_hex("accept", KEY_A)));
     }
 }

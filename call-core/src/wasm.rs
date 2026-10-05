@@ -85,15 +85,13 @@ pub fn start_attempt(own_name: &str, passphrase: &str) -> Result<String, JsValue
     .unwrap_or_else(|_| Err(JsValue::from_str("call-core panicked in startAttempt")))
 }
 
-/// See [`crate::confirm_attempt`]'s own doc. Returns a JSON-encoded
-/// [`crate::ConfirmedPairing`], or `undefined` if there is nothing to confirm.
-#[wasm_bindgen(js_name = confirmAttempt)]
-pub fn confirm_attempt(pairing_id: &str, candidate_pubkey: &str) -> Option<String> {
+/// See [`crate::accept_attempt`]'s own doc. Returns a JSON array of effects (empty if there is nothing to accept).
+#[wasm_bindgen(js_name = acceptAttempt)]
+pub fn accept_attempt(pairing_id: &str, candidate_pubkey: &str) -> String {
     catch_unwind(std::panic::AssertUnwindSafe(|| {
-        serde_json::to_string(&crate::confirm_attempt(pairing_id, candidate_pubkey)?).ok()
+        serde_json::to_string(&crate::accept_attempt(pairing_id, candidate_pubkey)).unwrap_or_else(|_| empty_effects_json())
     }))
-    .ok()
-    .flatten()
+    .unwrap_or_else(|_| empty_effects_json())
 }
 
 /// See [`crate::pending_attempt_ids`]'s own doc. Returns a JSON array of ids.
@@ -103,11 +101,12 @@ pub fn pending_attempt_ids() -> String {
         .unwrap_or_else(|_| "[]".to_string())
 }
 
-/// See [`crate::cancel_attempt`]'s own doc. No return value — a panic here
-/// is swallowed the same way `nativeCancelAttempt` swallows one.
+/// See [`crate::cancel_attempt`]'s own doc. Returns a JSON array of effects (the signed cancel for the peer, if
+/// the exchange had matched).
 #[wasm_bindgen(js_name = cancelAttempt)]
-pub fn cancel_attempt(pairing_id: &str) {
-    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| crate::cancel_attempt(pairing_id)));
+pub fn cancel_attempt(pairing_id: &str) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::cancel_attempt(pairing_id)).unwrap_or_else(|_| empty_effects_json())))
+        .unwrap_or_else(|_| empty_effects_json())
 }
 
 /// See [`crate::build_bootstrap_payload`]'s own doc. Returns `undefined`
@@ -376,21 +375,21 @@ pub fn note_media_failure() {
 /// See [`crate::call_ui::phase`]'s own doc. Returns a JSON-encoded
 /// [`crate::call_ui::PhaseView`]; a panic reads as "no call".
 #[wasm_bindgen(js_name = callPhase)]
-pub fn call_phase(has_active_call: bool, has_outcome: bool, has_ring: bool, accepted_incoming: bool, peer_connected: bool) -> String {
+pub fn call_phase(has_active_call: bool, has_outcome: bool, has_ring: bool, accepted_incoming: bool, peer_connected: bool, peer_offline: bool) -> String {
     catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let view = crate::call_ui::phase(&crate::call_ui::PhaseInput { has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected });
+        let view = crate::call_ui::phase(&crate::call_ui::PhaseInput { has_active_call, has_outcome, has_ring, accepted_incoming, peer_connected, peer_offline });
         serde_json::to_string(&view).unwrap_or_default()
     }))
     .ok()
     .filter(|s| !s.is_empty())
-    .unwrap_or_else(|| r#"{"phase":"idle","show_accept":false,"controls_pinned":false,"label_key":null}"#.to_string())
+    .unwrap_or_else(|| r#"{"phase":"idle","show_accept":false,"controls_pinned":false,"label_key":null,"note_key":null}"#.to_string())
 }
 
 /// See [`crate::call_ui::pairing_phase`]'s own doc. Returns a JSON-encoded
 /// [`crate::call_ui::PairingPhaseView`]; "preparing" on a panic.
 #[wasm_bindgen(js_name = pairingPhase)]
-pub fn pairing_phase(has_attempt: bool, relays_connected: u32, candidate_found: bool) -> String {
-    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::call_ui::pairing_phase(has_attempt, relays_connected, candidate_found)).unwrap_or_default()))
+pub fn pairing_phase(has_attempt: bool, relays_connected: u32, candidate_found: bool, accepted: bool) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::call_ui::pairing_phase(has_attempt, relays_connected, candidate_found, accepted)).unwrap_or_default()))
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| r#"{"phase":"preparing","label_key":"pairing.phasePreparing"}"#.to_string())
@@ -437,8 +436,8 @@ pub fn build_leaving_payload() -> Option<String> {
 
 /// See [`crate::nostr_protocol::build_bye_payload`]'s own doc.
 #[wasm_bindgen(js_name = buildByePayload)]
-pub fn build_bye_payload(call_id: &str) -> Option<String> {
-    catch_unwind(std::panic::AssertUnwindSafe(|| crate::nostr_protocol::build_bye_payload(call_id))).ok().flatten()
+pub fn build_bye_payload(call_id: &str, media_failed: bool) -> Option<String> {
+    catch_unwind(std::panic::AssertUnwindSafe(|| crate::nostr_protocol::build_bye_payload(call_id, media_failed))).ok().flatten()
 }
 
 /// See [`crate::nostr_protocol::build_busy_payload`]'s own doc.

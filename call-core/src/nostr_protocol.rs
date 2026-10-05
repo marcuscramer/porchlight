@@ -291,6 +291,10 @@ pub enum SignalMessage {
     Bye {
         #[serde(rename = "callId", default)]
         call_id: String,
+        /// `"media"`: the sender is ending the call because its own camera or microphone failed. Absent on an
+        /// ordinary bye; an older peer ignores it and reports a plain decline.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     #[serde(rename = "busy")]
     Busy {
@@ -357,9 +361,10 @@ pub fn build_leaving_payload() -> Option<String> {
     serde_json::to_string(&SignalMessage::Leaving).ok()
 }
 
-/// Mirrors `hangUp`'s payload exactly.
-pub fn build_bye_payload(call_id: &str) -> Option<String> {
-    serde_json::to_string(&SignalMessage::Bye { call_id: call_id.to_string() }).ok()
+/// Mirrors `hangUp`'s payload exactly; `media_failed` adds `"reason":"media"`.
+pub fn build_bye_payload(call_id: &str, media_failed: bool) -> Option<String> {
+    let reason = media_failed.then(|| "media".to_string());
+    serde_json::to_string(&SignalMessage::Bye { call_id: call_id.to_string(), reason }).ok()
 }
 
 /// Mirrors `sendBusy`'s payload — `call_id` is required here, unlike the
@@ -417,7 +422,7 @@ pub fn parse_signal_payload(payload_json: &str) -> Option<SignalMessage> {
             SignalMessage::Heartbeat { name: crate::sanitize_name(crate::truncate_chars(&name, crate::MAX_NAME_LENGTH)), busy, hello }
         }
         SignalMessage::Leaving => SignalMessage::Leaving,
-        SignalMessage::Bye { call_id } => SignalMessage::Bye { call_id: ensure_call_id(call_id) },
+        SignalMessage::Bye { call_id, reason } => SignalMessage::Bye { call_id: ensure_call_id(call_id), reason },
         SignalMessage::Busy { call_id } => SignalMessage::Busy { call_id: ensure_call_id(call_id) },
         SignalMessage::Call { call_id } => SignalMessage::Call { call_id: ensure_call_id(call_id) },
         SignalMessage::Offer { sdp, call_id } => {
@@ -895,7 +900,8 @@ mod tests {
 
     #[test]
     fn build_bye_payload_matches_the_wire_format() {
-        assert_eq!(build_bye_payload("call1").unwrap(), r#"{"type":"bye","callId":"call1"}"#);
+        assert_eq!(build_bye_payload("call1", false).unwrap(), r#"{"type":"bye","callId":"call1"}"#);
+        assert_eq!(build_bye_payload("call1", true).unwrap(), r#"{"type":"bye","callId":"call1","reason":"media"}"#);
     }
 
     #[test]
@@ -923,8 +929,8 @@ mod tests {
         );
         assert_eq!(parse_signal_payload(&build_leaving_payload().unwrap()).unwrap(), SignalMessage::Leaving);
         assert_eq!(
-            parse_signal_payload(&build_bye_payload("call1").unwrap()).unwrap(),
-            SignalMessage::Bye { call_id: "call1".to_string() }
+            parse_signal_payload(&build_bye_payload("call1", false).unwrap()).unwrap(),
+            SignalMessage::Bye { call_id: "call1".to_string(), reason: None }
         );
         assert_eq!(
             parse_signal_payload(&build_busy_payload("call1").unwrap()).unwrap(),
@@ -961,7 +967,7 @@ mod tests {
     #[test]
     fn parse_signal_payload_substitutes_a_random_call_id_when_missing() {
         let message = parse_signal_payload(r#"{"type":"bye"}"#).unwrap();
-        let SignalMessage::Bye { call_id } = message else { panic!("expected Bye, got {message:?}") };
+        let SignalMessage::Bye { call_id, .. } = message else { panic!("expected Bye, got {message:?}") };
         assert!(!call_id.is_empty(), "a missing callId must never come back as empty/absent");
     }
 

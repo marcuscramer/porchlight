@@ -36,13 +36,13 @@ object CallCoreBridge {
     private external fun nativeStartAttempt(ownName: String, passphrase: String): String?
 
     @JvmStatic
-    private external fun nativeConfirmAttempt(pairingId: String, candidatePubkey: String): String?
+    private external fun nativeAcceptAttempt(pairingId: String, candidatePubkey: String): String
 
     @JvmStatic
     private external fun nativePendingAttemptIds(): String
 
     @JvmStatic
-    private external fun nativeCancelAttempt(pairingId: String)
+    private external fun nativeCancelAttempt(pairingId: String): String
 
     @JvmStatic
     private external fun nativeBuildBootstrapPayload(pairingId: String): String?
@@ -76,13 +76,7 @@ object CallCoreBridge {
     private external fun nativePeerConnectionClosed(): String
 
     @JvmStatic
-    private external fun nativeNoteMediaFailure()
-
-    @JvmStatic
     private external fun nativeMarkConnected(pairingId: String, callId: String)
-
-    @JvmStatic
-    private external fun nativeShouldEndCallOnMediaFailure(hasActivePeerConnection: Boolean): Boolean
 
     @JvmStatic
     private external fun nativeForgetPairing(pairingId: String): String
@@ -148,7 +142,7 @@ object CallCoreBridge {
     private external fun nativeBuildLeavingPayload(): String?
 
     @JvmStatic
-    private external fun nativeBuildByePayload(callId: String): String?
+    private external fun nativeBuildByePayload(callId: String, mediaFailed: Boolean): String?
 
     @JvmStatic
     private external fun nativeBuildBusyPayload(callId: String): String?
@@ -196,10 +190,13 @@ object CallCoreBridge {
     private external fun nativeIceRememberDiagnosis(iceConnectionState: String)
 
     @JvmStatic
-    private external fun nativePairingPhase(hasAttempt: Boolean, relaysConnected: Int, candidateFound: Boolean): String
+    private external fun nativePairingPhase(hasAttempt: Boolean, relaysConnected: Int, candidateFound: Boolean, accepted: Boolean): String
 
     @JvmStatic
-    private external fun nativeCallPhase(hasActiveCall: Boolean, hasOutcome: Boolean, hasRing: Boolean, acceptedIncoming: Boolean, peerConnected: Boolean): String
+    private external fun nativeRelayWatchdog(connected: Int, total: Int, nowMs: Long): Int
+
+    @JvmStatic
+    private external fun nativeCallPhase(hasActiveCall: Boolean, hasOutcome: Boolean, hasRing: Boolean, acceptedIncoming: Boolean, peerConnected: Boolean, peerOffline: Boolean): String
 
     @JvmStatic
     private external fun nativeOutcomeText(reason: String, diagnosis: String): String
@@ -245,9 +242,6 @@ object CallCoreBridge {
      * [handleTimeout] when the live window elapses. */
     data class StartResult(val pairingId: String, val rendezvousTag: String, val outboundHex: String, val generation: Long)
 
-    /** The finished contact `call-core` hands back when a person confirms a pairing attempt's candidate. */
-    data class ConfirmedPairing(val pairingId: String, val ownPrivateKeyHex: String, val peerPublicKey: String, val peerName: String)
-
     /** Everything needed to (re)publish a heartbeat tick for one live
      * pending pairing, all at once — see the Rust crate's own
      * `PendingSnapshot` doc. */
@@ -262,6 +256,12 @@ object CallCoreBridge {
         data class SetCollision(val pairingId: String) : Effect
         data class SetTimedOut(val pairingId: String) : Effect
         data class SetConfirmedCandidate(val pairingId: String, val pubkeyHex: String, val name: String) : Effect
+        /** This side's person confirmed; waiting for the other. Schedule [handleTimeout] with [generation] after [timeoutMs]. */
+        data class SetWaitingForPeer(val pairingId: String, val generation: Long, val timeoutMs: Long) : Effect
+        /** The pairing ended without both people confirming; nothing was saved. */
+        data class SetNotAccepted(val pairingId: String) : Effect
+        /** Both confirmed: save this contact, and schedule [handleTimeout] with [generation] after [lingerMs]. */
+        data class PairingComplete(val pairingId: String, val ownPrivateKeyHex: String, val peerPublicKey: String, val peerName: String, val generation: Long, val lingerMs: Long) : Effect
     }
 
     /** Effects the caller must actually perform for the call-arbitration
@@ -278,7 +278,7 @@ object CallCoreBridge {
         data class SendBusy(val pairingId: String, val callId: String) : CallEffect
         data class ApplyRemoteOffer(val pairingId: String, val callId: String, val sdp: String) : CallEffect
         data class StartRinging(val pairingId: String, val callId: String, val autoAnswer: Boolean, val secondsRemaining: Int) : CallEffect
-        data class SendBye(val pairingId: String, val callId: String) : CallEffect
+        data class SendBye(val pairingId: String, val callId: String, val mediaFailed: Boolean) : CallEffect
         /** A terminal call needs a full-screen message shown — see the Rust
          * crate's own `CallEffect::ShowCallOutcome`/`CallOutcomeReason` doc
          * for exactly which teardown paths emit this and why (not every
@@ -290,7 +290,7 @@ object CallCoreBridge {
         data object KickHeartbeat : CallEffect
     }
 
-    enum class CallOutcomeReason { PEER_ENDED, DECLINED, CANCELLED, NO_ANSWER, UNREACHABLE, BUSY, CAMERA_FAILED, NEVER_CONNECTED, DROPPED }
+    enum class CallOutcomeReason { PEER_ENDED, DECLINED, CANCELLED, NO_ANSWER, UNREACHABLE, BUSY, CAMERA_FAILED, PEER_MEDIA_FAILED, NEVER_CONNECTED, DROPPED }
 
     /** What [requestCall] hands back — see the Rust crate's own
      * `RequestCallResult` doc. [callId] is `null` only when a *different*
@@ -344,7 +344,7 @@ object CallCoreBridge {
     data class PresenceUpdateResult(val presenceEffects: List<PresenceEffect>, val callEffects: List<CallEffect>)
 
     /** Starts a new pairing attempt with a freshly minted id and keypair, held in memory by `call-core` until a
-     * person confirms the match ([confirmAttempt]) or it ends. Trim/NFC-normalization and the rendezvous-tag
+     * pairing completes ([Effect.PairingComplete]) or it ends. Trim/NFC-normalization and the rendezvous-tag
      * derivation happen inside `pake-bridge`, called from `call-core` — see that crate's own doc; this call
      * forwards the raw typed passphrase unchanged. */
     fun startAttempt(ownName: String, passphrase: String): StartResult {
@@ -355,20 +355,19 @@ object CallCoreBridge {
         return StartResult(obj.getString("pairing_id"), obj.getString("rendezvous_tag"), obj.getString("outbound_hex"), obj.getLong("generation"))
     }
 
-    /** The person confirmed [candidatePubkey] for [pairingId]: ends the attempt and returns the contact to save, or
-     * `null` if there is nothing to confirm (the attempt ended, or the candidate isn't the confirmed one). */
-    fun confirmAttempt(pairingId: String, candidatePubkey: String): ConfirmedPairing? {
-        val json = nativeConfirmAttempt(pairingId, candidatePubkey) ?: return null
-        val obj = JSONObject(json)
-        return ConfirmedPairing(obj.getString("pairing_id"), obj.getString("own_private_key_hex"), obj.getString("peer_public_key"), obj.getString("peer_name"))
-    }
+    /** The person confirmed [candidatePubkey] for [pairingId]. Pairing needs both people to confirm, so this
+     * answers with effects: a waiting screen until the other side confirms too ([Effect.SetWaitingForPeer]), the
+     * contact to save once it has ([Effect.PairingComplete]), or [Effect.SetNotAccepted] if the other already
+     * cancelled. Empty if there is nothing to confirm (the attempt ended, or the candidate isn't the confirmed one). */
+    fun acceptAttempt(pairingId: String, candidatePubkey: String): List<Effect> = parseEffects(nativeAcceptAttempt(pairingId, candidatePubkey))
 
     /** Ids of the pairing attempts that are live right now. */
     fun pendingAttemptIds(): List<String> = JSONArray(nativePendingAttemptIds()).let { arr -> (0 until arr.length()).map { arr.getString(it) } }
 
     /** Abandons an attempt outright (user cancel, contact deleted) without
-     * completing it. A no-op if there's no live attempt for [pairingId]. */
-    fun cancelAttempt(pairingId: String) = nativeCancelAttempt(pairingId)
+     * completing it. The effects carry a signed cancel for the other side if the exchange had matched. Empty if
+     * there's no live attempt for [pairingId]. */
+    fun cancelAttempt(pairingId: String): List<Effect> = parseEffects(nativeCancelAttempt(pairingId))
 
     /** Everything needed to (re)publish a heartbeat tick for one live
      * pending pairing — rendezvous tag, the messages to publish (always
@@ -388,9 +387,8 @@ object CallCoreBridge {
     }
 
     /** The live-window timeout fired for [pairingId] — see the Rust crate's
-     * own doc for why [generation] (from [StartResult]) matters: a no-op
-     * unless it's still the same, unresolved attempt this timeout was
-     * scheduled for. */
+     * own doc for why [generation] (from [StartResult], [Effect.SetWaitingForPeer] or [Effect.PairingComplete])
+     * matters: a no-op unless it's still the same attempt, at the same stage, this timer was scheduled for. */
     fun handleTimeout(pairingId: String, generation: Long): List<Effect> = parseEffects(nativeHandleTimeout(pairingId, generation))
 
     /** Strips control/bidi-override/zero-width characters from a
@@ -469,17 +467,9 @@ object CallCoreBridge {
      * guarantee. */
     fun peerConnectionClosed(): List<CallEffect> = parseCallEffects(nativePeerConnectionClosed())
 
-    /** This device's own camera/microphone failed: call before closing the
-     * connection so the outcome says so (see the Rust crate's own
-     * `note_media_failure` doc). */
-    fun noteMediaFailure() = nativeNoteMediaFailure()
-
     /** Called the instant the real `PeerConnection` reaches CONNECTED —
      * see the Rust crate's own `mark_connected` doc. */
     fun markConnected(pairingId: String, callId: String) = nativeMarkConnected(pairingId, callId)
-
-    /** See the Rust crate's own `should_end_call_on_media_failure` doc. */
-    fun shouldEndCallOnMediaFailure(hasActivePeerConnection: Boolean): Boolean = nativeShouldEndCallOnMediaFailure(hasActivePeerConnection)
 
     /** See the Rust crate's own `call_arbitration::forget_pairing` doc —
      * call alongside [presenceRemovePairing] from `removePairing`. */
@@ -625,23 +615,34 @@ object CallCoreBridge {
     /** What the call screens show — see the Rust crate's own
      * `call_ui::PhaseView` doc. The label is picked per [phase] from the
      * app's own strings. */
-    data class PhaseView(val phase: Phase, val showAccept: Boolean, val controlsPinned: Boolean)
+    data class PhaseView(val phase: Phase, val showAccept: Boolean, val controlsPinned: Boolean, val noteKey: String?)
 
     /** Which phase a call is in, decided once in `call-core` for both shells. */
-    fun callPhase(hasActiveCall: Boolean, hasOutcome: Boolean, hasRing: Boolean, acceptedIncoming: Boolean, peerConnected: Boolean): PhaseView {
-        val obj = JSONObject(nativeCallPhase(hasActiveCall, hasOutcome, hasRing, acceptedIncoming, peerConnected))
-        return PhaseView(Phase.valueOf(obj.getString("phase").uppercase()), obj.getBoolean("show_accept"), obj.getBoolean("controls_pinned"))
+    fun callPhase(hasActiveCall: Boolean, hasOutcome: Boolean, hasRing: Boolean, acceptedIncoming: Boolean, peerConnected: Boolean, peerOffline: Boolean): PhaseView {
+        val obj = JSONObject(nativeCallPhase(hasActiveCall, hasOutcome, hasRing, acceptedIncoming, peerConnected, peerOffline))
+        return PhaseView(
+            Phase.valueOf(obj.getString("phase").uppercase()),
+            obj.getBoolean("show_accept"),
+            obj.getBoolean("controls_pinned"),
+            if (obj.isNull("note_key")) null else obj.getString("note_key"),
+        )
     }
 
-    /** What the "Waiting for the other device" screen says — see the Rust crate's own `call_ui::PairingPhase` doc. */
-    enum class PairingPhase { PREPARING, CONNECTING, WAITING, FOUND }
+    /** What to do about the relay connections right now — see the Rust crate's own `relay_watchdog` doc. */
+    enum class RelayWatchdogAction { NOTHING, SOFT_RECONNECT, REBUILD }
 
-    fun pairingPhase(hasAttempt: Boolean, relaysConnected: Int, candidateFound: Boolean): PairingPhase =
-        PairingPhase.valueOf(JSONObject(nativePairingPhase(hasAttempt, relaysConnected, candidateFound)).getString("phase").uppercase())
+    fun relayWatchdog(connected: Int, total: Int, nowMs: Long): RelayWatchdogAction =
+        RelayWatchdogAction.entries.getOrElse(nativeRelayWatchdog(connected, total, nowMs)) { RelayWatchdogAction.NOTHING }
+
+    /** What the "Waiting for the other device" screen says — see the Rust crate's own `call_ui::PairingPhase` doc. */
+    enum class PairingPhase { PREPARING, CONNECTING, WAITING, FOUND, WAITING_FOR_CONFIRM }
+
+    fun pairingPhase(hasAttempt: Boolean, relaysConnected: Int, candidateFound: Boolean, accepted: Boolean): PairingPhase =
+        PairingPhase.valueOf(JSONObject(nativePairingPhase(hasAttempt, relaysConnected, candidateFound, accepted)).getString("phase").uppercase())
 
     /** Which text an ended call gets — see the Rust crate's own
      * `call_ui::OutcomeText` doc. */
-    enum class OutcomeText { PEER_ENDED, DECLINED, CANCELLED, NO_ANSWER, UNREACHABLE, BUSY, CAMERA_FAILED, NEVER_CONNECTED, UDP_BLOCKED, NO_DIRECT_PATH, DROPPED }
+    enum class OutcomeText { PEER_ENDED, DECLINED, CANCELLED, NO_ANSWER, UNREACHABLE, BUSY, CAMERA_FAILED, PEER_MEDIA_FAILED, NEVER_CONNECTED, UDP_BLOCKED, NO_DIRECT_PATH, DROPPED }
 
     fun outcomeText(reason: CallOutcomeReason, diagnosis: IceDiagnosis?): OutcomeText =
         OutcomeText.valueOf(nativeOutcomeText(reason.name.lowercase(), diagnosis?.name?.lowercase() ?: "").trim('"').uppercase())
@@ -782,7 +783,7 @@ object CallCoreBridge {
 
     /** Mirrors `hangUp`'s payload — see the Rust crate's own
      * `nostr_protocol::build_bye_payload` doc. */
-    fun buildByePayload(callId: String): String? = nativeBuildByePayload(callId)
+    fun buildByePayload(callId: String, mediaFailed: Boolean): String? = nativeBuildByePayload(callId, mediaFailed)
 
     /** Mirrors `sendBusy`'s payload — see the Rust crate's own
      * `nostr_protocol::build_busy_payload` doc. */
@@ -905,6 +906,9 @@ object CallCoreBridge {
                 "SetCollision" -> Effect.SetCollision(obj.getString("pairing_id"))
                 "SetTimedOut" -> Effect.SetTimedOut(obj.getString("pairing_id"))
                 "SetConfirmedCandidate" -> Effect.SetConfirmedCandidate(obj.getString("pairing_id"), obj.getString("pubkey_hex"), obj.getString("name"))
+                "SetWaitingForPeer" -> Effect.SetWaitingForPeer(obj.getString("pairing_id"), obj.getLong("generation"), obj.getLong("timeout_ms"))
+                "SetNotAccepted" -> Effect.SetNotAccepted(obj.getString("pairing_id"))
+                "PairingComplete" -> Effect.PairingComplete(obj.getString("pairing_id"), obj.getString("own_private_key_hex"), obj.getString("peer_public_key"), obj.getString("peer_name"), obj.getLong("generation"), obj.getLong("linger_ms"))
                 else -> error("CallCoreBridge: unknown effect kind from native layer: $kind")
             }
         }
@@ -921,7 +925,7 @@ object CallCoreBridge {
                 "SendBusy" -> CallEffect.SendBusy(obj.getString("pairing_id"), obj.getString("call_id"))
                 "ApplyRemoteOffer" -> CallEffect.ApplyRemoteOffer(obj.getString("pairing_id"), obj.getString("call_id"), obj.getString("sdp"))
                 "StartRinging" -> CallEffect.StartRinging(obj.getString("pairing_id"), obj.getString("call_id"), obj.getBoolean("auto_answer"), obj.getInt("seconds_remaining"))
-                "SendBye" -> CallEffect.SendBye(obj.getString("pairing_id"), obj.getString("call_id"))
+                "SendBye" -> CallEffect.SendBye(obj.getString("pairing_id"), obj.getString("call_id"), obj.optBoolean("media_failed", false))
                 "ShowCallOutcome" -> CallEffect.ShowCallOutcome(
                     obj.getString("pairing_id"),
                     obj.getString("call_id"),

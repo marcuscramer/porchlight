@@ -118,19 +118,19 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeStartAttempt
     })
 }
 
-/// See [`crate::confirm_attempt`]'s own doc. Returns a JSON-encoded
-/// [`crate::ConfirmedPairing`], or `null` if there is nothing to confirm.
+/// See [`crate::accept_attempt`]'s own doc. Returns a JSON array of effects (empty if there is nothing to accept),
+/// the same always-a-JSON-array contract as `nativeHandleBootstrapMessage`.
 #[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeConfirmAttempt<'local>(
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeAcceptAttempt<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     pairing_id: JString<'local>,
     candidate_pubkey: JString<'local>,
 ) -> jstring {
-    encode_nullable(&mut env, |env| {
+    encode_or_fallback(&mut env, empty_effects_json, |env| {
         let pairing_id = get_string(env, &pairing_id)?;
         let candidate_pubkey = get_string(env, &candidate_pubkey)?;
-        serde_json::to_string(&crate::confirm_attempt(&pairing_id, &candidate_pubkey)?).ok()
+        Some(crate::accept_attempt(&pairing_id, &candidate_pubkey))
     })
 }
 
@@ -143,18 +143,18 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativePendingAttem
     encode_or_fallback(&mut env, || "[]".to_string(), |_| Some(crate::pending_attempt_ids()))
 }
 
-/// See [`crate::cancel_attempt`]'s own doc.
+/// See [`crate::cancel_attempt`]'s own doc. Returns a JSON array of effects (the signed cancel for the peer, if
+/// the exchange had matched).
 #[no_mangle]
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCancelAttempt<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     pairing_id: JString<'local>,
-) {
-    run_catching(&mut env, |env| {
-        if let Some(pairing_id) = get_string(env, &pairing_id) {
-            crate::cancel_attempt(&pairing_id);
-        }
-    });
+) -> jstring {
+    encode_or_fallback(&mut env, empty_effects_json, |env| {
+        let pairing_id = get_string(env, &pairing_id)?;
+        Some(crate::cancel_attempt(&pairing_id))
+    })
 }
 
 /// See [`crate::build_bootstrap_payload`]'s own doc. Returns `null` if
@@ -322,21 +322,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeMarkConnecte
         let (Some(pairing_id), Some(call_id)) = (get_string(env, &pairing_id), get_string(env, &call_id)) else { return };
         crate::call_arbitration::mark_connected(&pairing_id, &call_id);
     });
-}
-
-/// See [`crate::call_arbitration::should_end_call_on_media_failure`]'s own
-/// doc. Falls back to `true` (end the call) on a panic — the safer
-/// direction when this module's own logic couldn't be trusted: a call
-/// wrongly ended is recoverable (redial); a media failure wrongly treated
-/// as harmless during an actual live call is a worse user experience (a
-/// dead call that looks alive).
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeShouldEndCallOnMediaFailure<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    has_active_peer_connection: jni::sys::jboolean,
-) -> jni::sys::jboolean {
-    encode_bool(&mut env, true, |_env| Some(crate::call_arbitration::should_end_call_on_media_failure(has_active_peer_connection != 0)))
 }
 
 /// See [`crate::call_arbitration::forget_pairing`]'s own doc. Same
@@ -522,13 +507,6 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRouteEvent<'
     })
 }
 
-/// See [`crate::call_arbitration::note_media_failure`]'s own doc. No return
-/// value.
-#[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeNoteMediaFailure<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) {
-    run_catching(&mut env, |_| crate::call_arbitration::note_media_failure());
-}
-
 /// See [`crate::call_ui::phase`]'s own doc. Returns a JSON-encoded
 /// [`crate::call_ui::PhaseView`]; a panic reads as "no call" (the contact
 /// list), the screen that can always be shown.
@@ -541,10 +519,11 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCallPhase<'l
     has_ring: jni::sys::jboolean,
     accepted_incoming: jni::sys::jboolean,
     peer_connected: jni::sys::jboolean,
+    peer_offline: jni::sys::jboolean,
 ) -> jstring {
     encode_or_fallback(
         &mut env,
-        || r#"{"phase":"idle","show_accept":false,"controls_pinned":false,"label_key":null}"#.to_string(),
+        || r#"{"phase":"idle","show_accept":false,"controls_pinned":false,"label_key":null,"note_key":null}"#.to_string(),
         |_| {
             Some(crate::call_ui::phase(&crate::call_ui::PhaseInput {
                 has_active_call: has_active_call != 0,
@@ -552,6 +531,7 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCallPhase<'l
                 has_ring: has_ring != 0,
                 accepted_incoming: accepted_incoming != 0,
                 peer_connected: peer_connected != 0,
+                peer_offline: peer_offline != 0,
             }))
         },
     )
@@ -566,11 +546,12 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativePairingPhase
     has_attempt: jni::sys::jboolean,
     relays_connected: jni::sys::jint,
     candidate_found: jni::sys::jboolean,
+    accepted: jni::sys::jboolean,
 ) -> jstring {
     encode_or_fallback(
         &mut env,
         || r#"{"phase":"preparing","label_key":"pairing.phasePreparing"}"#.to_string(),
-        |_| Some(crate::call_ui::pairing_phase(has_attempt != 0, relays_connected.max(0) as u32, candidate_found != 0)),
+        |_| Some(crate::call_ui::pairing_phase(has_attempt != 0, relays_connected.max(0) as u32, candidate_found != 0, accepted != 0)),
     )
 }
 
@@ -645,10 +626,11 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeBuildByePayl
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     call_id: JString<'local>,
+    media_failed: jni::sys::jboolean,
 ) -> jstring {
     encode_nullable(&mut env, |env| {
         let call_id = get_string(env, &call_id)?;
-        crate::nostr_protocol::build_bye_payload(&call_id)
+        crate::nostr_protocol::build_bye_payload(&call_id, media_failed != 0)
     })
 }
 
@@ -1043,4 +1025,22 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeWakeUpNextSt
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeWakeUpConstants<'local>(mut env: JNIEnv<'local>, _class: JClass<'local>) -> jstring {
     // Static fallback, same reasoning as `nativeProtocolConstants`'s.
     encode_or_fallback(&mut env, || "{\"own_press_window_ms\":2500,\"mask_timeout_ms\":10000}".to_string(), |_env| Some(crate::wake_up::constants()))
+}
+
+/// See [`crate::relay_watchdog::check`]'s own doc. Returns 0 (nothing), 1 (soft reconnect) or 2 (rebuild the
+/// connections); 0 on a panic, the do-no-harm choice.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRelayWatchdog<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    connected: jni::sys::jint,
+    total: jni::sys::jint,
+    now_ms: jlong,
+) -> jni::sys::jint {
+    catch_unwind(|| match crate::relay_watchdog::check(connected.max(0) as u32, total.max(0) as u32, now_ms) {
+        crate::relay_watchdog::Action::Nothing => 0,
+        crate::relay_watchdog::Action::SoftReconnect => 1,
+        crate::relay_watchdog::Action::Rebuild => 2,
+    })
+    .unwrap_or(0)
 }

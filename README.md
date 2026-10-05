@@ -217,11 +217,17 @@ end.
    a phrase only the two of you would think of — avoid a common word, a
    name, or a short number.
 3. The two devices find each other automatically once the phrases match.
-   Once matched, confirm the other side's
-   name with a single tap — pairing is done, for good, for that contact.
+   Once matched, each of you confirms the other side's name with a single
+   tap. Pairing is done, for good, once *both* of you have confirmed; if
+   one of you cancels (or doesn't confirm in time), nothing is saved on
+   either device.
 
 ## Day to day
 
+- **Back**: on the Portal, the remote's **Back** key goes back or cancels on
+  every screen (Settings, adding a contact, pairing, a dialog); no screen has
+  an on-screen Back or Cancel button. The web version has those buttons
+  instead.
 - **Incoming calls**: ring with a green Accept button (the same one as
   Call) in the controls at the bottom of the screen; the red button next to
   it, or Back on the Portal, declines. On the Portal app (not the web
@@ -249,15 +255,19 @@ end.
 - **When a call doesn't go through**, the screen says why instead of a
   generic failure: *Call declined* (they pressed decline), *No answer* (it
   rang for a minute and nobody picked up), *Not reachable* (they appear to be
-  offline), *Busy* (they're on another call), *Camera or microphone problem*
-  (this device couldn't use its camera or microphone — on a Portal, check the
-  camera cover is open), and *Couldn't connect* (both sides were there but the
+  offline, or may have removed you from their contacts; while it waits, the
+  calling screen says they look offline), *Busy* (they're on another call),
+  *Camera or microphone problem* (this device couldn't use its camera or
+  microphone), *Couldn't be answered* (the other device couldn't answer
+  because of a camera or microphone problem on its side), and *Couldn't connect* (both sides were there but the
   video never came up; if it can tell, the message says whether the network
   seems to block calls, as on two phones on mobile data). The device that was
   being called sees *Missed call* if the caller hung up before it was answered,
   and *Call ended* when a call that was already underway is ended from the
   other side. These screens close by themselves after a while, or with Back
-  on the Portal (the OK button on the web).
+  on the Portal (the OK button on the web). If the Portal's camera stops
+  working during a call (for example the camera cover is closed), the call
+  carries on with sound only; switching Video on again tries the camera again.
 - **Status dots** next to each contact are purely informational — green
   means they're currently reachable, orange means they're on another call
   right now, red means they're not currently reachable, and none of this

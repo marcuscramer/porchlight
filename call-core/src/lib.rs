@@ -42,6 +42,7 @@
 //!   dedup, unwrap/verify, parse, presence and per-message decisions, returned
 //!   as one ordered result for the shell to execute;
 //! - `relay_status` — what the Status screens say about each relay;
+//! - `relay_watchdog` — when the Android shell should reconnect, or rebuild, its relay connections;
 //! - `call_ui` — which phase a call is in (ringing/calling/connecting/live/
 //!   outcome) and which text an ended call gets;
 //! - `wake_up` — the step-by-step decisions for getting the call screen in
@@ -77,6 +78,8 @@ pub mod signal_retry;
 
 pub mod relay_status;
 
+pub mod relay_watchdog;
+
 pub mod ice_evidence;
 
 /// A peer's self-reported, untrusted display name is capped and stripped
@@ -110,6 +113,11 @@ const MAX_ICE_CANDIDATE_LENGTH: usize = 4_096;
 /// timeout time. Exposed via [`protocol_constants`] so both platforms
 /// schedule off one real value instead of two hand-copied literals.
 const PAKE_LIVE_WINDOW_MS: u64 = 120_000;
+
+/// How long a finished pairing (both sides accepted) keeps republishing this side's accept, so the other side
+/// still gets it if the first publish was lost. The shell schedules [`handle_timeout`] for this long after
+/// [`Effect::PairingComplete`].
+const PAIRING_LINGER_MS: u64 = 30_000;
 
 /// Protocol-level constants both platforms must use identically, exposed as
 /// one JSON blob (`android::nativeProtocolConstants`/`wasm::protocolConstants`)
@@ -149,7 +157,7 @@ pub fn protocol_constants() -> ProtocolConstants {
 struct PakeAttempt {
     generation: u64,
     /// This attempt's own one-time identity. It becomes the contact's permanent key if the attempt is confirmed
-    /// ([`confirm_attempt`]); until then it lives only here, in memory.
+    /// (both people confirmed, see [`accept_attempt`]); until then it lives only here, in memory.
     own_private_key_hex: String,
     own_pubkey_hex: String,
     own_name: String,
@@ -171,6 +179,15 @@ struct PakeAttempt {
     /// Set together with `resolved`: the peer's public key and sanitized name that the SPAKE2 exchange confirmed,
     /// waiting for the human "Pair with \[name\]?" tap.
     confirmed: Option<(String, String)>,
+    /// This side's person tapped Accept; the contact waits for the peer's accept too.
+    local_accepted: bool,
+    /// The peer's verified accept arrived (possibly before this side's person tapped).
+    peer_accepted: bool,
+    /// The peer's verified cancel arrived before this side's person tapped Accept.
+    peer_cancelled: bool,
+    /// Both accepted and the contact was handed to the shell. The attempt stays registered for
+    /// [`PAIRING_LINGER_MS`], only to keep republishing this side's accept for a peer that missed it.
+    finished: bool,
 }
 
 /// Every piece of mutable state this crate holds, behind one shared lock —
@@ -204,6 +221,7 @@ struct AppState {
     /// device. Messages from these keys are ignored.
     retired_attempt_pubkeys: Vec<String>,
     relay_log: relay_status::RelayLogState,
+    relay_watchdog: relay_watchdog::WatchdogState,
     ice: ice_evidence::IceState,
 }
 
@@ -217,6 +235,7 @@ impl AppState {
             signal_retry: signal_retry::SignalRetryState::new(),
             retired_attempt_pubkeys: Vec::new(),
             relay_log: relay_status::RelayLogState::new(),
+            relay_watchdog: relay_watchdog::WatchdogState::new(),
             ice: ice_evidence::IceState::new(),
         }
     }
@@ -243,8 +262,8 @@ pub struct StartResult {
 }
 
 /// Starts a new pairing attempt with a freshly minted id and keypair. Nothing about the attempt is persisted by
-/// the shells: it lives in this registry until [`confirm_attempt`] hands back the finished contact (or it times
-/// out, collides or is cancelled), so an app or tab that dies mid-attempt leaves nothing behind. Trim/NFC-
+/// the shells: it lives in this registry until both people confirm (the finished contact comes back as
+/// [`Effect::PairingComplete`]) or it times out, collides or is cancelled, so an app or tab that dies mid-attempt leaves nothing behind. Trim/NFC-
 /// normalization and the rendezvous-tag derivation happen inside `pake_bridge::PakeSession::start` — this
 /// function does no passphrase handling of its own beyond forwarding it.
 pub fn start_attempt(own_name: &str, raw_passphrase: &str) -> StartResult {
@@ -282,6 +301,10 @@ pub(crate) fn start_attempt_with(pairing_id: &str, own_private_key_hex: &str, ow
         stashed_remote_confirm: None,
         resolved: false,
         confirmed: None,
+        local_accepted: false,
+        peer_accepted: false,
+        peer_cancelled: false,
+        finished: false,
     };
     let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(old) = app.pairing_registry.insert(pairing_id.to_string(), attempt) {
@@ -290,7 +313,7 @@ pub(crate) fn start_attempt_with(pairing_id: &str, own_private_key_hex: &str, ow
     StartResult { pairing_id: pairing_id.to_string(), rendezvous_tag, outbound_hex, generation }
 }
 
-/// The finished contact, handed to the shell to persist when a person confirms a candidate.
+/// The finished contact, handed to the shell to persist ([`Effect::PairingComplete`]).
 #[derive(Serialize, Debug, PartialEq)]
 pub struct ConfirmedPairing {
     pub pairing_id: String,
@@ -299,18 +322,57 @@ pub struct ConfirmedPairing {
     pub peer_name: String,
 }
 
-/// The person tapped "Pair with \[name\]?" for `candidate_pubkey`. Succeeds only for the candidate the exchange
-/// actually confirmed; ends the attempt and returns the contact to save. `None` if there is no such attempt or
-/// candidate (cancelled, timed out or collided in the meantime).
-pub fn confirm_attempt(pairing_id: &str, candidate_pubkey: &str) -> Option<ConfirmedPairing> {
+/// The person tapped Accept on "Pair with \[name\]?" for `candidate_pubkey`. Pairing needs both people to accept:
+/// this publishes a signed accept and, once the peer's accept is in too (it may already be), completes the pairing
+/// ([`Effect::PairingComplete`]); until then the shell shows a waiting screen ([`Effect::SetWaitingForPeer`]). If
+/// the peer already cancelled, ends the attempt ([`Effect::SetNotAccepted`]). Empty when there is no such attempt
+/// or candidate (cancelled, timed out or collided in the meantime) or it was already accepted.
+pub fn accept_attempt(pairing_id: &str, candidate_pubkey: &str) -> Vec<Effect> {
     let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    let attempt = app.pairing_registry.get(pairing_id)?;
-    let (pubkey, name) = attempt.confirmed.clone()?;
-    if pubkey != candidate_pubkey {
-        return None;
+    let Some(attempt) = app.pairing_registry.get_mut(pairing_id) else { return vec![] };
+    let Some((pubkey, _)) = attempt.confirmed.clone() else { return vec![] };
+    if pubkey != candidate_pubkey || attempt.local_accepted || attempt.finished {
+        return vec![];
     }
-    let attempt = app.pairing_registry.remove(pairing_id)?;
-    Some(ConfirmedPairing { pairing_id: pairing_id.to_string(), own_private_key_hex: attempt.own_private_key_hex, peer_public_key: pubkey, peer_name: name })
+    if attempt.peer_cancelled {
+        if let Some(old) = app.pairing_registry.remove(pairing_id) {
+            retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
+        }
+        return vec![Effect::SetNotAccepted { pairing_id: pairing_id.to_string() }];
+    }
+    let Some(tag) = attempt.keys.as_ref().map(|keys| keys.decision_tag_hex("accept", &attempt.own_pubkey_hex)) else { return vec![] };
+    attempt.local_accepted = true;
+    let mut effects = vec![Effect::SendBootstrap {
+        pairing_id: pairing_id.to_string(),
+        own_private_key_hex: attempt.own_private_key_hex.clone(),
+        rendezvous_tag: attempt.rendezvous_tag.clone(),
+        target_pubkey: pubkey,
+        payload: BootstrapPayload::PakeAccept { tag },
+    }];
+    if attempt.peer_accepted {
+        effects.push(complete(attempt, pairing_id));
+    } else {
+        // A fresh generation, so the timer scheduled when the attempt started no longer applies to it.
+        attempt.generation = next_generation();
+        effects.push(Effect::SetWaitingForPeer { pairing_id: pairing_id.to_string(), generation: attempt.generation, timeout_ms: PAKE_LIVE_WINDOW_MS });
+    }
+    effects.push(Effect::KickHeartbeat);
+    effects
+}
+
+/// Both sides accepted: hand the contact to the shell and keep the attempt a little longer (see `finished`).
+fn complete(attempt: &mut PakeAttempt, pairing_id: &str) -> Effect {
+    let (peer_public_key, peer_name) = attempt.confirmed.clone().expect("only a matched attempt completes");
+    attempt.finished = true;
+    attempt.generation = next_generation();
+    Effect::PairingComplete {
+        pairing_id: pairing_id.to_string(),
+        own_private_key_hex: attempt.own_private_key_hex.clone(),
+        peer_public_key,
+        peer_name,
+        generation: attempt.generation,
+        linger_ms: PAIRING_LINGER_MS,
+    }
 }
 
 /// Ids of the attempts that are live right now: what the shells subscribe and publish for.
@@ -323,13 +385,32 @@ pub fn pending_attempt_ids() -> Vec<String> {
 
 /// Abandons an attempt outright (user cancel, contact deleted) without
 /// completing it — removes it from the registry; its session (if not yet
-/// consumed) drops automatically. A no-op if there's no live attempt for
-/// `pairing_id`.
-pub fn cancel_attempt(pairing_id: &str) {
+/// consumed) drops automatically. If the exchange had already matched, the
+/// effects carry a signed cancel for the peer, so its person isn't left
+/// waiting on an accept that will never come. A no-op if there's no live
+/// attempt for `pairing_id`.
+pub fn cancel_attempt(pairing_id: &str) -> Vec<Effect> {
     let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(old) = app.pairing_registry.remove(pairing_id) {
-        retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
+    let Some(old) = app.pairing_registry.remove(pairing_id) else { return vec![] };
+    if old.finished {
+        return vec![];
     }
+    let effects = cancel_message(&old, pairing_id).into_iter().collect();
+    retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
+    effects
+}
+
+/// The signed cancel for a matched attempt's peer; nothing before there is a peer who could be waiting.
+fn cancel_message(attempt: &PakeAttempt, pairing_id: &str) -> Option<Effect> {
+    let (peer_pubkey, _) = attempt.confirmed.as_ref()?;
+    let tag = attempt.keys.as_ref()?.decision_tag_hex("cancel", &attempt.own_pubkey_hex);
+    Some(Effect::SendBootstrap {
+        pairing_id: pairing_id.to_string(),
+        own_private_key_hex: attempt.own_private_key_hex.clone(),
+        rendezvous_tag: attempt.rendezvous_tag.clone(),
+        target_pubkey: peer_pubkey.clone(),
+        payload: BootstrapPayload::PakeCancel { tag },
+    })
 }
 
 const MAX_RETIRED_PUBKEYS: usize = 64;
@@ -361,7 +442,7 @@ fn retire(retired: &mut Vec<String>, pubkey_hex: String) {
 /// once known. Returns `None` if there's no live attempt for `pairing_id`.
 ///
 /// **`pake1` is always among the messages, and `pake-confirm` joins it once
-/// this side has processed a candidate's `pake1`.** Relays don't store
+/// this side has processed a candidate's `pake1`; `pake-accept` joins them once this side's person accepted.** Relays don't store
 /// ephemeral events, so a peer that joins later only ever sees what is
 /// published *after* it subscribes. If this side stopped publishing its
 /// `pake1` the moment it finished (as an earlier version did), a late joiner
@@ -374,6 +455,9 @@ pub fn build_bootstrap_payload(pairing_id: &str) -> Option<String> {
     let mut payloads = vec![BootstrapPayload::Pake1 { outbound: attempt.outbound_hex.clone() }];
     if let (Some(keys), Some(sealed_name), Some(_)) = (&attempt.keys, &attempt.local_sealed_name, &attempt.candidate_pubkey) {
         payloads.push(BootstrapPayload::PakeConfirm { confirmation: keys.confirmation_hex().to_string(), sealed_name: sealed_name.clone() });
+    }
+    if let (true, Some(keys)) = (attempt.local_accepted, &attempt.keys) {
+        payloads.push(BootstrapPayload::PakeAccept { tag: keys.decision_tag_hex("accept", &attempt.own_pubkey_hex) });
     }
     let snapshot = PendingSnapshot {
         own_private_key_hex: attempt.own_private_key_hex.clone(),
@@ -411,7 +495,8 @@ pub struct PendingSnapshot {
 /// `sender_pubkey` actually signed this message; everything about *what it
 /// means* happens here.
 pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &str, payload_json: &str) -> Vec<Effect> {
-    let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let mut guard = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let app = &mut *guard;
     if app.retired_attempt_pubkeys.iter().any(|k| k == sender_pubkey) {
         return vec![];
     }
@@ -422,6 +507,11 @@ pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &s
     // `PakeAttempt.own_pubkey_hex`'s doc on the Kotlin/JS twins for why
     // this is load-bearing, not defensive noise.
     if sender_pubkey == attempt.own_pubkey_hex {
+        return vec![];
+    }
+
+    // A finished pairing only keeps republishing its accept; nothing the peer sends matters any more.
+    if attempt.finished {
         return vec![];
     }
 
@@ -444,6 +534,8 @@ pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &s
     let mut effects = match type_ {
         "pake1" => handle_pake1(registry, pairing_id, sender_pubkey, payload_json),
         "pake-confirm" => handle_pake_confirm(registry, pairing_id, sender_pubkey, payload_json),
+        "pake-accept" => handle_decision(&mut app.retired_attempt_pubkeys, registry, pairing_id, sender_pubkey, true, payload_json),
+        "pake-cancel" => handle_decision(&mut app.retired_attempt_pubkeys, registry, pairing_id, sender_pubkey, false, payload_json),
         _ => vec![],
     };
     // The first time anyone answers at this rendezvous point, answer back
@@ -459,6 +551,43 @@ pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &s
 
 fn attempt_still_live(registry: &HashMap<String, PakeAttempt>, pairing_id: &str) -> bool {
     registry.contains_key(pairing_id)
+}
+
+/// The peer's signed accept or cancel. Without the exchange's keys there is nothing to check it against, so it
+/// is dropped (the peer republishes its accept until the pairing ends); so is anything whose tag doesn't verify.
+fn handle_decision(
+    retired: &mut Vec<String>,
+    registry: &mut HashMap<String, PakeAttempt>,
+    pairing_id: &str,
+    sender_pubkey: &str,
+    accept: bool,
+    payload_json: &str,
+) -> Vec<Effect> {
+    #[derive(Deserialize, Default)]
+    struct DecisionPayload {
+        #[serde(default)]
+        tag: String,
+    }
+    let payload: DecisionPayload = serde_json::from_str(payload_json).unwrap_or_default();
+    let attempt = registry.get_mut(pairing_id).expect("caller already confirmed this exists");
+    let verified = payload.tag.len() <= MAX_PAKE_MESSAGE_HEX_LENGTH
+        && attempt.keys.as_ref().is_some_and(|keys| keys.verify_decision(if accept { "accept" } else { "cancel" }, sender_pubkey, &payload.tag));
+    if !verified {
+        return vec![];
+    }
+    if accept {
+        attempt.peer_accepted = true;
+        return if attempt.local_accepted { vec![complete(attempt, pairing_id)] } else { vec![] };
+    }
+    if !attempt.local_accepted {
+        // Nothing to show until this side's person taps Accept, which then ends the attempt.
+        attempt.peer_cancelled = true;
+        return vec![];
+    }
+    if let Some(old) = registry.remove(pairing_id) {
+        retire(retired, old.own_pubkey_hex);
+    }
+    vec![Effect::SetNotAccepted { pairing_id: pairing_id.to_string() }, Effect::KickHeartbeat]
 }
 
 fn handle_pake1(registry: &mut HashMap<String, PakeAttempt>, pairing_id: &str, sender_pubkey: &str, payload_json: &str) -> Vec<Effect> {
@@ -585,29 +714,42 @@ fn verify_confirmation_and_resolve(
     vec![Effect::SetConfirmedCandidate { pairing_id: pairing_id.to_string(), pubkey_hex: sender_pubkey.to_string(), name }]
 }
 
-/// The live-window timeout fired for `pairing_id` — a no-op unless the
-/// attempt that's *still* registered under that id is literally the same
-/// one this timeout was scheduled for (`generation` matches) and it hasn't
-/// already resolved. Without the generation check, a fresh retry (a human
-/// re-entering the phrase after this exact attempt already timed out or
-/// collided) would have its brand-new attempt clobbered by a stale timer
+/// A pairing timer fired for `pairing_id` — a no-op unless the attempt that's
+/// *still* registered under that id is literally the same one this timer was
+/// scheduled for (`generation` matches). Without that check, a fresh retry (a
+/// human re-entering the phrase after this exact attempt already timed out
+/// or collided) would have its brand-new attempt clobbered by a stale timer
 /// from the old one — mirrors the Kotlin/JS twins' object-identity check,
 /// made explicit since Rust has no object identity to lean on here.
-/// Without the `resolved` check, a human who takes longer than the live
-/// window to actually tap Confirm after a valid match gets yanked to a
-/// false "No response" error — confirmed as a real bug in the original
-/// implementation, not just a theoretical race.
+///
+/// There are three timers, one per stage of an attempt, each with its own generation:
+/// - the live window from the start: ends an attempt nobody matched. A matched one is left alone — a human who
+///   takes longer than the window to tap Accept must not be yanked to a false "No response" (a real bug in the
+///   original implementation);
+/// - the wait for the peer's accept ([`Effect::SetWaitingForPeer`]): the peer never accepted, so this side
+///   cancels (and tells the peer) and nothing is saved;
+/// - the linger after a finished pairing ([`Effect::PairingComplete`]): drops the attempt quietly.
 pub fn handle_timeout(pairing_id: &str, generation: u64) -> Vec<Effect> {
     let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
     let registry = &mut app.pairing_registry;
     let Some(attempt) = registry.get(pairing_id) else { return vec![] };
-    if attempt.generation != generation || attempt.resolved {
+    if attempt.generation != generation {
         return vec![];
     }
-    if let Some(old) = registry.remove(pairing_id) {
-        retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
+    if attempt.finished {
+        registry.remove(pairing_id);
+        return vec![];
     }
-    vec![Effect::SetTimedOut { pairing_id: pairing_id.to_string() }, Effect::KickHeartbeat]
+    if attempt.resolved && !attempt.local_accepted {
+        return vec![];
+    }
+    let Some(old) = registry.remove(pairing_id) else { return vec![] };
+    let mut effects: Vec<Effect> = cancel_message(&old, pairing_id).into_iter().collect();
+    let accepted = old.local_accepted;
+    retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
+    effects.push(if accepted { Effect::SetNotAccepted { pairing_id: pairing_id.to_string() } } else { Effect::SetTimedOut { pairing_id: pairing_id.to_string() } });
+    effects.push(Effect::KickHeartbeat);
+    effects
 }
 
 /// Effects the shell must actually perform — signaling sends, UI-facing
@@ -623,11 +765,21 @@ pub enum Effect {
     SetCollision { pairing_id: String },
     SetTimedOut { pairing_id: String },
     SetConfirmedCandidate { pairing_id: String, pubkey_hex: String, name: String },
+    /// This side's person accepted; the screen waits for the peer. The shell schedules [`handle_timeout`] with
+    /// `generation` after `timeout_ms`.
+    SetWaitingForPeer { pairing_id: String, generation: u64, timeout_ms: u64 },
+    /// The pairing ended without both people accepting (the peer cancelled, or never accepted in time). Nothing
+    /// was saved, on either side.
+    SetNotAccepted { pairing_id: String },
+    /// Both people accepted: the shell saves this contact. It also schedules [`handle_timeout`] with `generation`
+    /// after `linger_ms`, which drops the attempt that keeps republishing this side's accept until then.
+    PairingComplete { pairing_id: String, own_private_key_hex: String, peer_public_key: String, peer_name: String, generation: u64, linger_ms: u64 },
 }
 
 /// Matches the wire message shape both platforms' `NostrSignalingClient`/
-/// relay client already publish — `{"type":"pake1",...}` or
-/// `{"type":"pake-confirm",...}`.
+/// relay client already publish — `{"type":"pake1",...}`,
+/// `{"type":"pake-confirm",...}`, `{"type":"pake-accept","tag":"..."}` or
+/// `{"type":"pake-cancel","tag":"..."}`.
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(tag = "type")]
 pub enum BootstrapPayload {
@@ -635,6 +787,12 @@ pub enum BootstrapPayload {
     Pake1 { outbound: String },
     #[serde(rename = "pake-confirm")]
     PakeConfirm { confirmation: String, sealed_name: String },
+    /// This side's person accepted. `tag` is [`PakeKeys::decision_tag_hex`] for "accept".
+    #[serde(rename = "pake-accept")]
+    PakeAccept { tag: String },
+    /// This side's person (or timer) gave up on a matched pairing. `tag` is the same for "cancel".
+    #[serde(rename = "pake-cancel")]
+    PakeCancel { tag: String },
 }
 
 /// Strips control, bidi-override, and zero-width characters from a name
@@ -829,38 +987,207 @@ mod tests {
         cancel_attempt(&b.pairing_id);
     }
 
-    #[test]
-    fn confirming_the_matched_candidate_hands_back_the_contact_and_ends_the_attempt() {
-        let (id_a, id_b) = run_to_resolved_match("confirm flow phrase");
-        let snapshot: serde_json::Value = serde_json::from_str(&build_bootstrap_payload(&id_a).unwrap()).unwrap();
-        let confirmed = confirm_attempt(&id_a, "pubkey-b").expect("the matched candidate confirms");
-        assert_eq!(confirmed.pairing_id, id_a);
-        assert_eq!(confirmed.peer_public_key, "pubkey-b");
-        assert_eq!(confirmed.peer_name, "Bob");
-        assert_eq!(confirmed.own_private_key_hex, snapshot["own_private_key_hex"].as_str().unwrap());
-        assert!(build_bootstrap_payload(&id_a).is_none(), "a confirmed attempt is no longer live");
-        assert!(confirm_attempt(&id_a, "pubkey-b").is_none(), "and cannot be confirmed twice");
-        cancel_attempt(&id_b);
+    /// Delivers every `SendBootstrap` among `effects` to `to_id` as if it came from `from_pubkey`, returning what
+    /// the receiving side did about them.
+    fn deliver(effects: &[Effect], to_id: &str, from_pubkey: &str) -> Vec<Effect> {
+        let mut out = Vec::new();
+        for effect in effects {
+            if let Effect::SendBootstrap { payload, .. } = effect {
+                let json = serde_json::to_value(payload).unwrap();
+                let type_ = json["type"].as_str().unwrap().to_string();
+                out.extend(handle_bootstrap_message(to_id, from_pubkey, &type_, &json.to_string()));
+            }
+        }
+        out
+    }
+
+    fn the_complete(effects: &[Effect]) -> Option<ConfirmedPairing> {
+        effects.iter().find_map(|e| match e {
+            Effect::PairingComplete { pairing_id, own_private_key_hex, peer_public_key, peer_name, .. } => Some(ConfirmedPairing {
+                pairing_id: pairing_id.clone(),
+                own_private_key_hex: own_private_key_hex.clone(),
+                peer_public_key: peer_public_key.clone(),
+                peer_name: peer_name.clone(),
+            }),
+            _ => None,
+        })
+    }
+
+    fn waiting_generation(effects: &[Effect]) -> Option<u64> {
+        effects.iter().find_map(|e| match e {
+            Effect::SetWaitingForPeer { generation, .. } => Some(*generation),
+            _ => None,
+        })
     }
 
     #[test]
-    fn only_the_confirmed_candidate_can_be_confirmed() {
-        let (id_a, id_b) = run_to_resolved_match("wrong candidate phrase");
-        assert!(confirm_attempt(&id_a, "someone-else").is_none());
-        assert!(build_bootstrap_payload(&id_a).is_some(), "a refused confirmation leaves the attempt alone");
+    fn a_pairing_completes_only_when_both_sides_accepted_whoever_goes_first() {
+        let (id_a, id_b) = run_to_resolved_match("both accept phrase");
+        let snapshot: serde_json::Value = serde_json::from_str(&build_bootstrap_payload(&id_a).unwrap()).unwrap();
+
+        // A accepts first: it waits, nothing is saved yet.
+        let a_accept = accept_attempt(&id_a, "pubkey-b");
+        assert!(waiting_generation(&a_accept).is_some(), "{a_accept:?}");
+        assert!(the_complete(&a_accept).is_none());
+        // B accepts: it already has A's accept (delivered below), so it completes at once...
+        let b_accept = accept_attempt(&id_b, "pubkey-a");
+        assert!(the_complete(&b_accept).is_none(), "B has not seen A's accept yet");
+        assert!(waiting_generation(&b_accept).is_some());
+        // ...once A's accept reaches B,
+        let b_done = deliver(&a_accept, &id_b, "pubkey-a");
+        let b_contact = the_complete(&b_done).expect("B completes on A's accept");
+        assert_eq!((b_contact.peer_public_key.as_str(), b_contact.peer_name.as_str()), ("pubkey-a", "Alice"));
+        // and B's accept reaches A.
+        let a_done = deliver(&b_accept, &id_a, "pubkey-b");
+        let a_contact = the_complete(&a_done).expect("A completes on B's accept");
+        assert_eq!(a_contact.pairing_id, id_a);
+        assert_eq!((a_contact.peer_public_key.as_str(), a_contact.peer_name.as_str()), ("pubkey-b", "Bob"));
+        assert_eq!(a_contact.own_private_key_hex, snapshot["own_private_key_hex"].as_str().unwrap());
         cancel_attempt(&id_a);
         cancel_attempt(&id_b);
     }
 
     #[test]
-    fn nothing_can_be_confirmed_before_the_exchange_matched_or_after_the_attempt_ended() {
+    fn accepting_after_the_peer_already_accepted_completes_at_once() {
+        let (id_a, id_b) = run_to_resolved_match("accept second phrase");
+        let a_accept = accept_attempt(&id_a, "pubkey-b");
+        assert!(deliver(&a_accept, &id_b, "pubkey-a").is_empty(), "B's person has not tapped yet, nothing changes for B");
+        let b_accept = accept_attempt(&id_b, "pubkey-a");
+        assert!(the_complete(&b_accept).is_some(), "{b_accept:?}");
+        assert!(waiting_generation(&b_accept).is_none(), "no waiting screen when it completes immediately");
+        assert!(the_complete(&deliver(&b_accept, &id_a, "pubkey-b")).is_some());
+        cancel_attempt(&id_a);
+        cancel_attempt(&id_b);
+    }
+
+    #[test]
+    fn a_cancel_while_the_peer_waits_ends_the_peers_attempt_and_nothing_is_saved() {
+        let (id_a, id_b) = run_to_resolved_match("cancel while waiting");
+        let a_accept = accept_attempt(&id_a, "pubkey-b");
+        assert!(waiting_generation(&a_accept).is_some());
+        // B cancels instead of accepting.
+        let b_cancel = cancel_attempt(&id_b);
+        let a_after = deliver(&b_cancel, &id_a, "pubkey-b");
+        assert!(matches!(a_after.as_slice(), [Effect::SetNotAccepted { .. }, Effect::KickHeartbeat]), "{a_after:?}");
+        assert!(build_bootstrap_payload(&id_a).is_none(), "A's attempt is gone");
+        assert!(the_complete(&a_after).is_none());
+    }
+
+    #[test]
+    fn a_cancel_before_the_other_person_taps_makes_their_accept_fail() {
+        let (id_a, id_b) = run_to_resolved_match("cancel then accept");
+        let b_cancel = cancel_attempt(&id_b);
+        assert!(deliver(&b_cancel, &id_a, "pubkey-b").is_empty(), "A's screen is not touched by the peer's cancel");
+        let a_accept = accept_attempt(&id_a, "pubkey-b");
+        assert!(matches!(a_accept.as_slice(), [Effect::SetNotAccepted { .. }]), "{a_accept:?}");
+        assert!(build_bootstrap_payload(&id_a).is_none());
+    }
+
+    #[test]
+    fn cancelling_before_a_match_sends_nothing() {
+        let id = fresh_pairing_id();
+        let _ = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "cancel early phrase");
+        assert!(cancel_attempt(&id).is_empty());
+    }
+
+    #[test]
+    fn a_forged_or_misdirected_decision_changes_nothing() {
+        let (id_a, id_b) = run_to_resolved_match("forged decision phrase");
+        let a_accept = accept_attempt(&id_a, "pubkey-b");
+        let tag = |effects: &[Effect]| match effects.iter().find_map(|e| match e {
+            Effect::SendBootstrap { payload, .. } => Some(serde_json::to_value(payload).unwrap()),
+            _ => None,
+        }) {
+            Some(v) => v["tag"].as_str().unwrap().to_string(),
+            None => panic!("no message in {effects:?}"),
+        };
+        let a_tag = tag(&a_accept);
+        // A's own accept echoed back to A as the peer's.
+        assert!(handle_bootstrap_message(&id_a, "pubkey-b", "pake-accept", &format!(r#"{{"type":"pake-accept","tag":"{a_tag}"}}"#)).is_empty());
+        // A's accept presented as a cancel.
+        assert!(handle_bootstrap_message(&id_a, "pubkey-b", "pake-cancel", &format!(r#"{{"type":"pake-cancel","tag":"{a_tag}"}}"#)).is_empty());
+        // Garbage and a missing tag.
+        assert!(handle_bootstrap_message(&id_a, "pubkey-b", "pake-cancel", r#"{"type":"pake-cancel","tag":"zz"}"#).is_empty());
+        assert!(handle_bootstrap_message(&id_a, "pubkey-b", "pake-accept", r#"{"type":"pake-accept"}"#).is_empty());
+        assert!(build_bootstrap_payload(&id_a).is_some(), "still waiting, still alive");
+        // A real accept still gets through afterwards.
+        let b_accept = accept_attempt(&id_b, "pubkey-a");
+        assert!(the_complete(&deliver(&b_accept, &id_a, "pubkey-b")).is_some());
+        cancel_attempt(&id_a);
+        cancel_attempt(&id_b);
+    }
+
+    #[test]
+    fn nothing_changes_for_a_stranger_trying_to_accept_for_the_peer() {
+        let (id_a, id_b) = run_to_resolved_match("stranger accept phrase");
+        let b_accept = accept_attempt(&id_b, "pubkey-a");
+        // The same, valid message but from a different sender: a second sender at the tag is a collision.
+        let from_stranger = deliver(&b_accept, &id_a, "pubkey-stranger");
+        assert!(from_stranger.iter().any(|e| matches!(e, Effect::SetCollision { .. })), "{from_stranger:?}");
+        cancel_attempt(&id_b);
+    }
+
+    #[test]
+    fn a_finished_pairing_keeps_republishing_its_accept_until_the_linger_timer_drops_it() {
+        let (id_a, id_b) = run_to_resolved_match("linger phrase");
+        let a_accept = accept_attempt(&id_a, "pubkey-b");
+        let b_accept = accept_attempt(&id_b, "pubkey-a");
+        let a_done = deliver(&b_accept, &id_a, "pubkey-b");
+        let generation = a_done.iter().find_map(|e| match e {
+            Effect::PairingComplete { generation, .. } => Some(*generation),
+            _ => None,
+        });
+        let generation = generation.expect("A completed");
+        // Still republishing A's accept (B has not got it yet in this scenario)...
+        let snapshot: serde_json::Value = serde_json::from_str(&build_bootstrap_payload(&id_a).unwrap()).unwrap();
+        assert!(snapshot["payloads"].as_array().unwrap().iter().any(|p| p["type"] == "pake-accept"));
+        // ...ignores whatever the peer sends meanwhile...
+        assert!(handle_bootstrap_message(&id_a, "pubkey-b", "pake-cancel", r#"{"type":"pake-cancel","tag":"00"}"#).is_empty());
+        // ...a stale timer does nothing, the linger timer drops it quietly.
+        assert!(handle_timeout(&id_a, generation + 1000).is_empty());
+        assert!(build_bootstrap_payload(&id_a).is_some());
+        assert!(handle_timeout(&id_a, generation).is_empty());
+        assert!(build_bootstrap_payload(&id_a).is_none());
+        // B gets A's accept late and still completes.
+        assert!(the_complete(&deliver(&a_accept, &id_b, "pubkey-a")).is_some());
+        // Cancelling a finished pairing (e.g. the contact was deleted) sends nothing.
+        assert!(cancel_attempt(&id_b).is_empty());
+    }
+
+    #[test]
+    fn waiting_for_an_accept_that_never_comes_ends_with_a_cancel_and_nothing_saved() {
+        let (id_a, id_b) = run_to_resolved_match("accept timeout phrase");
+        let a_accept = accept_attempt(&id_a, "pubkey-b");
+        let generation = waiting_generation(&a_accept).expect("A waits");
+        // The timer from when the attempt started no longer applies.
+        assert!(handle_timeout(&id_a, 0).is_empty());
+        let after = handle_timeout(&id_a, generation);
+        assert!(matches!(after.as_slice(), [Effect::SendBootstrap { payload: BootstrapPayload::PakeCancel { .. }, .. }, Effect::SetNotAccepted { .. }, Effect::KickHeartbeat]), "{after:?}");
+        // B, still on its screen, finds out when it taps.
+        assert!(deliver(&after, &id_b, "pubkey-a").is_empty());
+        assert!(matches!(accept_attempt(&id_b, "pubkey-a").as_slice(), [Effect::SetNotAccepted { .. }]));
+    }
+
+    #[test]
+    fn only_the_confirmed_candidate_can_be_accepted_and_only_once() {
+        let (id_a, id_b) = run_to_resolved_match("wrong candidate phrase");
+        assert!(accept_attempt(&id_a, "someone-else").is_empty());
+        assert!(build_bootstrap_payload(&id_a).is_some(), "a refused accept leaves the attempt alone");
+        assert!(!accept_attempt(&id_a, "pubkey-b").is_empty());
+        assert!(accept_attempt(&id_a, "pubkey-b").is_empty(), "a second tap does nothing");
+        cancel_attempt(&id_a);
+        cancel_attempt(&id_b);
+    }
+
+    #[test]
+    fn nothing_can_be_accepted_before_the_exchange_matched_or_after_the_attempt_ended() {
         let id = fresh_pairing_id();
         let start = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "early confirm phrase");
         let peer = start_attempt_with(&fresh_pairing_id(), "test-private-key", "pubkey-b", "Bob", "early confirm phrase");
         let _ = handle_bootstrap_message(&id, "pubkey-b", "pake1", &pake1_json(&peer.outbound_hex));
-        assert!(confirm_attempt(&id, "pubkey-b").is_none(), "a candidate that has only sent pake1 is not confirmed yet");
+        assert!(accept_attempt(&id, "pubkey-b").is_empty(), "a candidate that has only sent pake1 is not confirmed yet");
         let _ = handle_timeout(&id, start.generation);
-        assert!(confirm_attempt(&id, "pubkey-b").is_none(), "a timed-out attempt is gone");
+        assert!(accept_attempt(&id, "pubkey-b").is_empty(), "a timed-out attempt is gone");
     }
 
     #[test]

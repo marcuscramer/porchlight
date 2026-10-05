@@ -102,18 +102,23 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     )
 
     /**
-     * The one pairing attempt in progress. It exists only in memory — nothing is saved until a person confirms the
+     * The one pairing attempt in progress. It exists only in memory — nothing is saved until both people confirm the
      * match ([confirmPeer]) — and `call-core` owns the protocol state; this is what the screens show. [id] is null
      * until `call-core` has minted it (turning the phrase into the meeting point takes a moment). [candidate] is the
      * peer the SPAKE2 exchange cryptographically confirmed, awaiting the final "Pair with [name]?" tap; there is
      * never more than one — a second distinct sender ends the attempt ([collision]) instead of offering a choice.
-     * [timedOut]: the live window elapsed with nobody confirmed.
+     * [timedOut]: the live window elapsed with nobody confirmed. [accepted]: this side's person confirmed and the
+     * other person hasn't yet. [notAccepted]: it ended without both confirming (the other cancelled or never did).
+     * [completed]: both confirmed and the contact is saved; the screen then goes back to the waiting screen.
      */
     data class PairingAttemptState(
         val id: String? = null,
         val candidate: CandidatePeer? = null,
         val collision: Boolean = false,
         val timedOut: Boolean = false,
+        val accepted: Boolean = false,
+        val notAccepted: Boolean = false,
+        val completed: Boolean = false,
     )
 
     /**
@@ -554,20 +559,16 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     } ?: Unit
 
     /**
-     * A person tapped "Pair with [name]?" for the candidate the SPAKE2 exchange already cryptographically confirmed.
-     * `call-core` ends the attempt and hands back the finished contact, which is saved here for the first time.
+     * A person tapped Confirm on "Pair with [name]?" for the candidate the SPAKE2 exchange already cryptographically
+     * confirmed. Pairing needs both people to confirm: `call-core` answers with a waiting screen until the other side
+     * has too, then hands back the finished contact ([CallCoreBridge.Effect.PairingComplete]), saved here for the
+     * first time.
      */
     fun confirmPeer() = callExecutor?.execute {
         val attempt = _state.value.pairingAttempt ?: return@execute
         val id = attempt.id ?: return@execute
         val candidate = attempt.candidate ?: return@execute
-        val confirmed = CallCoreBridge.confirmAttempt(id, candidate.publicKey)
-        updateState { it.copy(pairingAttempt = null) }
-        if (confirmed == null) return@execute
-        val pairing = Pairing(confirmed.pairingId, confirmed.ownPrivateKeyHex, confirmed.peerPublicKey, confirmed.peerName)
-        Config.addOrUpdatePairing(this, pairing)
-        addPairingState(pairing)
-        signaling?.kickHeartbeat()
+        applyEffects(CallCoreBridge.acceptAttempt(id, candidate.publicKey))
     } ?: Unit
 
     /**
@@ -596,7 +597,9 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
 
     /** Gives up on the attempt in progress (cancel, retry, auto-dismiss). */
     fun discardPairingAttempt() = callExecutor?.execute {
-        _state.value.pairingAttempt?.id?.let(CallCoreBridge::cancelAttempt)
+        // A matched attempt tells the other side (a signed cancel), so its person isn't left waiting. A completed one
+        // is left to its linger timer, which keeps republishing this side's confirmation for a peer that missed it.
+        _state.value.pairingAttempt?.takeUnless { it.completed }?.id?.let { applyEffects(CallCoreBridge.cancelAttempt(it)) }
         updateState { it.copy(pairingAttempt = null) }
     } ?: Unit
 
@@ -610,16 +613,17 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         val start = CallCoreBridge.startAttempt(Config.load(this).deviceName, rawPassphrase)
         updateState { it.copy(pairingAttempt = PairingAttemptState(id = start.pairingId)) }
         signaling?.kickHeartbeat()
-        // safeSchedule, not schedule: this fires up to PAKE_LIVE_WINDOW_MS
-        // (120s) later — long enough that a rename or any other
-        // restartAgent()/stopAgent() in the meantime can easily have shut
-        // callExecutor down first, which throws uncaught from a raw
-        // schedule() call (see ExecutorExt.kt's doc).
-        callExecutor?.safeSchedule(PAKE_LIVE_WINDOW_MS, TimeUnit.MILLISECONDS) {
-            // handleTimeout's own generation check (see CallCoreBridge's
-            // doc) is what makes this a no-op for an attempt that has
-            // already ended or matched.
-            applyEffects(CallCoreBridge.handleTimeout(start.pairingId, start.generation))
+        scheduleAttemptTimer(start.pairingId, start.generation, PAKE_LIVE_WINDOW_MS)
+    }
+
+    /**
+     * Calls [CallCoreBridge.handleTimeout] after [delayMs]; its generation check makes this a no-op for an attempt
+     * that has moved on. safeSchedule, not schedule: this can fire up to a minute or two later, long enough for a
+     * restartAgent()/stopAgent() to have shut callExecutor down first (see ExecutorExt.kt's doc).
+     */
+    private fun scheduleAttemptTimer(pairingId: String, generation: Long, delayMs: Long) {
+        callExecutor?.safeSchedule(delayMs, TimeUnit.MILLISECONDS) {
+            applyEffects(CallCoreBridge.handleTimeout(pairingId, generation))
         }
     }
 
@@ -641,6 +645,19 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                 is CallCoreBridge.Effect.SetTimedOut -> updateAttempt(effect.pairingId) { it.copy(timedOut = true) }
                 is CallCoreBridge.Effect.SetConfirmedCandidate ->
                     updateAttempt(effect.pairingId) { it.copy(candidate = CandidatePeer(effect.pubkeyHex, effect.name)) }
+                is CallCoreBridge.Effect.SetWaitingForPeer -> {
+                    updateAttempt(effect.pairingId) { it.copy(accepted = true) }
+                    scheduleAttemptTimer(effect.pairingId, effect.generation, effect.timeoutMs)
+                }
+                is CallCoreBridge.Effect.SetNotAccepted -> updateAttempt(effect.pairingId) { it.copy(accepted = false, notAccepted = true) }
+                is CallCoreBridge.Effect.PairingComplete -> {
+                    val pairing = Pairing(effect.pairingId, effect.ownPrivateKeyHex, effect.peerPublicKey, effect.peerName)
+                    Config.addOrUpdatePairing(this, pairing)
+                    addPairingState(pairing)
+                    updateAttempt(effect.pairingId) { it.copy(accepted = false, completed = true) }
+                    signaling?.kickHeartbeat()
+                    scheduleAttemptTimer(effect.pairingId, effect.generation, effect.lingerMs)
+                }
             }
         }
     }
@@ -698,7 +715,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                     updateState { it.copy(incomingCall = IncomingCall(autoAnswer = effect.autoAnswer, secondsRemaining = effect.secondsRemaining)) }
                     if (effect.autoAnswer) scheduleNextCountdownTick(effect.pairingId, effect.callId)
                 }
-                is CallCoreBridge.CallEffect.SendBye -> signaling?.hangUp(effect.pairingId, effect.callId)
+                is CallCoreBridge.CallEffect.SendBye -> signaling?.hangUp(effect.pairingId, effect.callId, effect.mediaFailed)
                 CallCoreBridge.CallEffect.ClosePeerConnection -> engine?.closePeer()
                 CallCoreBridge.CallEffect.ClearIncomingCallTimer -> clearIncomingCall()
                 CallCoreBridge.CallEffect.KickHeartbeat -> signaling?.kickHeartbeat()
@@ -1200,6 +1217,10 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
 
     override fun onCapturingChanged(capturing: Boolean) {
         updateState { it.copy(capturing = capturing) }
+    }
+
+    override fun onVideoUnavailable() {
+        updateState { it.copy(videoEnabled = false) }
     }
 
     // --- Notification --------------------------------------------------------

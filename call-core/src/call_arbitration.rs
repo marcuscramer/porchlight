@@ -92,13 +92,11 @@
 //!    state after clearing it) can't be reintroduced in a shell: there is one
 //!    `hang_up`. Tests: `hang_up_sends_bye_using_the_captured_pairing_and_call_id`,
 //!    `hang_up_clears_state_so_a_second_hang_up_sends_no_bye`.
-//! 5. **A media/capture failure only means "end the call" if a call is
-//!    actually in progress.** `should_end_call_on_media_failure` is trivial
-//!    today (the input echoed back) but kept as one place to route through:
-//!    ringing acquires the camera before anyone has decided anything, so it
-//!    must not be as fragile to a camera failure as an active call is. Web
-//!    has no camera-failure trigger wired to it yet — a known, accepted gap.
-//!    Test: `should_end_call_on_media_failure_matches_has_active_peer_connection`.
+//! 5. **A camera failure never ends a call that is already underway.** The
+//!    shells keep the call going without video (Android) or fail it before it
+//!    starts (web, which has no camera to fall back to once the browser says no);
+//!    `note_media_failure` only decides what the outcome says when a call ends
+//!    because of it, and tells the other side (`SendBye.media_failed`).
 //! 6. **Every teardown path clears the incoming-call state, not just the
 //!    slot.** `hang_up`/`handle_peer_hangup`/`handle_peer_left`/
 //!    `forget_pairing` all set the slot to `Idle` (one enum, so that clears a
@@ -317,7 +315,9 @@ pub enum CallEffect {
     SendBusy { pairing_id: String, call_id: String },
     ApplyRemoteOffer { pairing_id: String, call_id: String, sdp: String },
     StartRinging { pairing_id: String, call_id: String, auto_answer: bool, seconds_remaining: u32 },
-    SendBye { pairing_id: String, call_id: String },
+    /// `media_failed`: this device's own camera or microphone is why the call ends, so the peer's screen can say
+    /// so instead of "declined" (sent as `"reason":"media"`; an older peer ignores it).
+    SendBye { pairing_id: String, call_id: String, media_failed: bool },
     /// A terminal call needs a full-screen message shown to the user —
     /// distinct from a plain [`ClosePeerConnection`](CallEffect::ClosePeerConnection),
     /// which fires unconditionally on every teardown including a local hang
@@ -358,6 +358,8 @@ pub enum CallOutcomeReason {
     Busy,
     /// This device's own camera or microphone failed.
     CameraFailed,
+    /// We were calling and the other device could not answer because its camera or microphone failed.
+    PeerMediaFailed,
     /// Both sides were there but the media never connected.
     NeverConnected,
     /// Was connected, then lost.
@@ -746,7 +748,7 @@ pub fn hang_up() -> Vec<CallEffect> {
     let mut effects = vec![CallEffect::ClearIncomingCallTimer];
     if let Some(pairing_id) = pairing_id {
         let call_id = call_id.unwrap_or_else(random_call_id);
-        effects.push(CallEffect::SendBye { pairing_id, call_id });
+        effects.push(CallEffect::SendBye { pairing_id, call_id, media_failed: false });
     }
     effects.push(CallEffect::ClosePeerConnection);
     effects
@@ -801,7 +803,7 @@ pub fn check_call_timeout(now_ms: i64) -> Vec<CallEffect> {
     };
     vec![
         CallEffect::ClearIncomingCallTimer,
-        CallEffect::SendBye { pairing_id: active.pairing_id.clone(), call_id: active.call_id.clone() },
+        CallEffect::SendBye { pairing_id: active.pairing_id.clone(), call_id: active.call_id.clone(), media_failed: false },
         CallEffect::ClosePeerConnection,
         CallEffect::ShowCallOutcome { pairing_id: active.pairing_id, call_id: active.call_id, reason },
     ]
@@ -822,10 +824,11 @@ fn end_active_call_if_matching(state: &mut CallState, pairing_id: &str, call_id:
 /// Mirrors `onPeerHangup` — gated on **both** `pairing_id` and `call_id`
 /// matching. Same effects as [`hang_up`] minus `SendBye` (we don't bye a
 /// bye) plus [`CallEffect::ShowCallOutcome`]: `Cancelled` if we were still
-/// ringing, `Declined` if we were calling and nothing had been exchanged,
-/// otherwise `PeerEnded` — an explicit "bye" is the most specific signal
+/// ringing, `Declined` (or `PeerMediaFailed` when the bye says the other
+/// device's camera or microphone failed) if we were calling and nothing had
+/// been exchanged, otherwise `PeerEnded` — an explicit "bye" is the most specific signal
 /// available, reported regardless of `ActiveCall::connected_once`.
-pub fn handle_peer_hangup(pairing_id: &str, call_id: &str) -> Vec<CallEffect> {
+pub fn handle_peer_hangup(pairing_id: &str, call_id: &str, media_failed: bool) -> Vec<CallEffect> {
     let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
     let state = &mut app.call;
     // Read before the slot is cleared: what a "bye" means depends on what
@@ -833,7 +836,7 @@ pub fn handle_peer_hangup(pairing_id: &str, call_id: &str) -> Vec<CallEffect> {
     let reason = match &state.slot {
         CallSlot::Ringing(p) if p.pairing_id == pairing_id && p.call_id == call_id => CallOutcomeReason::Cancelled,
         CallSlot::Claimed(a) if a.pairing_id == pairing_id && a.call_id == call_id && !a.connected_once && !a.answer_applied && !a.offer_applied => {
-            CallOutcomeReason::Declined
+            if media_failed { CallOutcomeReason::PeerMediaFailed } else { CallOutcomeReason::Declined }
         }
         _ => CallOutcomeReason::PeerEnded,
     };
@@ -959,7 +962,7 @@ pub fn peer_connection_closed() -> Vec<CallEffect> {
         CallSlot::Ringing(pending) => {
             let reason = if failed_here(&pending.pairing_id, &pending.call_id) { CallOutcomeReason::CameraFailed } else { CallOutcomeReason::NeverConnected };
             vec![
-                CallEffect::SendBye { pairing_id: pending.pairing_id.clone(), call_id: pending.call_id.clone() },
+                CallEffect::SendBye { pairing_id: pending.pairing_id.clone(), call_id: pending.call_id.clone(), media_failed: reason == CallOutcomeReason::CameraFailed },
                 CallEffect::ShowCallOutcome { pairing_id: pending.pairing_id, call_id: pending.call_id, reason },
             ]
         }
@@ -972,7 +975,7 @@ pub fn peer_connection_closed() -> Vec<CallEffect> {
                 CallOutcomeReason::NeverConnected
             };
             vec![
-                CallEffect::SendBye { pairing_id: active.pairing_id.clone(), call_id: active.call_id.clone() },
+                CallEffect::SendBye { pairing_id: active.pairing_id.clone(), call_id: active.call_id.clone(), media_failed: reason == CallOutcomeReason::CameraFailed },
                 CallEffect::ShowCallOutcome { pairing_id: active.pairing_id, call_id: active.call_id, reason },
             ]
         }
@@ -991,14 +994,6 @@ pub fn note_media_failure() {
         (Some(p), Some(c)) => Some((p.to_string(), c.to_string())),
         _ => None,
     };
-}
-
-/// Mirrors `onMediaFailure`'s `if (pc != null)` guard: a live call
-/// (`has_active_peer_connection`) ends outright on a camera/track failure;
-/// a ringing-only preview (no `pc` yet) just releases the broken capture
-/// and leaves the ring alone.
-pub fn should_end_call_on_media_failure(has_active_peer_connection: bool) -> bool {
-    has_active_peer_connection
 }
 
 /// Whether any pairing currently has a deferred call waiting on presence —
@@ -1384,7 +1379,7 @@ mod tests {
         assert!(
             matches!(
                 effects.as_slice(),
-                [CallEffect::ClearIncomingCallTimer, CallEffect::SendBye { pairing_id, call_id }, CallEffect::ClosePeerConnection]
+                [CallEffect::ClearIncomingCallTimer, CallEffect::SendBye { pairing_id, call_id, .. }, CallEffect::ClosePeerConnection]
                 if pairing_id == &id && call_id == "call1"
             ),
             "{effects:?}"
@@ -1438,7 +1433,7 @@ mod tests {
             effects,
             vec![
                 CallEffect::ClearIncomingCallTimer,
-                CallEffect::SendBye { pairing_id: id.clone(), call_id: call_id.clone() },
+                CallEffect::SendBye { pairing_id: id.clone(), call_id: call_id.clone(), media_failed: false },
                 CallEffect::ClosePeerConnection,
                 CallEffect::ShowCallOutcome { pairing_id: id, call_id, reason: CallOutcomeReason::NoAnswer },
             ]
@@ -1513,7 +1508,7 @@ mod tests {
             vec![CallEffect::ClearIncomingCallTimer, CallEffect::ClosePeerConnection],
             "no SendBye on delete, matching removePairing on both platforms"
         );
-        assert!(handle_peer_hangup(&id, "call1").is_empty(), "active state should already be clear");
+        assert!(handle_peer_hangup(&id, "call1", false).is_empty(), "active state should already be clear");
     }
 
     #[test]
@@ -1535,8 +1530,8 @@ mod tests {
         let _guard = reset_state_for_test();
         let id = fresh_id();
         handle_should_offer(&id, "call1", "aaa", "bbb", false);
-        assert!(handle_peer_hangup(&id, "wrong-call").is_empty(), "mismatched call_id must be a no-op");
-        let effects = handle_peer_hangup(&id, "call1");
+        assert!(handle_peer_hangup(&id, "wrong-call", false).is_empty(), "mismatched call_id must be a no-op");
+        let effects = handle_peer_hangup(&id, "call1", false);
         assert_eq!(
             effects,
             vec![
@@ -1575,7 +1570,7 @@ mod tests {
         let _guard = reset_state_for_test();
         let id = fresh_id();
         handle_offer(&id, "call1", "sdp", true);
-        handle_peer_hangup(&id, "call1");
+        handle_peer_hangup(&id, "call1", false);
         assert_eq!(tick_incoming_call_countdown(&id, "call1"), TickOutcome::Stale, "pending_offer must be cleared");
         assert!(accept_incoming_call(0).is_none());
     }
@@ -1598,24 +1593,27 @@ mod tests {
         // We were ringing: the caller gave up (a missed call).
         let ringing = fresh_id();
         handle_should_offer(&ringing, "call1", "aaa", "bbb", false);
-        assert_eq!(outcome_of(&handle_peer_hangup(&ringing, "call1")), CallOutcomeReason::Cancelled);
+        assert_eq!(outcome_of(&handle_peer_hangup(&ringing, "call1", false)), CallOutcomeReason::Cancelled);
 
         // We were calling and nothing had been exchanged: they said no.
         let calling = fresh_id();
         let call_id = request_call(&calling, "aaa", "bbb", true, 0).call_id.unwrap();
-        assert_eq!(outcome_of(&handle_peer_hangup(&calling, &call_id)), CallOutcomeReason::Declined);
+        assert_eq!(outcome_of(&handle_peer_hangup(&calling, &call_id, false)), CallOutcomeReason::Declined);
+        let media = fresh_id();
+        let media_call = request_call(&media, "aaa", "bbb", true, 0).call_id.unwrap();
+        assert_eq!(outcome_of(&handle_peer_hangup(&media, &media_call, true)), CallOutcomeReason::PeerMediaFailed, "a bye that blames the camera is its own outcome");
 
         // Anything past that — an answer applied, or connected — is an ended call.
         let answered = fresh_id();
         let call_id = request_call(&answered, "aaa", "bbb", true, 0).call_id.unwrap();
         assert!(should_apply_answer(&answered, &call_id));
-        assert_eq!(outcome_of(&handle_peer_hangup(&answered, &call_id)), CallOutcomeReason::PeerEnded);
+        assert_eq!(outcome_of(&handle_peer_hangup(&answered, &call_id, false)), CallOutcomeReason::PeerEnded);
 
         let connected = fresh_id();
         handle_should_offer(&connected, "call3", "aaa", "bbb", false);
         accept_incoming_call(0);
         mark_connected(&connected, "call3");
-        assert_eq!(outcome_of(&handle_peer_hangup(&connected, "call3")), CallOutcomeReason::PeerEnded);
+        assert_eq!(outcome_of(&handle_peer_hangup(&connected, "call3", false)), CallOutcomeReason::PeerEnded);
     }
 
     #[test]
@@ -1700,7 +1698,7 @@ mod tests {
 
         let id2 = fresh_id();
         handle_should_offer(&id2, "call2", "aaa", "bbb", false);
-        handle_peer_hangup(&id2, "call2");
+        handle_peer_hangup(&id2, "call2", false);
         assert_eq!(peer_connection_closed(), vec![], "handle_peer_hangup already fully decided this teardown");
     }
 
@@ -1750,11 +1748,11 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                CallEffect::SendBye { pairing_id: id.clone(), call_id: "call1".to_string() },
+                CallEffect::SendBye { pairing_id: id.clone(), call_id: "call1".to_string(), media_failed: false },
                 CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::NeverConnected },
             ]
         );
-        assert!(handle_peer_hangup(&id, "call1").is_empty(), "active state should already be clear");
+        assert!(handle_peer_hangup(&id, "call1", false).is_empty(), "active state should already be clear");
         assert_eq!(peer_connection_closed(), vec![], "must be a no-op when nothing was active");
     }
 
@@ -1769,7 +1767,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                CallEffect::SendBye { pairing_id: id.clone(), call_id: "call1".to_string() },
+                CallEffect::SendBye { pairing_id: id.clone(), call_id: "call1".to_string(), media_failed: false },
                 CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::Dropped },
             ]
         );
@@ -1786,7 +1784,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![
-                CallEffect::SendBye { pairing_id: id.clone(), call_id: "call1".to_string() },
+                CallEffect::SendBye { pairing_id: id.clone(), call_id: "call1".to_string(), media_failed: false },
                 CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::NeverConnected },
             ],
             "{effects:?}"
@@ -1808,7 +1806,7 @@ mod tests {
             matches!(effects.as_slice(), [CallEffect::SendBye { .. }, CallEffect::ShowCallOutcome { .. }]),
             "{effects:?}"
         );
-        assert_eq!(effects[0], CallEffect::SendBye { pairing_id: id, call_id });
+        assert_eq!(effects[0], CallEffect::SendBye { pairing_id: id, call_id, media_failed: false });
     }
 
     // --- mark_connected ---
@@ -1824,20 +1822,13 @@ mod tests {
         assert_eq!(
             peer_connection_closed(),
             vec![
-                CallEffect::SendBye { pairing_id: id.clone(), call_id: "call1".to_string() },
+                CallEffect::SendBye { pairing_id: id.clone(), call_id: "call1".to_string(), media_failed: false },
                 CallEffect::ShowCallOutcome { pairing_id: id.clone(), call_id: "call1".to_string(), reason: CallOutcomeReason::NeverConnected },
             ]
         );
     }
 
     // --- media failure guard ---
-
-    #[test]
-    fn should_end_call_on_media_failure_matches_has_active_peer_connection() {
-        let _guard = reset_state_for_test();
-        assert!(should_end_call_on_media_failure(true));
-        assert!(!should_end_call_on_media_failure(false));
-    }
 
     // --- any_call_wanted ---
 

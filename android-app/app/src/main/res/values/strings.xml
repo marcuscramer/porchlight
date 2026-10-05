@@ -77,9 +77,13 @@
     <string name="pairing_phasePreparing">Preparing…</string>
     <string name="pairing_phaseConnecting">Connecting to relays…</string>
     <string name="pairing_phaseFound">Found a device — verifying…</string>
+    <string name="pairing_phaseWaitingForConfirm">Waiting for %1$s to confirm…</string>
+    <string name="pairing_notConfirmedTitle">Pairing not completed</string>
+    <string name="pairing_notConfirmedMessage">The other person cancelled or didn\'t confirm in time. Nothing was saved on either device. Start again with a fresh phrase.</string>
     <string name="pairing_progressRelays">Connected to %1$s of %2$s relays</string>
     <string name="pairing_progressCancelsIn">Auto-cancelling in %1$s</string>
     <string name="call_callingLabel">Calling</string>
+    <string name="call_peerOfflineNote">They look offline right now. Porchlight keeps trying for a minute.</string>
     <string name="call_connectingLabel">Connecting</string>
     <string name="call_incomingCallFrom">Incoming call from</string>
     <string name="call_autoAnswerCountdown">Connecting automatically in %1$s</string>
@@ -91,7 +95,6 @@
     <string name="call_audio">Audio</string>
     <string name="call_video">Video</string>
     <string name="call_positionSelfView">Position self-view</string>
-    <string name="call_pressBackToContinue">Press Back to continue</string>
     <string name="call_okButton">OK</string>
     <string name="call_outcome_peerEndedTitle">Call ended</string>
     <string name="call_outcome_peerEndedMessage">%1$s ended the call.</string>
@@ -108,9 +111,11 @@
     <string name="call_outcome_noAnswerTitle">No answer</string>
     <string name="call_outcome_noAnswerMessage">%1$s didn\'t answer the call.</string>
     <string name="call_outcome_unreachableTitle">Not reachable</string>
-    <string name="call_outcome_unreachableMessage">%1$s appears to be offline right now. Try again in a little while.</string>
+    <string name="call_outcome_unreachableMessage">%1$s appears to be offline right now, or may have removed you from their contacts. Try again in a little while.</string>
     <string name="call_outcome_busyTitle">Busy</string>
     <string name="call_outcome_busyMessage">%1$s is on another call right now. Try again in a little while.</string>
+    <string name="call_outcome_peerMediaFailedTitle">Couldn\'t be answered</string>
+    <string name="call_outcome_peerMediaFailedMessage">%1$s couldn\'t answer because of a problem with the camera or microphone on their device.</string>
     <string name="call_outcome_cameraFailedTitle">Camera or microphone problem</string>
     <string name="call_outcome_cameraFailedMessage">The call couldn\'t use this device\'s camera or microphone. Check that nothing else is using them and that Porchlight is allowed to, then try again.</string>
     <string name="call_outcome_cameraDeniedMessage">Porchlight isn\'t allowed to use the camera or microphone. Allow it in the permission settings of your browser and your phone\'s settings for this browser. Then try again.</string>

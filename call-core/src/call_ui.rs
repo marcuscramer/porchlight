@@ -29,6 +29,9 @@ pub struct PhaseInput {
     /// The media connection is up.
     #[serde(default)]
     pub peer_connected: bool,
+    /// The contact being called currently looks offline (red), so the call waits for them to come back.
+    #[serde(default)]
+    pub peer_offline: bool,
 }
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +61,8 @@ pub struct PhaseView {
     /// String key of the centred message, `None` for the live and idle
     /// phases (the outcome has its own text, see [`outcome_text`]).
     pub label_key: Option<&'static str>,
+    /// String key of a second line under the message, e.g. why a call to an offline contact is taking a while.
+    pub note_key: Option<&'static str>,
 }
 
 pub fn phase(input: &PhaseInput) -> PhaseView {
@@ -80,7 +85,9 @@ pub fn phase(input: &PhaseInput) -> PhaseView {
         Phase::Connecting => (Some("call.connectingLabel"), true),
         Phase::Idle | Phase::Outcome | Phase::Live => (None, false),
     };
-    PhaseView { phase, show_accept: phase == Phase::Ringing, controls_pinned: pinned, label_key }
+    // A call to an offline contact waits up to a minute; say so, since the contact may also have deleted us.
+    let note_key = (phase == Phase::Calling && input.peer_offline).then_some("call.peerOfflineNote");
+    PhaseView { phase, show_accept: phase == Phase::Ringing, controls_pinned: pinned, label_key, note_key }
 }
 
 /// What the "Waiting for the other device" screen says while a pairing attempt runs. The shells report
@@ -96,6 +103,8 @@ pub enum PairingPhase {
     Waiting,
     /// A first message from another device was seen; the exchange is being verified.
     Found,
+    /// This side's person accepted; waiting for the other person to accept too.
+    WaitingForConfirm,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -105,9 +114,11 @@ pub struct PairingPhaseView {
     pub label_key: &'static str,
 }
 
-pub fn pairing_phase(has_attempt: bool, relays_connected: u32, candidate_found: bool) -> PairingPhaseView {
+pub fn pairing_phase(has_attempt: bool, relays_connected: u32, candidate_found: bool, accepted: bool) -> PairingPhaseView {
     let phase = if !has_attempt {
         PairingPhase::Preparing
+    } else if accepted {
+        PairingPhase::WaitingForConfirm
     } else if candidate_found {
         PairingPhase::Found
     } else if relays_connected == 0 {
@@ -120,6 +131,7 @@ pub fn pairing_phase(has_attempt: bool, relays_connected: u32, candidate_found: 
         PairingPhase::Connecting => "pairing.phaseConnecting",
         PairingPhase::Waiting => "pairing.waitingForDevice",
         PairingPhase::Found => "pairing.phaseFound",
+        PairingPhase::WaitingForConfirm => "pairing.phaseWaitingForConfirm",
     };
     PairingPhaseView { phase, label_key }
 }
@@ -136,6 +148,8 @@ pub enum OutcomeText {
     Unreachable,
     Busy,
     CameraFailed,
+    /// The other device's camera or microphone failed, so it could not answer.
+    PeerMediaFailed,
     NeverConnected,
     /// Never connected, and the ICE evidence says UDP is blocked.
     UdpBlocked,
@@ -154,6 +168,7 @@ pub fn outcome_text(reason: &CallOutcomeReason, diagnosis: Option<IceDiagnosis>)
         (CallOutcomeReason::Unreachable, _) => OutcomeText::Unreachable,
         (CallOutcomeReason::Busy, _) => OutcomeText::Busy,
         (CallOutcomeReason::CameraFailed, _) => OutcomeText::CameraFailed,
+        (CallOutcomeReason::PeerMediaFailed, _) => OutcomeText::PeerMediaFailed,
         (CallOutcomeReason::Dropped, _) => OutcomeText::Dropped,
         (CallOutcomeReason::NeverConnected, Some(IceDiagnosis::UdpBlocked)) => OutcomeText::UdpBlocked,
         (CallOutcomeReason::NeverConnected, Some(IceDiagnosis::NoDirectPath)) => OutcomeText::NoDirectPath,
@@ -175,13 +190,13 @@ mod tests {
     use super::*;
 
     fn input(active: bool, outcome: bool, ring: bool, accepted: bool, connected: bool) -> PhaseInput {
-        PhaseInput { has_active_call: active, has_outcome: outcome, has_ring: ring, accepted_incoming: accepted, peer_connected: connected }
+        PhaseInput { has_active_call: active, has_outcome: outcome, has_ring: ring, accepted_incoming: accepted, peer_connected: connected, peer_offline: false }
     }
 
     #[test]
     fn nothing_going_on_is_idle() {
         let v = phase(&input(false, false, false, false, false));
-        assert_eq!(v, PhaseView { phase: Phase::Idle, show_accept: false, controls_pinned: false, label_key: None });
+        assert_eq!(v, PhaseView { phase: Phase::Idle, show_accept: false, controls_pinned: false, label_key: None, note_key: None });
     }
 
     #[test]
@@ -217,25 +232,43 @@ mod tests {
     }
 
     #[test]
+    fn calling_an_offline_contact_says_so_and_nothing_else_does() {
+        let offline = PhaseInput { has_active_call: true, peer_offline: true, ..Default::default() };
+        assert_eq!(phase(&offline).note_key, Some("call.peerOfflineNote"));
+        // Only the outgoing "calling" screen: a ring, a live call or an idle screen never carry it.
+        for other in [
+            PhaseInput { has_active_call: true, has_ring: true, peer_offline: true, ..Default::default() },
+            PhaseInput { has_active_call: true, peer_connected: true, peer_offline: true, ..Default::default() },
+            PhaseInput { peer_offline: true, ..Default::default() },
+        ] {
+            assert_eq!(phase(&other).note_key, None);
+        }
+        assert_eq!(phase(&PhaseInput { has_active_call: true, ..Default::default() }).note_key, None);
+    }
+
+    #[test]
     fn connected_is_live_with_dismissable_controls_whatever_else_is_set() {
         for (ring, accepted) in [(false, false), (true, false), (true, true), (false, true)] {
             let v = phase(&input(true, false, ring, accepted, true));
-            assert_eq!(v, PhaseView { phase: Phase::Live, show_accept: false, controls_pinned: false, label_key: None });
+            assert_eq!(v, PhaseView { phase: Phase::Live, show_accept: false, controls_pinned: false, label_key: None, note_key: None });
         }
     }
 
     #[test]
     fn pairing_goes_from_preparing_to_connecting_to_waiting_to_found() {
         use PairingPhase::*;
-        assert_eq!(pairing_phase(false, 0, false).phase, Preparing);
+        assert_eq!(pairing_phase(false, 0, false, false).phase, Preparing);
         // Not registered yet, whatever else looks true.
-        assert_eq!(pairing_phase(false, 5, true).phase, Preparing);
-        assert_eq!(pairing_phase(true, 0, false).phase, Connecting);
-        assert_eq!(pairing_phase(true, 1, false).phase, Waiting);
-        assert_eq!(pairing_phase(true, 5, false).label_key, "pairing.waitingForDevice");
+        assert_eq!(pairing_phase(false, 5, true, false).phase, Preparing);
+        assert_eq!(pairing_phase(true, 0, false, false).phase, Connecting);
+        assert_eq!(pairing_phase(true, 1, false, false).phase, Waiting);
+        assert_eq!(pairing_phase(true, 5, false, false).label_key, "pairing.waitingForDevice");
         // Seeing someone wins over the relay count.
-        assert_eq!(pairing_phase(true, 0, true).phase, Found);
-        assert_eq!(pairing_phase(true, 3, true).phase, Found);
+        assert_eq!(pairing_phase(true, 0, true, false).phase, Found);
+        assert_eq!(pairing_phase(true, 3, true, false).phase, Found);
+        // Having accepted wins over everything else, and has its own headline.
+        assert_eq!(pairing_phase(true, 0, true, true).phase, WaitingForConfirm);
+        assert_eq!(pairing_phase(true, 3, true, true).label_key, "pairing.phaseWaitingForConfirm");
     }
 
     #[test]
@@ -254,6 +287,7 @@ mod tests {
             (Unreachable, OutcomeText::Unreachable),
             (Busy, OutcomeText::Busy),
             (CameraFailed, OutcomeText::CameraFailed),
+            (PeerMediaFailed, OutcomeText::PeerMediaFailed),
         ] {
             assert_eq!(outcome_text(&reason, Some(IceDiagnosis::UdpBlocked)), text);
             assert_eq!(outcome_text(&reason, None), text);
@@ -272,7 +306,7 @@ mod tests {
     #[test]
     fn serializes_to_the_names_the_shells_match_on() {
         let v = phase(&input(true, false, true, false, false));
-        assert_eq!(serde_json::to_string(&v).unwrap(), r#"{"phase":"ringing","show_accept":true,"controls_pinned":true,"label_key":"call.incomingCallFrom"}"#);
+        assert_eq!(serde_json::to_string(&v).unwrap(), r#"{"phase":"ringing","show_accept":true,"controls_pinned":true,"label_key":"call.incomingCallFrom","note_key":null}"#);
         assert_eq!(serde_json::to_string(&OutcomeText::UdpBlocked).unwrap(), r#""udp_blocked""#);
     }
 }

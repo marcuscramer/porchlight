@@ -182,12 +182,19 @@ class NostrSignalingClient(
     // arrives, with connectedRelays still counting it as healthy. A ping every
     // 30s fails such a socket within one missed pong, which fires the normal
     // disconnect/reconnect path.
-    private val httpClient = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
+    private fun newHttpClient() = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
+
+    // Replaced as a pair by [rebuildConnections]; everything but the watchdog uses whatever is current.
+    private var httpClient = newHttpClient()
     private val websocketBuilder = object : WebsocketBuilder {
         override fun build(url: NormalizedRelayUrl, out: WebSocketListener): WebSocket =
             BasicOkHttpWebSocket(url, { httpClient }, out)
     }
-    private val client = NostrClient(websocketBuilder, scope)
+    private var client = NostrClient(websocketBuilder, scope)
+
+    // Which NostrClient the connection callbacks belong to. A client that [rebuildConnections] threw away can still
+    // report its sockets closing; those reports must not touch the state of the new one.
+    private var clientGeneration = 0
 
     // Per-pairing pubkey cache, keyed by ownPrivateKeyHex — cheap to
     // recompute, but every heartbeat tick touches every confirmed pairing's
@@ -233,11 +240,6 @@ class NostrSignalingClient(
     // decompiling 1.08.0 and 1.12.6) — so without this a relay that's briefly
     // down when publish() fires loses that message for good.
 
-    // Set the moment connectedRelays.size first drops below relayUrls.size,
-    // cleared the moment every relay is connected again — see [monitor]'s
-    // own doc.
-    private var relaysDegradedSinceMs: Long? = null
-
     data class Snapshot(val relays: List<CallCoreBridge.RelayView>, val lastHeartbeatSentAtMs: Long?)
 
     /** Safe to call from any thread. */
@@ -263,6 +265,16 @@ class NostrSignalingClient(
         // NostrClient/OkHttp invoke these on their own connection/socket
         // threads, not [executor] — marshaled here so connectedRelays
         // is never touched from more than one thread.
+        listenToConnections()
+        client.connect()
+        resubscribe()
+
+        scheduleHeartbeat(0)
+        executor.scheduleWithFixedDelay({ monitor() }, ONLINE_CHECK_INTERVAL_MS, ONLINE_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun listenToConnections() {
+        val generation = clientGeneration
         client.addConnectionListener(object : RelayConnectionListener {
             // safeExecute, not execute: client.disconnect() during
             // close()/teardown fires these from OkHttp's own thread for
@@ -270,6 +282,7 @@ class NostrSignalingClient(
             override fun onConnected(relay: IRelayClient, pingMillis: Int, compressed: Boolean) {
                 CallCoreBridge.noteRelayConnected(relay.url.url)
                 executor.safeExecute {
+                    if (generation != clientGeneration) return@safeExecute
                     val wasEmpty = connectedRelays.isEmpty()
                     connectedRelays.add(relay.url)
                     connectedSnapshot = connectedRelays.mapTo(HashSet()) { it.url }
@@ -288,6 +301,7 @@ class NostrSignalingClient(
             }
             override fun onDisconnected(relay: IRelayClient) {
                 executor.safeExecute {
+                    if (generation != clientGeneration) return@safeExecute
                     connectedRelays.remove(relay.url)
                     connectedSnapshot = connectedRelays.mapTo(HashSet()) { it.url }
                     if (connectedRelays.isEmpty()) listener.onSignalingDisconnected()
@@ -302,6 +316,7 @@ class NostrSignalingClient(
                 // connectedRelays (and so monitor()'s degraded check) stale.
                 // See this property's own doc for why a set, not a counter.
                 executor.safeExecute {
+                    if (generation != clientGeneration) return@safeExecute
                     connectedRelays.remove(relay.url)
                     connectedSnapshot = connectedRelays.mapTo(HashSet()) { it.url }
                     if (connectedRelays.isEmpty()) listener.onSignalingDisconnected()
@@ -327,11 +342,6 @@ class NostrSignalingClient(
                 }
             }
         })
-        client.connect()
-        resubscribe()
-
-        scheduleHeartbeat(0)
-        executor.scheduleWithFixedDelay({ monitor() }, ONLINE_CHECK_INTERVAL_MS, ONLINE_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS)
     }
 
     /**
@@ -484,17 +494,13 @@ class NostrSignalingClient(
     /**
      * Also the relay-connection watchdog, not just the presence-timeout
      * sweep its name describes — piggybacking on the same 10s tick rather
-     * than adding a second timer. quartz-android's own [NostrClient.reconnect]
-     * (called after every publish, via [kickHeartbeat]/[resubscribe]'s own
-     * callers) passes `ignoreRetryDelays = false`, so it respects
-     * `BasicRelayClient`'s per-relay backoff — including the pathological
-     * 24-hour one described at [FORCE_RECONNECT_AFTER_DEGRADED_MS]. Once
-     * under-connected for longer than that threshold, force a real
-     * reconnect via `client.reconnect(onlyIfChanged = false)`, which does
-     * an unconditional disconnect()+connect() — `disconnect()` resets
-     * every relay's backoff state, and the `connect()` right after it
-     * never consults the backoff gate at all (that only lives in the
-     * "only if changed" path) — so this clears even the day-long lockout.
+     * than adding a second timer. What counts as unhealthy, and whether to
+     * reconnect softly or rebuild the connections, is `call-core`'s
+     * `relay_watchdog`; this only carries it out. quartz-android's own
+     * [NostrClient.reconnect] respects `BasicRelayClient`'s per-relay backoff
+     * (including a day-long one), so the soft step uses
+     * `reconnect(onlyIfChanged = false)`, an unconditional disconnect and
+     * connect that clears it.
      */
     private fun monitor() {
         val now = System.currentTimeMillis()
@@ -502,16 +508,45 @@ class NostrSignalingClient(
         listener.onCallTimeoutCheck(CallCoreBridge.checkCallTimeout(now))
         retryPendingPublishes()
 
-        if (connectedRelays.size >= relayUrls.size) {
-            relaysDegradedSinceMs = null
-            return
+        when (CallCoreBridge.relayWatchdog(connectedRelays.size, relayUrls.size, now)) {
+            CallCoreBridge.RelayWatchdogAction.NOTHING -> {}
+            CallCoreBridge.RelayWatchdogAction.SOFT_RECONNECT -> {
+                Log.w(TAG, "relays under-connected (${connectedRelays.size}/${relayUrls.size}), reconnecting")
+                client.reconnect(onlyIfChanged = false)
+            }
+            CallCoreBridge.RelayWatchdogAction.REBUILD -> {
+                Log.w(TAG, "relays still under-connected (${connectedRelays.size}/${relayUrls.size}) after reconnecting, rebuilding the connections")
+                rebuildConnections()
+            }
         }
-        val degradedSince = relaysDegradedSinceMs ?: now.also { relaysDegradedSinceMs = it }
-        if (now - degradedSince >= FORCE_RECONNECT_AFTER_DEGRADED_MS) {
-            Log.w(TAG, "relays under-connected (${connectedRelays.size}/${relayUrls.size}) for over ${FORCE_RECONNECT_AFTER_DEGRADED_MS}ms, forcing reconnect")
-            client.reconnect(onlyIfChanged = false)
-            relaysDegradedSinceMs = now
-        }
+    }
+
+    /**
+     * Throws the connection objects and their sockets away and builds new ones. After hours of reconnecting, the
+     * connection library can end up with sockets it no longer tracks (64 were open on a Portal that had been
+     * deaf for hours) and a connect call that does nothing; the only reliable cure is a fresh [NostrClient] and a
+     * fresh [OkHttpClient] whose dispatcher and pool are emptied.
+     */
+    private fun rebuildConnections() {
+        Log.i(TAG, "rebuilding the relay connections")
+        val oldClient = client
+        val oldHttp = httpClient
+        clientGeneration++
+        connectedRelays.clear()
+        connectedSnapshot = emptySet()
+        httpClient = newHttpClient()
+        client = NostrClient(websocketBuilder, scope)
+        runCatching { oldClient.disconnect() }
+        closeSockets(oldHttp)
+        listenToConnections()
+        client.connect()
+        resubscribe()
+    }
+
+    private fun closeSockets(http: OkHttpClient) {
+        runCatching { http.dispatcher.cancelAll() }
+        runCatching { http.connectionPool.evictAll() }
+        runCatching { http.dispatcher.executorService.shutdown() }
     }
 
     // --- Outbound API mirroring the old SignalingClient's shape ------------
@@ -523,7 +558,7 @@ class NostrSignalingClient(
     // Each payload is built by call-core itself (see CallCoreBridge's own
     // `SignalMessage` doc) — the schema lives in one place instead of two
     // independently hand-assembled copies (this class and app.js).
-    fun hangUp(pairingId: String, callId: String) = sendConfirmedOrPending(pairingId) { CallCoreBridge.buildByePayload(callId) }
+    fun hangUp(pairingId: String, callId: String, mediaFailed: Boolean = false) = sendConfirmedOrPending(pairingId) { CallCoreBridge.buildByePayload(callId, mediaFailed) }
     fun sendBusy(pairingId: String, callId: String) = sendConfirmedOrPending(pairingId) { CallCoreBridge.buildBusyPayload(callId) }
     fun sendCall(pairingId: String, callId: String) = sendConfirmedOrPending(pairingId) { CallCoreBridge.buildCallPayload(callId) }
     fun sendOffer(pairingId: String, sdp: String, callId: String) = sendConfirmedOrPending(pairingId) { CallCoreBridge.buildOfferPayload(sdp, callId) }
@@ -681,8 +716,9 @@ class NostrSignalingClient(
             // executor down right after calling close(), before this inner
             // call runs. If it was rejected, there's no 500ms flush window
             // left to wait out anyway — disconnect immediately instead.
-            if (executor.safeSchedule(500, TimeUnit.MILLISECONDS) { client.disconnect() } == null) {
+            if (executor.safeSchedule(500, TimeUnit.MILLISECONDS) { client.disconnect(); closeSockets(httpClient) } == null) {
                 client.disconnect()
+                closeSockets(httpClient)
             }
         }
     }
@@ -711,19 +747,6 @@ class NostrSignalingClient(
         // presence-related constant that stays here, purely this class's
         // own polling cadence for calling CallCoreBridge.checkOnlineTimeouts.
         private const val ONLINE_CHECK_INTERVAL_MS = GeneratedSharedConfig.PRESENCE_TICK_INTERVAL_MS
-
-        // See [monitor]'s own doc for why this exists: quartz-android's
-        // BasicRelayClient can lock a relay out of reconnecting for a full
-        // day after an ordinary, recoverable failure (an HTTP-coded
-        // handshake failure, or "Host unreachable"). Forcing a reconnect
-        // doesn't fight the library's own exponential backoff for a plain
-        // dropped connection — it just makes recovery happen sooner —
-        // so this can safely sit well under call-core's PAKE_LIVE_WINDOW_MS
-        // (120s): a relay that's been degraded for 45s gets forced back
-        // before a live pairing attempt's own window gives up on it,
-        // instead of (as a prior 150s threshold did) always losing that
-        // race.
-        private const val FORCE_RECONNECT_AFTER_DEGRADED_MS = 45_000L
 
         // See resubscribe()'s onClosed override: a relay sending NIP-01
         // CLOSED for a persistent reason (PoW/auth it'll never satisfy)

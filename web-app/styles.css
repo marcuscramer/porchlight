@@ -83,7 +83,7 @@ html, body {
 }
 
 /* #screenPairingProgress is the one screen with a real DOM wrapper div per
-   sub-state (progressWaiting/progressCollision/progressTimeout) instead of
+   sub-state (progressWaiting/progressCollision/progressTimeout/progressNotConfirmed) instead of
    every element being a direct child of .panel — plain `display: block` on
    those wrappers by default meant their own h1/p/button never joined
    .panel's own flex row, so button width (full-width via flexbox's default
@@ -97,7 +97,8 @@ html, body {
    always wins regardless. */
 #progressWaiting,
 #progressCollision,
-#progressTimeout {
+#progressTimeout,
+#progressNotConfirmed {
   display: contents;
 }
 
@@ -526,10 +527,8 @@ html, body {
   border-top-color: var(--color-action-primary-background);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-  /* Horizontal centering only — #progressWaiting's own `display: contents`
-     (above) makes this a direct flex child of .panel now, so .panel's own
-     `gap` already provides the spacing below it; a bottom margin here too
-     would double it up. */
+  /* Horizontal centering only: on the pairing screen it sits in the
+     column-flex .pair-action slot, which provides the vertical placement. */
   margin: 0 auto;
 }
 
@@ -556,20 +555,26 @@ html, body {
   }
 }
 
-/* --- Pairing screen (mirrors NameConfirmScreen) -------------------------- */
-
-.pair-title {
-  font-family: var(--typography-display-font-family);
-  font-weight: var(--typography-display-font-weight);
-  font-size: var(--typography-display-font-size);
-  letter-spacing: var(--typography-display-letter-spacing);
-  color: var(--color-text-primary);
-}
-
-.pair-muted {
-  color: var(--color-text-dim);
+/* --- Pairing screens (progress, collision, timeout, confirm) -------------
+   Same slots in the same order on all four — h1, .pair-text, .pair-action,
+   then the Cancel button — each with a fixed minimum height, so the title,
+   the spinner/action and Cancel sit at the same place on every one of them
+   (the panel is vertically centered, so equal heights mean equal positions).
+   .pair-text reserves two lines (the progress screen's two status lines;
+   the collision/timeout paragraphs are longer and just grow past it);
+   .pair-action holds the spinner (progress) or the one action button
+   (Try again / Confirm). The text block is a tidy stack of lines, not a
+   gap-separated list. */
+.pair-text {
+  min-height: calc(2 * 1.4em);
   font-size: var(--typography-body-font-size);
-  margin: var(--dimension-4) 0;
+  line-height: 1.4;
+}
+.pair-action {
+  min-height: var(--dimension-40);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 /* Never show the browser's own media UI (Safari's start-playback button and
