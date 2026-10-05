@@ -59,10 +59,17 @@ export function tier(history, url, opts = DEFAULTS) {
   return 'unproven';
 }
 
-/** Has this relay failed (or been unreachable) in each of the last `n` runs? */
+/**
+ * Has this relay failed in each of the last `n` runs? The newest run counts a relay that was not measured at all as
+ * failing (unreachable); an earlier run only counts an explicit failing entry. A relay with no entry in an earlier run
+ * was simply not in the list then (it was just added, or the history was reset), which is not a failure.
+ */
 function failedLast(history, url, n) {
   const runs = history.runs.slice(-n);
-  return runs.length >= n && runs.every((run) => !run.relays[url]?.passes);
+  if (runs.length < n) return false;
+  const newestFailed = !runs[runs.length - 1].relays[url]?.passes;
+  const earlierFailed = runs.slice(0, -1).every((run) => run.relays[url] && !run.relays[url].passes);
+  return newestFailed && earlierFailed;
 }
 
 /**

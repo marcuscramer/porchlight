@@ -32,15 +32,27 @@ test('one failing run only warns; the second one in a row replaces the relay', (
   assert.ok(r.relays.includes(url('z')) && !r.relays.includes(url('e')));
 });
 
-test('an unreachable relay (not measured) counts as failing', () => {
+test('an unreachable relay (no row this run) is replaced once it also failed the run before', () => {
   const good = ['a', 'b', 'c', 'd'].map((n, i) => row(n, { software: `s${i}` }));
   const cand = row('z', { software: 'sz' });
-  const weeks = [[...good, cand], [...good, cand]];
+  const before = [...good, cand, row('gone', { passes: false, failedGates: ['uptime 0%'] })];
+  const now = [...good, cand];
   const current = [...good.map((x) => x.url), url('gone')];
-  const r = selectList({ current, rows: weeks[1], history: hist(...weeks) });
+  const r = selectList({ current, rows: now, history: hist(before, now) });
   assert.equal(r.changed, true);
   assert.equal(r.changes[0].removed, url('gone'));
   assert.match(r.changes[0].why, /unreachable/);
+});
+
+test('a relay with no earlier record (just added, or the history was reset) is not replaced after one bad run', () => {
+  const good = ['a', 'b', 'c', 'd'].map((n, i) => row(n, { software: `s${i}` }));
+  const cand = row('z', { software: 'sz' });
+  const bad = row('new', { passes: false, failedGates: ['uptime 0%'], software: 's9' });
+  const before = [...good, cand];
+  const now = [...good, cand, bad];
+  const r = selectList({ current: [...good, bad].map((x) => x.url), rows: now, history: hist(before, now) });
+  assert.equal(r.changed, false);
+  assert.match(r.warnings[0], /kept for now/);
 });
 
 test('replacements keep the list diverse: not the same network, domain or too much of one software', () => {
