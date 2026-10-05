@@ -1022,15 +1022,15 @@ pub fn is_call_active() -> bool {
     !matches!(app.call.slot, CallSlot::Idle)
 }
 
-/// Whether a contact's Call button is offered: the pairing is confirmed, no
-/// media is already connected to it, and this device's call slot is free.
+/// Whether a contact's Call button is offered: no media is already connected
+/// to it, and this device's call slot is free.
 /// The last condition is belt-and-suspenders — placing a call to a different
 /// contact while one is already active is a silent no-op in [`request_call`]
 /// — but it also keeps the button from being offered at all, which is what
 /// both shells' contact lists want. `connected`: the shell's own
 /// per-contact "media is up" flag (a `PeerConnection` fact core never holds).
-pub fn can_place_call(is_paired: bool, connected: bool) -> bool {
-    is_paired && !connected && !is_call_active()
+pub fn can_place_call(connected: bool) -> bool {
+    !connected && !is_call_active()
 }
 
 /// Serializes call_arbitration tests (and, via [`reset_state_for_test`],
@@ -1905,16 +1905,15 @@ mod tests {
     // --- can_place_call ---
 
     #[test]
-    fn can_place_call_needs_a_confirmed_unconnected_contact_and_a_free_slot() {
+    fn can_place_call_needs_an_unconnected_contact_and_a_free_slot() {
         let _guard = reset_state_for_test();
-        assert!(can_place_call(true, false));
-        assert!(!can_place_call(false, false), "an unconfirmed pairing can't be called");
-        assert!(!can_place_call(true, true), "already connected to this contact");
+        assert!(can_place_call(false));
+        assert!(!can_place_call(true), "already connected to this contact");
 
         let id = fresh_id();
         request_call(&id, "aaa", "bbb", false, 0);
-        assert!(!can_place_call(true, false), "the call slot is occupied");
+        assert!(!can_place_call(false), "the call slot is occupied");
         hang_up();
-        assert!(can_place_call(true, false));
+        assert!(can_place_call(false));
     }
 }

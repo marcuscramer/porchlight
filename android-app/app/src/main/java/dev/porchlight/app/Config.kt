@@ -31,21 +31,22 @@ enum class PreviewCorner {
  * brand-new [id] each time; see CameraAgentService.startPairing), not an
  * in-place update of this same record.
  *
+ * A `Pairing` only exists once a person has confirmed the match: a pairing
+ * attempt lives in `call-core`'s memory and is handed back, finished, by
+ * `CallCoreBridge.confirmAttempt` (see CameraAgentService.confirmPeer).
+ *
  * [ownPrivateKeyHex] is *this device's own* permanent Nostr identity for
- * *this one relationship* — generated fresh the moment a pairing attempt
- * starts and never reused across pairings or shared with the peer: every
+ * *this one relationship* — generated fresh when the pairing attempt starts
+ * and never reused across pairings or shared with the peer: every
  * `Pairing` is a fully independent cryptographic relationship, so
  * compromising one never exposes any other. [peerPublicKey] is the *peer's*
- * Nostr pubkey (hex) — populated once the SPAKE2 exchange succeeds and a
- * human confirms the peer's self-reported name (see
- * CameraAgentService.confirmPeer).
+ * Nostr pubkey (hex), [peerName] its self-reported name.
  */
 data class Pairing(
     val id: String,
     val ownPrivateKeyHex: String,
-    // "" (not null) for both — simpler JSON round-tripping than a nullable field.
-    val peerPublicKey: String = "",
-    val peerName: String = "",
+    val peerPublicKey: String,
+    val peerName: String,
     // Per-contact, off by default (see call-core's `signal_router::RoutePeer`): when
     // true, an incoming call from this contact connects automatically after
     // a countdown instead of waiting for a manual Accept tap — a deliberate
@@ -59,9 +60,7 @@ data class Pairing(
     // redelivery even across a reload/app restart.
     val lastSignalCreatedAt: Long = 0L,
     val lastSignalEventId: String = "",
-) {
-    val isConfirmed: Boolean get() = peerPublicKey.isNotBlank()
-}
+)
 
 /**
  * Persisted configuration for the call app: a name for this device, and the
@@ -207,6 +206,9 @@ data class Config(
                         lastSignalEventId = o.optString("lastSignalEventId"),
                     )
                 }
+                    // Older versions saved a pairing attempt as an unconfirmed contact (no peer yet), which an app
+                    // restart mid-attempt left behind as a nameless row; attempts live in memory now.
+                    .filter { it.peerPublicKey.isNotBlank() }
             }.getOrDefault(emptyList())
         }
 

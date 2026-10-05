@@ -82,29 +82,27 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
  * Shown from the moment a phrase is submitted until the attempt resolves
  * one of three ways: a candidate appears (crypto-confirmed, just needs the
  * final human tap — see [NameConfirmScreen]), a collision is detected, or
- * the live window times out with nobody found. Reads [ContactState] live
- * (via [contacts]) rather than owning any state of its own — the same
- * "observe CameraAgentService.state, don't duplicate it" pattern every
- * other screen in this app already uses.
+ * the live window times out with nobody found. Shows [attempt] (null while
+ * the attempt is still being started) rather than owning any state of its
+ * own — the same "observe CameraAgentService.state, don't duplicate it"
+ * pattern every other screen in this app already uses.
  */
 @Composable
 fun PairingProgressScreen(
-    pairingId: String,
+    attempt: CameraAgentService.PairingAttemptState?,
     service: CameraAgentService?,
-    contacts: List<CameraAgentService.ContactState>,
-    onConfirm: (pairingId: String, publicKeyHex: String) -> Unit,
+    onConfirm: () -> Unit,
     onRetry: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val contact = contacts.find { it.id == pairingId }
-    val candidate = contact?.pairingCandidates?.firstOrNull()
+    val candidate = attempt?.candidate
     when {
         candidate != null -> NameConfirmScreen(
             candidate = candidate,
-            onConfirm = { onConfirm(pairingId, candidate.publicKey) },
+            onConfirm = onConfirm,
             onCancel = onCancel,
         )
-        contact?.pairingCollision == true -> {
+        attempt?.collision == true -> {
             // Auto-dismiss to onCancel only, never onAction — safe here
             // because giving up on the attempt is the passive outcome,
             // unlike this same OutcomeScreen composable's other caller
@@ -122,7 +120,7 @@ fun PairingProgressScreen(
                 onCancel = onCancel,
             )
         }
-        contact?.pairingTimedOut == true -> {
+        attempt?.timedOut == true -> {
             LaunchedEffect(Unit) {
                 delay(AUTO_DISMISS_DELAY_MS)
                 onCancel()
@@ -135,7 +133,7 @@ fun PairingProgressScreen(
                 onCancel = onCancel,
             )
         }
-        else -> WaitingForDeviceScreen(pairingId, service, onCancel)
+        else -> WaitingForDeviceScreen(attempt?.id, service, onCancel)
     }
 }
 
@@ -144,7 +142,7 @@ fun PairingProgressScreen(
  * plus how many relays are connected and how long is left, refreshed every second.
  */
 @Composable
-private fun WaitingForDeviceScreen(pairingId: String, service: CameraAgentService?, onCancel: () -> Unit) {
+private fun WaitingForDeviceScreen(pairingId: String?, service: CameraAgentService?, onCancel: () -> Unit) {
     val startedAt = remember { System.currentTimeMillis() }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -155,7 +153,7 @@ private fun WaitingForDeviceScreen(pairingId: String, service: CameraAgentServic
     }
     val relays = remember(now) { service?.signalingSnapshot()?.relays.orEmpty() }
     val connected = relays.count { it.state != CallCoreBridge.RelayState.DOWN }
-    val pending = remember(now) { CallCoreBridge.pendingSnapshot(pairingId) }
+    val pending = remember(now) { pairingId?.let(CallCoreBridge::pendingSnapshot) }
     val phase = CallCoreBridge.pairingPhase(hasAttempt = pending != null, relaysConnected = connected, candidateFound = pending?.candidatePubkey != null)
     val title = when (phase) {
         CallCoreBridge.PairingPhase.PREPARING -> R.string.pairing_phasePreparing

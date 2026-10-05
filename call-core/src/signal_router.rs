@@ -461,8 +461,8 @@ mod tests {
     #[test]
     fn a_stale_replayed_pairing_message_is_ignored() {
         let _g = call_arbitration::reset_state_for_test();
-        let me = crate::start_attempt("stale-test-pairing", "stale-test-own-pubkey", "Me", "stale test phrase");
-        let peer = crate::start_attempt("stale-test-peer", "stale-test-peer-pubkey", "Peer", "stale test phrase");
+        let me = crate::start_attempt_with("stale-test-pairing", "test-private-key", "stale-test-own-pubkey", "Me", "stale test phrase");
+        let peer = crate::start_attempt_with("stale-test-peer", "test-private-key", "stale-test-peer-pubkey", "Peer", "stale test phrase");
         let sender = nostr_protocol::generate_keys();
         let sender_secret = sender.secret_key().to_secret_hex();
         let event = nostr_protocol::build_bootstrap_event(&sender_secret, &me.rendezvous_tag, None, &format!(r#"{{"type":"pake1","outbound":"{}"}}"#, peer.outbound_hex)).unwrap();

@@ -81,7 +81,6 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     data class ContactState(
         val id: String,
         val name: String,
-        val isPaired: Boolean,
         // Mirrors Pairing.autoAnswer — carried here, not read separately
         // from Config by the UI, so the Settings > Contacts toggle always
         // reflects this running service's own live pairings map instead of
@@ -100,21 +99,21 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         // kept distinct from `status` so the waiting screen can tell "not
         // running" apart from "there, but can't establish media."
         val connected: Boolean = false,
-        // At most one entry: the peer a SPAKE2 exchange has already
-        // cryptographically confirmed for this pending pairing, awaiting
-        // the final human "Pair with [name]?" tap. Never holds more than
-        // one — a second distinct sender aborts the attempt outright
-        // (pairingCollision) instead of listing a choice.
-        val pairingCandidates: List<CandidatePeer> = emptyList(),
-        // True if a second, distinct sender showed up at this pending
-        // pairing's rendezvous point before it resolved — see
-        // call-core's `handle_bootstrap_message` doc. Cleared the next time a fresh
-        // attempt starts for this same contact.
-        val pairingCollision: Boolean = false,
-        // True if a pending pairing's live window elapsed with no
-        // successful confirmation — see PAKE_LIVE_WINDOW_MS. Cleared the
-        // next time a fresh attempt starts for this same contact.
-        val pairingTimedOut: Boolean = false,
+    )
+
+    /**
+     * The one pairing attempt in progress. It exists only in memory — nothing is saved until a person confirms the
+     * match ([confirmPeer]) — and `call-core` owns the protocol state; this is what the screens show. [id] is null
+     * until `call-core` has minted it (turning the phrase into the meeting point takes a moment). [candidate] is the
+     * peer the SPAKE2 exchange cryptographically confirmed, awaiting the final "Pair with [name]?" tap; there is
+     * never more than one — a second distinct sender ends the attempt ([collision]) instead of offering a choice.
+     * [timedOut]: the live window elapsed with nobody confirmed.
+     */
+    data class PairingAttemptState(
+        val id: String? = null,
+        val candidate: CandidatePeer? = null,
+        val collision: Boolean = false,
+        val timedOut: Boolean = false,
     )
 
     /**
@@ -156,6 +155,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         // negotiation window.
         val acceptedIncoming: Boolean = false,
         val contacts: List<ContactState> = emptyList(),
+        val pairingAttempt: PairingAttemptState? = null,
         // Set by a ShowCallOutcome effect, cleared by dismissCallOutcome() —
         // drives HomeScreen's full-screen "why did this call end" prompt.
         val pendingCallOutcome: PendingCallOutcome? = null,
@@ -554,74 +554,61 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     } ?: Unit
 
     /**
-     * A human tapped "Pair with [name]?" for a candidate the SPAKE2
-     * exchange already cryptographically confirmed (see
-     * [onRouted]) — the one remaining manual step, a cheap
-     * final sanity check rather than a heavy fingerprint ceremony. Looks
-     * the candidate up from the currently-published state rather than
-     * asking NostrSignalingClient to track it separately — the same data
-     * the confirm screen is already showing.
+     * A person tapped "Pair with [name]?" for the candidate the SPAKE2 exchange already cryptographically confirmed.
+     * `call-core` ends the attempt and hands back the finished contact, which is saved here for the first time.
      */
-    fun confirmPeer(pairingId: String, publicKeyHex: String) = callExecutor?.execute {
-        val candidate = _state.value.contacts.find { it.id == pairingId }
-            ?.pairingCandidates?.find { it.publicKey == publicKeyHex } ?: return@execute
-        Config.updatePairingPeer(this, pairingId, candidate.publicKey, candidate.name)
-        pairings[pairingId] = pairings[pairingId]?.copy(peerPublicKey = candidate.publicKey, peerName = candidate.name)
-            ?: return@execute
-        // The SPAKE2 exchange was already consumed by finish() inside
-        // handleBootstrapMessage by the time a candidate exists to confirm
-        // here — this just tells call-core to stop tracking the attempt.
-        CallCoreBridge.cancelAttempt(pairingId)
+    fun confirmPeer() = callExecutor?.execute {
+        val attempt = _state.value.pairingAttempt ?: return@execute
+        val id = attempt.id ?: return@execute
+        val candidate = attempt.candidate ?: return@execute
+        val confirmed = CallCoreBridge.confirmAttempt(id, candidate.publicKey)
+        updateState { it.copy(pairingAttempt = null) }
+        if (confirmed == null) return@execute
+        val pairing = Pairing(confirmed.pairingId, confirmed.ownPrivateKeyHex, confirmed.peerPublicKey, confirmed.peerName)
+        Config.addOrUpdatePairing(this, pairing)
+        addPairingState(pairing)
         signaling?.kickHeartbeat()
-        updateContact(pairingId) { it.copy(isPaired = true, name = candidate.name, pairingCandidates = emptyList()) }
     } ?: Unit
 
     /**
-     * Starts a passphrase pairing attempt for a brand-new contact — the
-     * *only* way a pairing is ever created now (a stale contact is Delete,
-     * then this, with a fresh phrase, rather than a "Reconnect": every
-     * attempt is then unambiguously new, never corrupting an existing
-     * contact's peer info if it's cancelled or fails). [passphrase] is
-     * never persisted anywhere — only this attempt's own fresh keypair is,
-     * immediately, so it's ready to become the pairing's permanent identity
-     * the moment SPAKE2 succeeds.
+     * Starts a passphrase pairing attempt for a brand-new contact — the *only* way a pairing is ever created (a
+     * stale contact is Delete, then this, with a fresh phrase). [passphrase] and the attempt's fresh keypair are
+     * never persisted: `call-core` holds the attempt in memory and hands back the finished contact when a person
+     * confirms the match, so an app that dies mid-attempt leaves nothing behind.
      *
-     * Returns the (persisted, unconfirmed) [Pairing] synchronously, mostly
-     * so a caller can navigate to a screen keyed by its id — construction
-     * itself is pure, touching no shared state, so this is safe off
-     * [callExecutor]. If the service isn't bound yet at all (the very
-     * first pairing ever on a fresh device), the actual attempt is deferred
-     * until [startAgent] brings [callExecutor] up — see
-     * [pendingFirstAttempt].
+     * Turning the phrase into the meeting point (Argon2id) takes a moment, so the attempt shows up in [AgentState]
+     * first with no id and gets one when it has started. Everything runs in order on [callExecutor], so a cancel
+     * that arrives meanwhile ([discardPairingAttempt]) takes effect right after the start completes. If this service isn't running yet (the first pairing
+     * ever on a fresh device), [startFirstPairing] hands the passphrase to the instance that [startAgent] brings up.
      */
-    fun startPairing(passphrase: String): Pairing {
-        val fresh = Pairing(id = UUID.randomUUID().toString(), ownPrivateKeyHex = KeyPair().privKey!!.toHexKey())
+    fun startPairing(passphrase: String) {
         val executor = callExecutor
         if (executor != null) {
             executor.execute {
-                Config.addOrUpdatePairing(this, fresh)
-                addPairingState(fresh)
-                beginPakeAttempt(fresh, passphrase)
+                updateState { it.copy(pairingAttempt = PairingAttemptState()) }
+                beginPakeAttempt(passphrase)
             }
         } else {
-            Config.addOrUpdatePairing(this, fresh)
-            pendingFirstAttempt = fresh.id to passphrase
+            pendingFirstAttempt = passphrase
             CameraAgentService.start(this)
         }
-        return fresh
     }
 
+    /** Gives up on the attempt in progress (cancel, retry, auto-dismiss). */
+    fun discardPairingAttempt() = callExecutor?.execute {
+        _state.value.pairingAttempt?.id?.let(CallCoreBridge::cancelAttempt)
+        updateState { it.copy(pairingAttempt = null) }
+    } ?: Unit
+
     /**
-     * Actually starts the SPAKE2 exchange for [pairing] — calls into
-     * `CallCoreBridge`, which trims/NFC-normalizes the raw typed passphrase
-     * and derives the rendezvous tag internally (via `pake-bridge`),
-     * registers the live attempt in `call-core`'s own registry, and
-     * schedules its live-window timeout. Always called on [callExecutor].
+     * Actually starts the SPAKE2 exchange — calls into `CallCoreBridge`, which trims/NFC-normalizes the raw typed
+     * passphrase, mints the attempt's id and keypair, derives the rendezvous tag internally (via `pake-bridge`),
+     * registers the live attempt in `call-core`'s own registry, and schedules its live-window timeout. Always
+     * called on [callExecutor].
      */
-    private fun beginPakeAttempt(pairing: Pairing, rawPassphrase: String) {
-        val ownPubkeyHex = KeyPair(privKey = pairing.ownPrivateKeyHex.hexToByteArray()).pubKey!!.toHexKey()
-        val start = CallCoreBridge.startAttempt(pairing.id, ownPubkeyHex, Config.load(this).deviceName, rawPassphrase)
-        updateContact(pairing.id) { it.copy(pairingCandidates = emptyList(), pairingCollision = false, pairingTimedOut = false) }
+    private fun beginPakeAttempt(rawPassphrase: String) {
+        val start = CallCoreBridge.startAttempt(Config.load(this).deviceName, rawPassphrase)
+        updateState { it.copy(pairingAttempt = PairingAttemptState(id = start.pairingId)) }
         signaling?.kickHeartbeat()
         // safeSchedule, not schedule: this fires up to PAKE_LIVE_WINDOW_MS
         // (120s) later — long enough that a rename or any other
@@ -630,9 +617,9 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         // schedule() call (see ExecutorExt.kt's doc).
         callExecutor?.safeSchedule(PAKE_LIVE_WINDOW_MS, TimeUnit.MILLISECONDS) {
             // handleTimeout's own generation check (see CallCoreBridge's
-            // doc) is what makes this a no-op for a fresh retry or an
-            // already-resolved match.
-            applyEffects(CallCoreBridge.handleTimeout(pairing.id, start.generation))
+            // doc) is what makes this a no-op for an attempt that has
+            // already ended or matched.
+            applyEffects(CallCoreBridge.handleTimeout(start.pairingId, start.generation))
         }
     }
 
@@ -645,20 +632,15 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     private fun applyEffects(effects: List<CallCoreBridge.Effect>) {
         for (effect in effects) {
             when (effect) {
-                is CallCoreBridge.Effect.SendBootstrap -> {
-                    val pairing = pairings[effect.pairingId] ?: continue
-                    signaling?.sendPairingBootstrap(pairing.ownPrivateKeyHex, effect.rendezvousTag, effect.targetPubkey) {
+                is CallCoreBridge.Effect.SendBootstrap ->
+                    signaling?.sendPairingBootstrap(effect.ownPrivateKeyHex, effect.rendezvousTag, effect.targetPubkey) {
                         effect.payload.keys().forEach { key -> put(key, effect.payload.get(key)) }
                     }
-                }
                 CallCoreBridge.Effect.KickHeartbeat -> signaling?.kickHeartbeat()
-                is CallCoreBridge.Effect.SetCollision ->
-                    updateContact(effect.pairingId) { it.copy(pairingCandidates = emptyList(), pairingCollision = true) }
-                is CallCoreBridge.Effect.SetTimedOut ->
-                    updateContact(effect.pairingId) { it.copy(pairingTimedOut = true) }
-                is CallCoreBridge.Effect.SetConfirmedCandidate -> {
-                    updateContact(effect.pairingId) { it.copy(pairingCandidates = listOf(CandidatePeer(effect.pubkeyHex, effect.name))) }
-                }
+                is CallCoreBridge.Effect.SetCollision -> updateAttempt(effect.pairingId) { it.copy(candidate = null, collision = true) }
+                is CallCoreBridge.Effect.SetTimedOut -> updateAttempt(effect.pairingId) { it.copy(timedOut = true) }
+                is CallCoreBridge.Effect.SetConfirmedCandidate ->
+                    updateAttempt(effect.pairingId) { it.copy(candidate = CandidatePeer(effect.pubkeyHex, effect.name)) }
             }
         }
     }
@@ -741,7 +723,6 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
      */
     fun removePairing(pairingId: String) = callExecutor?.execute {
         pairings.remove(pairingId)
-        CallCoreBridge.cancelAttempt(pairingId)
         // See CallCoreBridge.forgetPairing's own doc: clears a deferred
         // call's wants_call entry and, if this pairing owned the active
         // call slot, its ClosePeerConnection effect below tears down the
@@ -795,7 +776,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                     // when nothing was active.
                     CallCoreBridge.hangUp()
                     signaling?.close(); signaling = null
-                    pairings.keys.toList().forEach(CallCoreBridge::cancelAttempt)
+                    CallCoreBridge.pendingAttemptIds().forEach(CallCoreBridge::cancelAttempt)
                     if (clearPairings) pairings.clear()
                     engine?.stop(); engine = null
                 }.get(2, TimeUnit.SECONDS)
@@ -821,7 +802,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     private fun startAgent() {
         if (engine != null) return
         val config = Config.load(this)
-        if (!config.isValid) {
+        if (!config.isValid && pendingFirstAttempt == null) {
             Log.w(TAG, "config invalid; not starting")
             stopSelf()
             return
@@ -840,9 +821,10 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         // See startPairing()/pendingFirstAttempt's doc — the very first
         // pairing ever on a fresh device can be requested before this
         // service (and thus callExecutor) exists at all.
-        pendingFirstAttempt?.let { (id, passphrase) ->
+        pendingFirstAttempt?.let { passphrase ->
             pendingFirstAttempt = null
-            config.pairings.find { it.id == id }?.let { pairing -> executor.execute { beginPakeAttempt(pairing, passphrase) } }
+            updateState { it.copy(pairingAttempt = PairingAttemptState()) }
+            executor.execute { beginPakeAttempt(passphrase) }
         }
 
         _state.value = _state.value.copy(running = true, statusText = getString(R.string.notifications_connectingStatus))
@@ -877,7 +859,6 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         val fresh = ContactState(
             id = pairing.id,
             name = pairing.peerName,
-            isPaired = pairing.isConfirmed,
             autoAnswer = pairing.autoAnswer,
             status = status,
         )
@@ -978,6 +959,10 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         if (next.running) updateNotification(next.statusText)
     }
 
+    private fun updateAttempt(pairingId: String, transform: (PairingAttemptState) -> PairingAttemptState) {
+        updateState { state -> state.copy(pairingAttempt = state.pairingAttempt?.takeIf { it.id == pairingId }?.let(transform) ?: state.pairingAttempt) }
+    }
+
     private fun updateContact(pairingId: String, transform: (ContactState) -> ContactState) {
         updateState { state -> state.copy(contacts = state.contacts.map { if (it.id == pairingId) transform(it) else it }) }
     }
@@ -987,22 +972,19 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     private inner class PairingResolverImpl : NostrSignalingClient.PairingResolver {
         override fun confirmedPeers(): List<NostrSignalingClient.ConfirmedPeer> =
             Config.load(this@CameraAgentService).pairings
-                .filter { it.isConfirmed }
                 .map { NostrSignalingClient.ConfirmedPeer(it.id, it.ownPrivateKeyHex, it.peerPublicKey, it.lastSignalCreatedAt, it.lastSignalEventId, it.autoAnswer) }
 
         override fun pendingPairings(): List<NostrSignalingClient.PendingPairing> =
-            Config.load(this@CameraAgentService).pairings
-                .filterNot { it.isConfirmed }
-                .map { pairing ->
-                    val snapshot = CallCoreBridge.pendingSnapshot(pairing.id)
-                    NostrSignalingClient.PendingPairing(
-                        pairingId = pairing.id,
-                        ownPrivateKeyHex = pairing.ownPrivateKeyHex,
-                        rendezvousTag = snapshot?.rendezvousTag,
-                        bootstrapPayloads = snapshot?.payloads ?: emptyList(),
-                        bootstrapTarget = snapshot?.candidatePubkey,
-                    )
-                }
+            CallCoreBridge.pendingAttemptIds().mapNotNull { id ->
+                val snapshot = CallCoreBridge.pendingSnapshot(id) ?: return@mapNotNull null
+                NostrSignalingClient.PendingPairing(
+                    pairingId = id,
+                    ownPrivateKeyHex = snapshot.ownPrivateKeyHex,
+                    rendezvousTag = snapshot.rendezvousTag,
+                    bootstrapPayloads = snapshot.payloads,
+                    bootstrapTarget = snapshot.candidatePubkey,
+                )
+            }
 
         override fun deviceName(): String = Config.load(this@CameraAgentService).deviceName
     }
@@ -1272,7 +1254,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
          * is still null; whichever [CameraAgentService] instance
          * [startAgent] next brings up consumes it.
          */
-        private var pendingFirstAttempt: Pair<String, String>? = null
+        private var pendingFirstAttempt: String? = null
 
         // "At least 120 seconds" — long enough for two people to type a few
         // words over a call on a TV remote/on-screen keyboard without
@@ -1312,9 +1294,8 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
          * [passphrase] in [pendingFirstAttempt] for whichever instance
          * [startAgent] next brings up to actually begin the attempt with.
          */
-        fun startFirstPairing(context: Context, pairing: Pairing, passphrase: String) {
-            Config.addOrUpdatePairing(context, pairing)
-            pendingFirstAttempt = pairing.id to passphrase
+        fun startFirstPairing(context: Context, passphrase: String) {
+            pendingFirstAttempt = passphrase
             start(context)
         }
     }

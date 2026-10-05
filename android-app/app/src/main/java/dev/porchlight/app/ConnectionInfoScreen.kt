@@ -91,7 +91,7 @@ internal fun ConnectionInfoScreen(
             }
 
             InfoRow(stringResource(R.string.connectionInfo_lastHeartbeat), agoText(CallCoreBridge.ago(snapshot?.lastHeartbeatSentAtMs, now)))
-            val peers = state.contacts.filter { it.isPaired }
+            val peers = state.contacts
             InfoRow(
                 stringResource(R.string.connectionInfo_contactsOnline),
                 stringResource(R.string.connectionInfo_contactsOnlineValue, peers.count { it.status != CallCoreBridge.PresenceStatus.OFFLINE }, peers.size),

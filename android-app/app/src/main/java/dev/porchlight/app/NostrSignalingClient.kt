@@ -451,10 +451,7 @@ class NostrSignalingClient(
      * regained connectivity, a peer coming online — asks for exactly one via
      * [kickHeartbeat] and a `hello`, instead of raising the rate.
      */
-    private fun currentHeartbeatIntervalMs(): Long {
-        val pendingIds = resolver.pendingPairings().map { it.pairingId }
-        return CallCoreBridge.currentHeartbeatIntervalMs(pendingIds).toLong()
-    }
+    private fun currentHeartbeatIntervalMs(): Long = CallCoreBridge.currentHeartbeatIntervalMs().toLong()
 
     private fun scheduleHeartbeat(delayMs: Long) {
         if (closed) return

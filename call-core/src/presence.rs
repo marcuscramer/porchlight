@@ -380,19 +380,19 @@ pub fn is_online(pairing_id: &str) -> bool {
 }
 
 /// The delay before the next heartbeat tick: `PAIRING_REPUBLISH_INTERVAL_MS`
-/// while any of `pending_pairing_ids` has a live pairing attempt (its
-/// bootstrap messages are republished on the same tick), otherwise the
-/// steady `HEARTBEAT_INTERVAL_MS`. Everything else that wants a prompt
-/// heartbeat asks for exactly one — a `hello` (see [`mark_seen`]) or an
-/// explicit kick — instead of raising the rate: a deferred call used to
-/// speed everything up to 3s even though our own heartbeats do nothing to
-/// make the peer answer sooner.
-pub fn current_heartbeat_interval_ms(pending_pairing_ids: &[String]) -> u32 {
+/// while a pairing attempt is live (its bootstrap messages are republished on
+/// the same tick), otherwise the steady `HEARTBEAT_INTERVAL_MS`. Everything
+/// else that wants a prompt heartbeat asks for exactly one — a `hello` (see
+/// [`mark_seen`]) or an explicit kick — instead of raising the rate: a
+/// deferred call used to speed everything up to 3s even though our own
+/// heartbeats do nothing to make the peer answer sooner.
+pub fn current_heartbeat_interval_ms() -> u32 {
     let state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
-    if pending_pairing_ids.iter().any(|id| state.pairing_registry.contains_key(id)) {
-        return PAIRING_REPUBLISH_INTERVAL_MS;
-    }
-    HEARTBEAT_INTERVAL_MS
+    heartbeat_interval_ms(!state.pairing_registry.is_empty())
+}
+
+fn heartbeat_interval_ms(pairing_attempt_live: bool) -> u32 {
+    if pairing_attempt_live { PAIRING_REPUBLISH_INTERVAL_MS } else { HEARTBEAT_INTERVAL_MS }
 }
 
 /// Clears `last_seen_at`/`status`/`last_hello_reply_at` for a deleted
@@ -556,29 +556,18 @@ mod tests {
     // --- current_heartbeat_interval_ms ---
 
     #[test]
-    fn current_heartbeat_interval_ms_is_steady_with_nothing_pending() {
-        let _guard = reset_state_for_test();
-        assert_eq!(current_heartbeat_interval_ms(&[]), HEARTBEAT_INTERVAL_MS);
+    fn the_heartbeat_is_steady_unless_a_pairing_attempt_is_live() {
+        assert_eq!(heartbeat_interval_ms(false), HEARTBEAT_INTERVAL_MS);
+        assert_eq!(heartbeat_interval_ms(true), PAIRING_REPUBLISH_INTERVAL_MS);
     }
 
     #[test]
-    fn a_deferred_call_does_not_speed_the_heartbeat_up() {
-        let _guard = reset_state_for_test();
-        let id = fresh_id();
-        crate::call_arbitration::request_call(&id, "aaa", "bbb", false, 0);
-        assert_eq!(current_heartbeat_interval_ms(&[]), HEARTBEAT_INTERVAL_MS);
-    }
-
-    #[test]
-    fn a_live_pairing_attempt_uses_the_pairing_cadence_a_dead_one_does_not() {
+    fn a_live_pairing_attempt_uses_the_pairing_cadence() {
         let _guard = reset_state_for_test();
         let live = fresh_id();
-        let dead = fresh_id();
-        crate::start_attempt(&live, "pubkey-a", "A", "cadence test");
-        assert_eq!(current_heartbeat_interval_ms(std::slice::from_ref(&live)), PAIRING_REPUBLISH_INTERVAL_MS);
-        assert_eq!(current_heartbeat_interval_ms(std::slice::from_ref(&dead)), HEARTBEAT_INTERVAL_MS, "a pending pairing with no live attempt has nothing to republish");
+        crate::start_attempt_with(&live, "test-private-key", "pubkey-a", "A", "cadence test");
+        assert_eq!(current_heartbeat_interval_ms(), PAIRING_REPUBLISH_INTERVAL_MS);
         crate::cancel_attempt(&live);
-        assert_eq!(current_heartbeat_interval_ms(std::slice::from_ref(&live)), HEARTBEAT_INTERVAL_MS);
     }
 
     // --- remove_pairing ---

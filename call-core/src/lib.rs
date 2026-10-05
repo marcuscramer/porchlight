@@ -148,6 +148,9 @@ pub fn protocol_constants() -> ProtocolConstants {
 /// counter plays the same role explicitly.
 struct PakeAttempt {
     generation: u64,
+    /// This attempt's own one-time identity. It becomes the contact's permanent key if the attempt is confirmed
+    /// ([`confirm_attempt`]); until then it lives only here, in memory.
+    own_private_key_hex: String,
     own_pubkey_hex: String,
     own_name: String,
     #[allow(dead_code)] // kept for symmetry/future use (e.g. re-publish diagnostics); not read yet
@@ -165,6 +168,9 @@ struct PakeAttempt {
     /// before this side had processed their `pake1`.
     stashed_remote_confirm: Option<(String, String)>,
     resolved: bool,
+    /// Set together with `resolved`: the peer's public key and sanitized name that the SPAKE2 exchange confirmed,
+    /// waiting for the human "Pair with \[name\]?" tap.
+    confirmed: Option<(String, String)>,
 }
 
 /// Every piece of mutable state this crate holds, behind one shared lock —
@@ -230,22 +236,41 @@ fn next_generation() -> u64 {
 /// live window elapses.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct StartResult {
+    pub pairing_id: String,
     pub rendezvous_tag: String,
     pub outbound_hex: String,
     pub generation: u64,
 }
 
-/// Starts a new pairing attempt for `pairing_id`, replacing any existing
-/// one under the same id (a fresh retry after a timeout/collision). Trim/
-/// NFC-normalization and the rendezvous-tag derivation happen inside
-/// `pake_bridge::PakeSession::start` — this function does no passphrase
-/// handling of its own beyond forwarding it.
-pub fn start_attempt(pairing_id: &str, own_pubkey_hex: &str, own_name: &str, raw_passphrase: &str) -> StartResult {
+/// Starts a new pairing attempt with a freshly minted id and keypair. Nothing about the attempt is persisted by
+/// the shells: it lives in this registry until [`confirm_attempt`] hands back the finished contact (or it times
+/// out, collides or is cancelled), so an app or tab that dies mid-attempt leaves nothing behind. Trim/NFC-
+/// normalization and the rendezvous-tag derivation happen inside `pake_bridge::PakeSession::start` — this
+/// function does no passphrase handling of its own beyond forwarding it.
+pub fn start_attempt(own_name: &str, raw_passphrase: &str) -> StartResult {
+    let keys = nostr_protocol::generate_keys();
+    start_attempt_with(&new_pairing_id(), &keys.secret_key().to_secret_hex(), &keys.public_key().to_hex(), own_name, raw_passphrase)
+}
+
+/// A random version-4 UUID, the same shape the shells used to mint for a new pairing.
+fn new_pairing_id() -> String {
+    let mut b = [0u8; 16];
+    getrandom::getrandom(&mut b).expect("OS RNG must be available");
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let h = hex_encode(&b);
+    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
+}
+
+/// [`start_attempt`] with the identity supplied, replacing any existing attempt under the same id. The tests use
+/// it to give two simulated devices known ids and keys.
+pub(crate) fn start_attempt_with(pairing_id: &str, own_private_key_hex: &str, own_pubkey_hex: &str, own_name: &str, raw_passphrase: &str) -> StartResult {
     let (session, rendezvous_tag, outbound) = PakeSession::start(raw_passphrase);
     let outbound_hex = hex_encode(&outbound);
     let generation = next_generation();
     let attempt = PakeAttempt {
         generation,
+        own_private_key_hex: own_private_key_hex.to_string(),
         own_pubkey_hex: own_pubkey_hex.to_string(),
         own_name: sanitize_name(own_name),
         rendezvous_tag: rendezvous_tag.clone(),
@@ -256,12 +281,44 @@ pub fn start_attempt(pairing_id: &str, own_pubkey_hex: &str, own_name: &str, raw
         local_sealed_name: None,
         stashed_remote_confirm: None,
         resolved: false,
+        confirmed: None,
     };
     let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(old) = app.pairing_registry.insert(pairing_id.to_string(), attempt) {
         retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
     }
-    StartResult { rendezvous_tag, outbound_hex, generation }
+    StartResult { pairing_id: pairing_id.to_string(), rendezvous_tag, outbound_hex, generation }
+}
+
+/// The finished contact, handed to the shell to persist when a person confirms a candidate.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct ConfirmedPairing {
+    pub pairing_id: String,
+    pub own_private_key_hex: String,
+    pub peer_public_key: String,
+    pub peer_name: String,
+}
+
+/// The person tapped "Pair with \[name\]?" for `candidate_pubkey`. Succeeds only for the candidate the exchange
+/// actually confirmed; ends the attempt and returns the contact to save. `None` if there is no such attempt or
+/// candidate (cancelled, timed out or collided in the meantime).
+pub fn confirm_attempt(pairing_id: &str, candidate_pubkey: &str) -> Option<ConfirmedPairing> {
+    let mut app = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let attempt = app.pairing_registry.get(pairing_id)?;
+    let (pubkey, name) = attempt.confirmed.clone()?;
+    if pubkey != candidate_pubkey {
+        return None;
+    }
+    let attempt = app.pairing_registry.remove(pairing_id)?;
+    Some(ConfirmedPairing { pairing_id: pairing_id.to_string(), own_private_key_hex: attempt.own_private_key_hex, peer_public_key: pubkey, peer_name: name })
+}
+
+/// Ids of the attempts that are live right now: what the shells subscribe and publish for.
+pub fn pending_attempt_ids() -> Vec<String> {
+    let app = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let mut ids: Vec<String> = app.pairing_registry.keys().cloned().collect();
+    ids.sort();
+    ids
 }
 
 /// Abandons an attempt outright (user cancel, contact deleted) without
@@ -319,6 +376,7 @@ pub fn build_bootstrap_payload(pairing_id: &str) -> Option<String> {
         payloads.push(BootstrapPayload::PakeConfirm { confirmation: keys.confirmation_hex().to_string(), sealed_name: sealed_name.clone() });
     }
     let snapshot = PendingSnapshot {
+        own_private_key_hex: attempt.own_private_key_hex.clone(),
         rendezvous_tag: attempt.rendezvous_tag.clone(),
         payloads,
         candidate_pubkey: attempt.candidate_pubkey.clone(),
@@ -336,6 +394,8 @@ pub fn build_bootstrap_payload(pairing_id: &str) -> Option<String> {
 /// rendezvous point.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct PendingSnapshot {
+    /// The attempt's own key, which signs what is published for it.
+    pub own_private_key_hex: String,
     pub rendezvous_tag: String,
     pub payloads: Vec<BootstrapPayload>,
     pub candidate_pubkey: Option<String>,
@@ -439,6 +499,7 @@ fn handle_pake1(registry: &mut HashMap<String, PakeAttempt>, pairing_id: &str, s
             attempt.local_sealed_name = Some(sealed_name.clone());
             effects.push(Effect::SendBootstrap {
                 pairing_id: pairing_id.to_string(),
+                own_private_key_hex: attempt.own_private_key_hex.clone(),
                 rendezvous_tag,
                 target_pubkey: sender_pubkey.to_string(),
                 payload: BootstrapPayload::PakeConfirm { confirmation, sealed_name },
@@ -519,11 +580,9 @@ fn verify_confirmation_and_resolve(
     };
     let attempt = registry.get_mut(pairing_id).expect("still present, just checked");
     attempt.resolved = true;
-    vec![Effect::SetConfirmedCandidate {
-        pairing_id: pairing_id.to_string(),
-        pubkey_hex: sender_pubkey.to_string(),
-        name: sanitize_name(truncate_chars(&name, MAX_NAME_LENGTH)),
-    }]
+    let name = sanitize_name(truncate_chars(&name, MAX_NAME_LENGTH));
+    attempt.confirmed = Some((sender_pubkey.to_string(), name.clone()));
+    vec![Effect::SetConfirmedCandidate { pairing_id: pairing_id.to_string(), pubkey_hex: sender_pubkey.to_string(), name }]
 }
 
 /// The live-window timeout fired for `pairing_id` — a no-op unless the
@@ -559,7 +618,7 @@ pub fn handle_timeout(pairing_id: &str, generation: u64) -> Vec<Effect> {
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(tag = "kind")]
 pub enum Effect {
-    SendBootstrap { pairing_id: String, rendezvous_tag: String, target_pubkey: String, payload: BootstrapPayload },
+    SendBootstrap { pairing_id: String, own_private_key_hex: String, rendezvous_tag: String, target_pubkey: String, payload: BootstrapPayload },
     KickHeartbeat,
     SetCollision { pairing_id: String },
     SetTimedOut { pairing_id: String },
@@ -648,8 +707,8 @@ mod tests {
     fn run_to_resolved_match(passphrase: &str) -> (String, String) {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let a = start_attempt(&id_a, "pubkey-a", "Alice", passphrase);
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", passphrase);
+        let a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", passphrase);
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", passphrase);
 
         // B's pake1 arrives at A.
         let effects_a = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
@@ -686,7 +745,7 @@ mod tests {
     #[test]
     fn echoing_a_devices_own_messages_back_never_reaches_a_confirmed_candidate() {
         let id_a = fresh_pairing_id();
-        let a = start_attempt(&id_a, "pubkey-a", "Alice", "correct horse battery staple");
+        let a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "correct horse battery staple");
 
         let effects = handle_bootstrap_message(&id_a, "pubkey-attacker", "pake1", &pake1_json(&a.outbound_hex));
         let mut all = effects.iter().collect::<Vec<_>>();
@@ -720,12 +779,12 @@ mod tests {
         // with the same phrase the old attempt's `pake1` comes back looking like another device.
         RETIRE_IN_TESTS.with(|f| f.set(true));
         let old_key = "ghost-key-cancelled-attempt";
-        let first = start_attempt(&fresh_pairing_id(), old_key, "Me", "ghost phrase one");
+        let first = start_attempt_with(&fresh_pairing_id(), "test-private-key", old_key, "Me", "ghost phrase one");
         let old_id = fresh_pairing_id();
-        let _ = start_attempt(&old_id, old_key, "Me", "ghost phrase one");
+        let _ = start_attempt_with(&old_id, "test-private-key", old_key, "Me", "ghost phrase one");
         cancel_attempt(&old_id);
         let retry_id = fresh_pairing_id();
-        let _ = start_attempt(&retry_id, "ghost-key-retry", "Me", "ghost phrase one");
+        let _ = start_attempt_with(&retry_id, "test-private-key", "ghost-key-retry", "Me", "ghost phrase one");
         let effects = handle_bootstrap_message(&retry_id, old_key, "pake1", &pake1_json(&first.outbound_hex));
         assert!(effects.is_empty(), "{effects:?}");
         assert!(candidate_of(&retry_id).is_none(), "a ghost must not count as a device found");
@@ -738,14 +797,14 @@ mod tests {
     fn a_replaced_or_timed_out_attempts_message_is_ignored_too() {
         RETIRE_IN_TESTS.with(|f| f.set(true));
         let id = fresh_pairing_id();
-        let a = start_attempt(&id, "ghost-replaced", "Me", "ghost phrase two");
+        let a = start_attempt_with(&id, "test-private-key", "ghost-replaced", "Me", "ghost phrase two");
         // The same pairing id started again (a retry after a collision/timeout) replaces the old attempt.
-        let b = start_attempt(&id, "ghost-replacement", "Me", "ghost phrase two");
+        let b = start_attempt_with(&id, "test-private-key", "ghost-replacement", "Me", "ghost phrase two");
         assert!(handle_bootstrap_message(&id, "ghost-replaced", "pake1", &pake1_json(&a.outbound_hex)).is_empty());
         let timed_out = handle_timeout(&id, b.generation);
         assert!(matches!(timed_out.as_slice(), [Effect::SetTimedOut { .. }, Effect::KickHeartbeat]));
         let next = fresh_pairing_id();
-        let _ = start_attempt(&next, "ghost-next", "Me", "ghost phrase two");
+        let _ = start_attempt_with(&next, "test-private-key", "ghost-next", "Me", "ghost phrase two");
         assert!(handle_bootstrap_message(&next, "ghost-replacement", "pake1", &pake1_json(&b.outbound_hex)).is_empty());
     }
 
@@ -755,9 +814,59 @@ mod tests {
     }
 
     #[test]
+    fn a_new_attempt_mints_its_own_id_and_matching_keypair() {
+        let a = start_attempt("Alice", "mint test phrase");
+        let b = start_attempt("Bob", "mint test phrase");
+        assert_ne!(a.pairing_id, b.pairing_id);
+        assert_eq!(a.pairing_id.len(), 36);
+        let snapshot: serde_json::Value = serde_json::from_str(&build_bootstrap_payload(&a.pairing_id).unwrap()).unwrap();
+        let private_key = snapshot["own_private_key_hex"].as_str().unwrap();
+        assert_eq!(private_key.len(), 64);
+        assert_ne!(private_key, serde_json::from_str::<serde_json::Value>(&build_bootstrap_payload(&b.pairing_id).unwrap()).unwrap()["own_private_key_hex"].as_str().unwrap());
+        assert!(pending_attempt_ids().contains(&a.pairing_id));
+        cancel_attempt(&a.pairing_id);
+        assert!(!pending_attempt_ids().contains(&a.pairing_id));
+        cancel_attempt(&b.pairing_id);
+    }
+
+    #[test]
+    fn confirming_the_matched_candidate_hands_back_the_contact_and_ends_the_attempt() {
+        let (id_a, id_b) = run_to_resolved_match("confirm flow phrase");
+        let snapshot: serde_json::Value = serde_json::from_str(&build_bootstrap_payload(&id_a).unwrap()).unwrap();
+        let confirmed = confirm_attempt(&id_a, "pubkey-b").expect("the matched candidate confirms");
+        assert_eq!(confirmed.pairing_id, id_a);
+        assert_eq!(confirmed.peer_public_key, "pubkey-b");
+        assert_eq!(confirmed.peer_name, "Bob");
+        assert_eq!(confirmed.own_private_key_hex, snapshot["own_private_key_hex"].as_str().unwrap());
+        assert!(build_bootstrap_payload(&id_a).is_none(), "a confirmed attempt is no longer live");
+        assert!(confirm_attempt(&id_a, "pubkey-b").is_none(), "and cannot be confirmed twice");
+        cancel_attempt(&id_b);
+    }
+
+    #[test]
+    fn only_the_confirmed_candidate_can_be_confirmed() {
+        let (id_a, id_b) = run_to_resolved_match("wrong candidate phrase");
+        assert!(confirm_attempt(&id_a, "someone-else").is_none());
+        assert!(build_bootstrap_payload(&id_a).is_some(), "a refused confirmation leaves the attempt alone");
+        cancel_attempt(&id_a);
+        cancel_attempt(&id_b);
+    }
+
+    #[test]
+    fn nothing_can_be_confirmed_before_the_exchange_matched_or_after_the_attempt_ended() {
+        let id = fresh_pairing_id();
+        let start = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "early confirm phrase");
+        let peer = start_attempt_with(&fresh_pairing_id(), "test-private-key", "pubkey-b", "Bob", "early confirm phrase");
+        let _ = handle_bootstrap_message(&id, "pubkey-b", "pake1", &pake1_json(&peer.outbound_hex));
+        assert!(confirm_attempt(&id, "pubkey-b").is_none(), "a candidate that has only sent pake1 is not confirmed yet");
+        let _ = handle_timeout(&id, start.generation);
+        assert!(confirm_attempt(&id, "pubkey-b").is_none(), "a timed-out attempt is gone");
+    }
+
+    #[test]
     fn self_echo_is_dropped() {
         let id = fresh_pairing_id();
-        let start = start_attempt(&id, "my-own-pubkey", "Me", "some phrase");
+        let start = start_attempt_with(&id, "test-private-key", "my-own-pubkey", "Me", "some phrase");
         let effects = handle_bootstrap_message(&id, "my-own-pubkey", "pake1", &pake1_json(&start.outbound_hex));
         assert!(effects.is_empty(), "the relay's echo of our own publish must be dropped silently: {effects:?}");
     }
@@ -772,8 +881,8 @@ mod tests {
     #[test]
     fn second_distinct_sender_collides_even_before_any_match() {
         let id = fresh_pairing_id();
-        let _start = start_attempt(&id, "pubkey-a", "Alice", "shared phrase");
-        let peer = start_attempt(&fresh_pairing_id(), "candidate-1", "Bob", "shared phrase");
+        let _start = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "shared phrase");
+        let peer = start_attempt_with(&fresh_pairing_id(), "test-private-key", "candidate-1", "Bob", "shared phrase");
         let _ = handle_bootstrap_message(&id, "candidate-1", "pake1", &pake1_json(&peer.outbound_hex));
         let effects = handle_bootstrap_message(&id, "candidate-2", "pake1", &pake1_json(&peer.outbound_hex));
         assert!(
@@ -804,8 +913,8 @@ mod tests {
     fn redelivered_pake1_after_finish_is_a_no_op() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let _a = start_attempt(&id_a, "pubkey-a", "Alice", "redelivery test");
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", "redelivery test");
+        let _a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "redelivery test");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "redelivery test");
         let first = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
         assert!(!first.is_empty(), "first pake1 should produce a SendBootstrap effect");
         // Redelivery of the exact same pake1 (public relays redeliver
@@ -823,8 +932,8 @@ mod tests {
         // finished processing *their* pake1.
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let a = start_attempt(&id_a, "pubkey-a", "Alice", "stash race test");
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", "stash race test");
+        let a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "stash race test");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "stash race test");
 
         // B processes A's pake1 first and sends its confirm.
         let effects_b = handle_bootstrap_message(&id_b, "pubkey-a", "pake1", &pake1_json(&a.outbound_hex));
@@ -850,8 +959,8 @@ mod tests {
     fn mismatched_confirmation_times_out_not_panics() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let _a = start_attempt(&id_a, "pubkey-a", "Alice", "phrase one");
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", "phrase two"); // different passphrase
+        let _a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "phrase one");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "phrase two"); // different passphrase
         let effects_a = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
         let bogus_confirm = expect_send_confirm(&effects_a); // A's own (mismatched) confirm, reused as "their" confirm on purpose
         let bogus = SentConfirm { confirmation: bogus_confirm.confirmation.chars().rev().collect(), sealed_name: bogus_confirm.sealed_name.clone() };
@@ -875,7 +984,7 @@ mod tests {
     #[test]
     fn timeout_fires_for_the_matching_generation_when_unresolved() {
         let id = fresh_pairing_id();
-        let start = start_attempt(&id, "pubkey-a", "Alice", "timeout test");
+        let start = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "timeout test");
         let effects = handle_timeout(&id, start.generation);
         assert!(
             matches!(effects.as_slice(), [Effect::SetTimedOut { .. }, Effect::KickHeartbeat]),
@@ -886,11 +995,11 @@ mod tests {
     #[test]
     fn timeout_is_a_no_op_for_a_stale_generation_after_a_fresh_retry() {
         let id = fresh_pairing_id();
-        let first = start_attempt(&id, "pubkey-a", "Alice", "first try");
+        let first = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "first try");
         // Human retries with a fresh phrase before the first attempt's
         // timeout ever fires — a new attempt replaces the old one under
         // the same pairing_id.
-        let _second = start_attempt(&id, "pubkey-a", "Alice", "second try");
+        let _second = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "second try");
         let stale_timeout = handle_timeout(&id, first.generation);
         assert!(stale_timeout.is_empty(), "a stale timeout from a superseded attempt must not touch the new one: {stale_timeout:?}");
     }
@@ -898,7 +1007,7 @@ mod tests {
     #[test]
     fn cancel_attempt_removes_it_and_later_messages_are_no_ops() {
         let id = fresh_pairing_id();
-        let start = start_attempt(&id, "pubkey-a", "Alice", "cancel test");
+        let start = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "cancel test");
         cancel_attempt(&id);
         let effects = handle_bootstrap_message(&id, "someone", "pake1", &pake1_json(&start.outbound_hex));
         assert!(effects.is_empty());
@@ -910,7 +1019,7 @@ mod tests {
     #[test]
     fn candidate_name_is_sanitized_and_length_capped() {
         let id_a = fresh_pairing_id();
-        let a = start_attempt(&id_a, "pubkey-a", "Alice", "sanitize test");
+        let a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "sanitize test");
         let (peer, _tag, peer_out) = PakeSession::start("sanitize test");
         let effects_a = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&hex_encode(&peer_out)));
         let _ = expect_send_confirm(&effects_a);
@@ -934,8 +1043,8 @@ mod tests {
     fn the_peers_name_is_what_the_confirmed_candidate_carries() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let a = start_attempt(&id_a, "pubkey-a", "Alice", "name carry test");
-        let b = start_attempt(&id_b, "pubkey-b", "Bob's TV", "name carry test");
+        let a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "name carry test");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob's TV", "name carry test");
         let effects_a = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
         let _ = expect_send_confirm(&effects_a);
         let effects_b = handle_bootstrap_message(&id_b, "pubkey-a", "pake1", &pake1_json(&a.outbound_hex));
@@ -948,8 +1057,8 @@ mod tests {
     fn pairing_messages_carry_no_device_name_in_the_clear() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let _a = start_attempt(&id_a, "pubkey-a", "Secret Name 123", "no clear name");
-        let b = start_attempt(&id_b, "pubkey-b", "Other Name 456", "no clear name");
+        let _a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Secret Name 123", "no clear name");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Other Name 456", "no clear name");
 
         let pake1 = build_bootstrap_payload(&id_a).unwrap();
         assert!(!pake1.contains("Secret Name 123"), "pake1 must not carry the name: {pake1}");
@@ -966,8 +1075,8 @@ mod tests {
     fn a_republished_pake_confirm_is_byte_identical() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let _a = start_attempt(&id_a, "pubkey-a", "Alice", "stable republish");
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", "stable republish");
+        let _a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "stable republish");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "stable republish");
         let _ = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
         assert_eq!(build_bootstrap_payload(&id_a), build_bootstrap_payload(&id_a));
     }
@@ -976,8 +1085,8 @@ mod tests {
     fn a_pake_confirm_without_a_sealed_name_is_ignored() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let a = start_attempt(&id_a, "pubkey-a", "Alice", "no sealed name");
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", "no sealed name");
+        let a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "no sealed name");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "no sealed name");
         let _ = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
         let effects_b = handle_bootstrap_message(&id_b, "pubkey-a", "pake1", &pake1_json(&a.outbound_hex));
         let b_confirm = expect_send_confirm(&effects_b);
@@ -994,8 +1103,8 @@ mod tests {
     fn a_sealed_name_that_will_not_open_fails_the_attempt_even_with_a_valid_confirmation() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let a = start_attempt(&id_a, "pubkey-a", "Alice", "bad sealed name");
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", "bad sealed name");
+        let a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "bad sealed name");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "bad sealed name");
         let _ = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
         let effects_b = handle_bootstrap_message(&id_b, "pubkey-a", "pake1", &pake1_json(&a.outbound_hex));
         let mut b_confirm = expect_send_confirm(&effects_b);
@@ -1013,8 +1122,8 @@ mod tests {
     fn build_bootstrap_payload_is_pake1_before_a_candidate_confirms_and_pake1_plus_pake_confirm_after() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let a = start_attempt(&id_a, "pubkey-a", "Alice", "payload shape test");
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", "payload shape test");
+        let a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "payload shape test");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "payload shape test");
 
         let before = build_bootstrap_payload(&id_a).unwrap();
         assert!(before.contains("\"type\":\"pake1\""), "{before}");
@@ -1030,9 +1139,9 @@ mod tests {
     fn a_late_joiner_resolves_from_what_the_waiting_side_republishes() {
         let id_a = fresh_pairing_id();
         let id_b = fresh_pairing_id();
-        let _a = start_attempt(&id_a, "pubkey-a", "Alice", "late joiner");
+        let _a = start_attempt_with(&id_a, "test-private-key", "pubkey-a", "Alice", "late joiner");
         // A has been waiting; B only now types the phrase and publishes its pake1.
-        let b = start_attempt(&id_b, "pubkey-b", "Bob", "late joiner");
+        let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "late joiner");
         let effects_a = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
         assert!(effects_a.contains(&Effect::KickHeartbeat), "A must answer immediately: {effects_a:?}");
         let a_confirm = expect_send_confirm(&effects_a);

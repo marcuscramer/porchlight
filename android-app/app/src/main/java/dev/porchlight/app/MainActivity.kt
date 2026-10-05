@@ -643,7 +643,7 @@ private sealed interface AdminScreen {
     data object ConnectionInfo : AdminScreen
     // "Add contact" only — there's no "Reconnect": a stale contact is just
     // Delete + Add contact again, so this carries no pairing id at all;
-    // startPairing always mints a brand-new one. Reached directly from a
+    // every attempt is brand new. Reached directly from a
     // trailing row in WaitingScreen's own contact list (both once this
     // device already has contacts, and pre-onboarding with zero — the
     // waiting screen renders either way, empty list and all). Per-contact
@@ -651,13 +651,12 @@ private sealed interface AdminScreen {
     // not behind a separate Contacts screen. Exactly one entry point means
     // Back always falls straight back to the waiting screen.
     data object EnteringPhrase : AdminScreen
-    // A phrase was submitted, minting [pairingId] — waiting on the SPAKE2
-    // exchange to resolve (candidate found, collision, or timeout). See
-    // PairingProgressScreen's doc. Always a brand-new, never-yet-confirmed
-    // contact now, so cancelling (or abandoning via a further retry) always
-    // means fully forgetting it (CameraAgentService.removePairing) rather
-    // than leaving a permanent "Unnamed contact" stub behind.
-    data class PairingInProgress(val pairingId: String) : AdminScreen
+    // A phrase was submitted — waiting on the SPAKE2 exchange to resolve
+    // (candidate found, collision, or timeout). See PairingProgressScreen's
+    // doc. The attempt exists only in memory (CameraAgentService's
+    // pairingAttempt, backed by call-core), so cancelling or abandoning it via
+    // a retry leaves nothing behind.
+    data object PairingInProgress : AdminScreen
 }
 
 @Composable
@@ -718,18 +717,11 @@ private fun AppRoot(
         if (showAdminChoice) config = Config.load(context)
     }
 
-    // Constructs a fresh Pairing directly when the service isn't running
-    // yet — the pre-onboarding case (this device just finished "Initial
-    // setup" but has zero contacts yet, so CameraAgentService hasn't
-    // started: it only starts once Config.isValid). See
-    // CameraAgentService.startFirstPairing's doc for why persisting it and
-    // stashing the passphrase has to happen here.
-    fun startPairing(passphrase: String): Pairing {
+    // See CameraAgentService.startPairing: the service hands the passphrase to
+    // itself when it isn't running yet (the first pairing ever on a fresh device).
+    fun startPairing(passphrase: String) {
         val svc = service
-        if (svc != null) return svc.startPairing(passphrase)
-        val fresh = Pairing(id = UUID.randomUUID().toString(), ownPrivateKeyHex = KeyPair().privKey!!.toHexKey())
-        CameraAgentService.startFirstPairing(context, fresh, passphrase)
-        return fresh
+        if (svc != null) svc.startPairing(passphrase) else CameraAgentService.startFirstPairing(context, passphrase)
     }
 
     // A call always comes first — ringing, connected, or just ended — over
@@ -794,9 +786,8 @@ private fun AppRoot(
         screen is AdminScreen.EnteringPhrase -> {
             EnterPhraseScreen(
                 onSubmit = { phrase ->
-                    val pairing = startPairing(phrase)
-                    config = Config.load(context)
-                    adminScreen = AdminScreen.PairingInProgress(pairing.id)
+                    startPairing(phrase)
+                    adminScreen = AdminScreen.PairingInProgress
                 },
                 // Falls straight back to the waiting screen (which is where
                 // this was always reached from — see AdminScreen.
@@ -806,20 +797,17 @@ private fun AppRoot(
         }
         screen is AdminScreen.PairingInProgress -> {
             PairingProgressScreen(
-                pairingId = screen.pairingId,
+                attempt = state.pairingAttempt,
                 service = service,
-                contacts = state.contacts,
-                onConfirm = { id, publicKeyHex -> service?.confirmPeer(id, publicKeyHex); adminScreen = null },
-                // The attempt so far (including its unconfirmed stub) is
-                // forgotten entirely, same as Cancel below — startPairing
-                // mints an unrelated fresh id, so there's nothing to reuse
-                // this one for.
+                onConfirm = { service?.confirmPeer(); adminScreen = null },
+                // The attempt so far is forgotten entirely, same as Cancel
+                // below — the next one is a new attempt with its own id and key.
                 onRetry = {
-                    service?.removePairing(screen.pairingId)
+                    service?.discardPairingAttempt()
                     adminScreen = AdminScreen.EnteringPhrase
                 },
                 onCancel = {
-                    service?.removePairing(screen.pairingId)
+                    service?.discardPairingAttempt()
                     adminScreen = null
                 },
             )

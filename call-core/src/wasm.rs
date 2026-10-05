@@ -77,12 +77,30 @@ universal_time::define_time_provider!(JsDateTimeProvider);
 /// signal); an exception here is easy for `app.js` to `.catch()` the same
 /// way it already handles this function's genuine `Err` path.
 #[wasm_bindgen(js_name = startAttempt)]
-pub fn start_attempt(pairing_id: &str, own_pubkey_hex: &str, own_name: &str, passphrase: &str) -> Result<String, JsValue> {
+pub fn start_attempt(own_name: &str, passphrase: &str) -> Result<String, JsValue> {
     catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let result = crate::start_attempt(pairing_id, own_pubkey_hex, own_name, passphrase);
+        let result = crate::start_attempt(own_name, passphrase);
         serde_json::to_string(&result).map_err(|e| JsValue::from_str(&e.to_string()))
     }))
     .unwrap_or_else(|_| Err(JsValue::from_str("call-core panicked in startAttempt")))
+}
+
+/// See [`crate::confirm_attempt`]'s own doc. Returns a JSON-encoded
+/// [`crate::ConfirmedPairing`], or `undefined` if there is nothing to confirm.
+#[wasm_bindgen(js_name = confirmAttempt)]
+pub fn confirm_attempt(pairing_id: &str, candidate_pubkey: &str) -> Option<String> {
+    catch_unwind(std::panic::AssertUnwindSafe(|| {
+        serde_json::to_string(&crate::confirm_attempt(pairing_id, candidate_pubkey)?).ok()
+    }))
+    .ok()
+    .flatten()
+}
+
+/// See [`crate::pending_attempt_ids`]'s own doc. Returns a JSON array of ids.
+#[wasm_bindgen(js_name = pendingAttemptIds)]
+pub fn pending_attempt_ids() -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::pending_attempt_ids()).unwrap_or_else(|_| "[]".to_string())))
+        .unwrap_or_else(|_| "[]".to_string())
 }
 
 /// See [`crate::cancel_attempt`]'s own doc. No return value — a panic here
@@ -291,16 +309,13 @@ pub fn is_online(pairing_id: &str) -> bool {
 }
 
 /// See [`crate::presence::current_heartbeat_interval_ms`]'s own doc.
-/// Returns `u32` directly (a plain JS `number`) — small enough this module doesn't need
-/// the `handleTimeout`-style `u32`-at-the-boundary workaround, it just is
-/// one already. Falls back to [`crate::presence::HEARTBEAT_INTERVAL_MS`]
-/// (the slow, steady-state cadence) on a panic, matching
-/// `nativeCurrentHeartbeatIntervalMs`'s own fail-closed choice — a
-/// performance detail, not a correctness one.
+/// Returns `u32` directly (a plain JS `number`). Falls back to
+/// [`crate::presence::HEARTBEAT_INTERVAL_MS`] (the slow, steady-state
+/// cadence) on a panic, matching `nativeCurrentHeartbeatIntervalMs`'s own
+/// fail-closed choice — a performance detail, not a correctness one.
 #[wasm_bindgen(js_name = currentHeartbeatIntervalMs)]
-pub fn current_heartbeat_interval_ms(pending_pairing_ids: Vec<String>) -> u32 {
-    catch_unwind(std::panic::AssertUnwindSafe(|| crate::presence::current_heartbeat_interval_ms(&pending_pairing_ids)))
-        .unwrap_or(crate::presence::HEARTBEAT_INTERVAL_MS)
+pub fn current_heartbeat_interval_ms() -> u32 {
+    catch_unwind(crate::presence::current_heartbeat_interval_ms).unwrap_or(crate::presence::HEARTBEAT_INTERVAL_MS)
 }
 
 /// See [`crate::presence::remove_pairing`]'s own doc. No return value — a
@@ -582,8 +597,8 @@ pub fn due_for_retry(now_ms: f64) -> String {
 /// See [`crate::call_arbitration::can_place_call`]'s own doc. `false` (no
 /// Call button) on a panic — the fail-closed choice.
 #[wasm_bindgen(js_name = canPlaceCall)]
-pub fn can_place_call(is_paired: bool, connected: bool) -> bool {
-    catch_unwind(|| crate::call_arbitration::can_place_call(is_paired, connected)).unwrap_or(false)
+pub fn can_place_call(connected: bool) -> bool {
+    catch_unwind(|| crate::call_arbitration::can_place_call(connected)).unwrap_or(false)
 }
 
 /// See [`crate::ice_evidence::reset`]'s own doc.

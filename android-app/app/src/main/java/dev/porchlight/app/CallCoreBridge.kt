@@ -33,7 +33,13 @@ object CallCoreBridge {
     }
 
     @JvmStatic
-    private external fun nativeStartAttempt(pairingId: String, ownPubkeyHex: String, ownName: String, passphrase: String): String?
+    private external fun nativeStartAttempt(ownName: String, passphrase: String): String?
+
+    @JvmStatic
+    private external fun nativeConfirmAttempt(pairingId: String, candidatePubkey: String): String?
+
+    @JvmStatic
+    private external fun nativePendingAttemptIds(): String
 
     @JvmStatic
     private external fun nativeCancelAttempt(pairingId: String)
@@ -107,7 +113,7 @@ object CallCoreBridge {
     private external fun nativeIsCallActive(): Boolean
 
     @JvmStatic
-    private external fun nativeCurrentHeartbeatIntervalMs(pendingPairingIdsJson: String): Int
+    private external fun nativeCurrentHeartbeatIntervalMs(): Int
 
     @JvmStatic
     private external fun nativePresenceRemovePairing(pairingId: String)
@@ -172,7 +178,7 @@ object CallCoreBridge {
     private external fun nativeWakeUpConstants(): String
 
     @JvmStatic
-    private external fun nativeCanPlaceCall(isPaired: Boolean, connected: Boolean): Boolean
+    private external fun nativeCanPlaceCall(connected: Boolean): Boolean
 
     @JvmStatic
     private external fun nativeIceReset()
@@ -237,18 +243,21 @@ object CallCoreBridge {
     /** What starting a new attempt hands back — see the Rust crate's own
      * `StartResult` doc. [generation] must be passed back verbatim to
      * [handleTimeout] when the live window elapses. */
-    data class StartResult(val rendezvousTag: String, val outboundHex: String, val generation: Long)
+    data class StartResult(val pairingId: String, val rendezvousTag: String, val outboundHex: String, val generation: Long)
+
+    /** The finished contact `call-core` hands back when a person confirms a pairing attempt's candidate. */
+    data class ConfirmedPairing(val pairingId: String, val ownPrivateKeyHex: String, val peerPublicKey: String, val peerName: String)
 
     /** Everything needed to (re)publish a heartbeat tick for one live
      * pending pairing, all at once — see the Rust crate's own
      * `PendingSnapshot` doc. */
-    data class PendingSnapshot(val rendezvousTag: String, val payloads: List<JSONObject>, val candidatePubkey: String?)
+    data class PendingSnapshot(val ownPrivateKeyHex: String, val rendezvousTag: String, val payloads: List<JSONObject>, val candidatePubkey: String?)
 
     /** Effects the caller must actually perform — signaling sends, UI-facing
      * contact-state updates, timer kicks. Mirrors the Rust crate's `Effect`
      * enum one-for-one; see its own doc for what each means. */
     sealed interface Effect {
-        data class SendBootstrap(val pairingId: String, val rendezvousTag: String, val targetPubkey: String, val payload: JSONObject) : Effect
+        data class SendBootstrap(val pairingId: String, val ownPrivateKeyHex: String, val rendezvousTag: String, val targetPubkey: String, val payload: JSONObject) : Effect
         data object KickHeartbeat : Effect
         data class SetCollision(val pairingId: String) : Effect
         data class SetTimedOut(val pairingId: String) : Effect
@@ -334,18 +343,28 @@ object CallCoreBridge {
      * lists are fused into one result. */
     data class PresenceUpdateResult(val presenceEffects: List<PresenceEffect>, val callEffects: List<CallEffect>)
 
-    /** Starts a new pairing attempt for [pairingId], replacing any existing
-     * one under the same id. Trim/NFC-normalization and the rendezvous-tag
-     * derivation happen inside `pake-bridge`, called from `call-core` — see
-     * that crate's own doc; this call forwards the raw typed passphrase
-     * unchanged. */
-    fun startAttempt(pairingId: String, ownPubkeyHex: String, ownName: String, passphrase: String): StartResult {
-        val json = checkNotNull(nativeStartAttempt(pairingId, ownPubkeyHex, ownName, passphrase)) {
+    /** Starts a new pairing attempt with a freshly minted id and keypair, held in memory by `call-core` until a
+     * person confirms the match ([confirmAttempt]) or it ends. Trim/NFC-normalization and the rendezvous-tag
+     * derivation happen inside `pake-bridge`, called from `call-core` — see that crate's own doc; this call
+     * forwards the raw typed passphrase unchanged. */
+    fun startAttempt(ownName: String, passphrase: String): StartResult {
+        val json = checkNotNull(nativeStartAttempt(ownName, passphrase)) {
             "CallCoreBridge.startAttempt failed at the native layer"
         }
         val obj = JSONObject(json)
-        return StartResult(obj.getString("rendezvous_tag"), obj.getString("outbound_hex"), obj.getLong("generation"))
+        return StartResult(obj.getString("pairing_id"), obj.getString("rendezvous_tag"), obj.getString("outbound_hex"), obj.getLong("generation"))
     }
+
+    /** The person confirmed [candidatePubkey] for [pairingId]: ends the attempt and returns the contact to save, or
+     * `null` if there is nothing to confirm (the attempt ended, or the candidate isn't the confirmed one). */
+    fun confirmAttempt(pairingId: String, candidatePubkey: String): ConfirmedPairing? {
+        val json = nativeConfirmAttempt(pairingId, candidatePubkey) ?: return null
+        val obj = JSONObject(json)
+        return ConfirmedPairing(obj.getString("pairing_id"), obj.getString("own_private_key_hex"), obj.getString("peer_public_key"), obj.getString("peer_name"))
+    }
+
+    /** Ids of the pairing attempts that are live right now. */
+    fun pendingAttemptIds(): List<String> = JSONArray(nativePendingAttemptIds()).let { arr -> (0 until arr.length()).map { arr.getString(it) } }
 
     /** Abandons an attempt outright (user cancel, contact deleted) without
      * completing it. A no-op if there's no live attempt for [pairingId]. */
@@ -361,6 +380,7 @@ object CallCoreBridge {
         val json = nativeBuildBootstrapPayload(pairingId) ?: return null
         val obj = JSONObject(json)
         return PendingSnapshot(
+            ownPrivateKeyHex = obj.getString("own_private_key_hex"),
             rendezvousTag = obj.getString("rendezvous_tag"),
             payloads = obj.getJSONArray("payloads").let { arr -> (0 until arr.length()).map { arr.getJSONObject(it) } },
             candidatePubkey = if (obj.isNull("candidate_pubkey")) null else obj.getString("candidate_pubkey"),
@@ -495,8 +515,7 @@ object CallCoreBridge {
 
     /** See the Rust crate's own `presence::current_heartbeat_interval_ms`
      * doc: the delay until the next heartbeat tick. */
-    fun currentHeartbeatIntervalMs(pendingPairingIds: List<String>): Int =
-        nativeCurrentHeartbeatIntervalMs(JSONArray(pendingPairingIds).toString())
+    fun currentHeartbeatIntervalMs(): Int = nativeCurrentHeartbeatIntervalMs()
 
     /** See the Rust crate's own `presence::remove_pairing` doc — call
      * alongside [forgetPairing] from `removePairing`. */
@@ -592,7 +611,7 @@ object CallCoreBridge {
 
     /** See the Rust crate's own `call_arbitration::can_place_call` doc —
      * whether a contact's Call button is offered. */
-    fun canPlaceCall(isPaired: Boolean, connected: Boolean): Boolean = nativeCanPlaceCall(isPaired, connected)
+    fun canPlaceCall(connected: Boolean): Boolean = nativeCanPlaceCall(connected)
 
     // --- ICE evidence / call-failure diagnosis (Rust `ice_evidence`) -----------
 
@@ -881,7 +900,7 @@ object CallCoreBridge {
         return (0 until array.length()).map { i ->
             val obj = array.getJSONObject(i)
             when (val kind = obj.getString("kind")) {
-                "SendBootstrap" -> Effect.SendBootstrap(obj.getString("pairing_id"), obj.getString("rendezvous_tag"), obj.getString("target_pubkey"), obj.getJSONObject("payload"))
+                "SendBootstrap" -> Effect.SendBootstrap(obj.getString("pairing_id"), obj.getString("own_private_key_hex"), obj.getString("rendezvous_tag"), obj.getString("target_pubkey"), obj.getJSONObject("payload"))
                 "KickHeartbeat" -> Effect.KickHeartbeat
                 "SetCollision" -> Effect.SetCollision(obj.getString("pairing_id"))
                 "SetTimedOut" -> Effect.SetTimedOut(obj.getString("pairing_id"))

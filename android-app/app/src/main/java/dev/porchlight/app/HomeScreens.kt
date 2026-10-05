@@ -943,7 +943,7 @@ private fun WaitingScreen(
                         // The rule (a paired, not-yet-connected contact while
                         // no call is active) lives in call-core, shared with
                         // web — see call_arbitration::can_place_call.
-                        canCall = CallCoreBridge.canPlaceCall(contact.isPaired, contact.connected),
+                        canCall = CallCoreBridge.canPlaceCall(contact.connected),
                         status = contact.status,
                         onCall = { onCall(contact.id) },
                         autoAnswer = contact.autoAnswer,

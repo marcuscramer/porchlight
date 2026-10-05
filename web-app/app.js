@@ -120,10 +120,12 @@ function loadPairings() {
   if (!Array.isArray(parsed)) return [];
   const allValid = parsed.every((p) => p && typeof p.id === 'string' && typeof p.ownPrivateKeyHex === 'string');
   if (!allValid) return [];
-  return parsed.map((p) => ({
+  // Older versions saved a pairing attempt as an unconfirmed contact (no peer yet), which a reload mid-attempt left
+  // behind as a nameless row; attempts live in memory now, so those are dropped.
+  return parsed.filter((p) => p.peerPublicKey).map((p) => ({
     id: p.id,
     ownPrivateKeyHex: p.ownPrivateKeyHex,
-    peerPublicKey: p.peerPublicKey || '',
+    peerPublicKey: p.peerPublicKey,
     peerName: p.peerName || '',
     // The newest gift-wrapped signal (by created_at, then by id — see
     // WrapEventCandidate::last_signal_created_at's own doc, nostr_protocol.rs,
@@ -138,7 +140,6 @@ function loadPairings() {
 function savePairings() {
   localStorage.setItem(PAIRINGS_STORAGE_KEY, JSON.stringify(pairings));
 }
-function isConfirmed(pairing) { return !!pairing.peerPublicKey; }
 function findPairing(pairingId) { return pairings.find((p) => p.id === pairingId) || null; }
 
 function addOrUpdatePairing(pairing) {
@@ -162,10 +163,6 @@ function updateLastSignal(pairingId, createdAt, eventId) {
 function removePairing(pairingId) {
   pairings = pairings.filter((p) => p.id !== pairingId);
   savePairings();
-  callCore.cancelAttempt(pairingId);
-  confirmedCandidate.delete(pairingId);
-  pairingCollision.delete(pairingId);
-  pairingTimedOut.delete(pairingId);
   // See callCore.forgetPairing's own doc: clears a deferred call's
   // wants_call entry (a real leak otherwise) and, if this pairing owned the
   // active call slot, its ClosePeerConnection effect below tears down the
@@ -208,7 +205,7 @@ let heartbeatTimeoutHandle = null;
 let onlineCheckTimer = null;
 
 function confirmedPeers() {
-  return pairings.filter(isConfirmed).map((p) => (
+  return pairings.map((p) => (
     {
       pairingId: p.id,
       ownPrivateKeyHex: p.ownPrivateKeyHex,
@@ -218,17 +215,15 @@ function confirmedPeers() {
     }
   ));
 }
-/** Mirrors NostrSignalingClient.kt's PendingPairing — rendezvousTag/
- * bootstrapPayloads (empty)/bootstrapTarget are null when there's no *live* attempt
- * right now (a fresh page load, or a timed-out/collided attempt): nothing
- * to publish or subscribe for until a human starts a new one. */
+/** Mirrors NostrSignalingClient.kt's PendingPairing: what call-core holds for each live pairing attempt (at most
+ * one in practice), with `rendezvousTag`, `bootstrapPayloads` and `bootstrapTarget` as its snapshot gives them. */
 function pendingPairingsList() {
-  return pairings.filter((p) => !isConfirmed(p)).map((p) => {
-    const json = callCore.buildBootstrapPayload(p.id); // undefined if there's no live attempt
+  return JSON.parse(callCore.pendingAttemptIds()).map((pairingId) => {
+    const json = callCore.buildBootstrapPayload(pairingId); // undefined if the attempt ended in the meantime
     const snapshot = json ? JSON.parse(json) : null;
     return {
-      pairingId: p.id,
-      ownPrivateKeyHex: p.ownPrivateKeyHex,
+      pairingId,
+      ownPrivateKeyHex: snapshot ? snapshot.own_private_key_hex : null,
       rendezvousTag: snapshot ? snapshot.rendezvous_tag : null,
       bootstrapPayloads: snapshot ? snapshot.payloads : [],
       bootstrapTarget: snapshot ? snapshot.candidate_pubkey : null,
@@ -462,7 +457,7 @@ function heartbeatTick() {
  * `presence::current_heartbeat_interval_ms` doc: anything else that wants a
  * prompt heartbeat asks for exactly one (kickHeartbeat + hello) instead. */
 function currentHeartbeatIntervalMs() {
-  return callCore.currentHeartbeatIntervalMs(pendingPairingsList().map((p) => p.pairingId));
+  return callCore.currentHeartbeatIntervalMs();
 }
 
 function scheduleHeartbeat(delayMs) {
@@ -582,7 +577,7 @@ function sendToConfirmedPeer(pairingId, ownPrivateKeyHex, peerPublicKey, buildPa
 }
 function sendConfirmedOrPending(pairingId, buildPayload) {
   const peer = findPairing(pairingId);
-  if (peer && isConfirmed(peer)) sendToConfirmedPeer(pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, buildPayload);
+  if (peer) sendToConfirmedPeer(pairingId, peer.ownPrivateKeyHex, peer.peerPublicKey, buildPayload);
 }
 
 /** Publishes one bootstrap-phase event — plain, unencrypted JSON content
@@ -733,16 +728,11 @@ window.addEventListener('online', () => {
 // phrase" flow (see the pairing design doc).
 // ---------------------------------------------------------------------------
 
-/** At most one entry: the peer a SPAKE2 exchange has already
- * cryptographically confirmed for this pending pairing, awaiting the final
- * human "Pair with [name]?" tap. `call-core` owns the actual attempt
- * registry — this file only keeps the UI-facing state a confirmed/
- * collided/timed-out attempt needs to render, mirroring Android's own
- * ContactState. */
-const confirmedCandidate = new Map(); // pairingId -> { pubkeyHex, name }
-// Mirrors ContactState.pairingCollision/pairingTimedOut.
-const pairingCollision = new Set();
-const pairingTimedOut = new Set();
+/** The one pairing attempt in progress, or null. It exists only in memory — nothing is saved until a person
+ * confirms the match — and `call-core` owns the protocol state; this is what the screens show.
+ * `status`: 'preparing' (turning the phrase into the meeting point), 'waiting', 'matched' (the exchange confirmed
+ * `candidate`, awaiting the "Pair with [name]?" tap), 'collided' or 'timedOut'. */
+let attempt = null; // { id, startedAt, status, candidate: { pubkeyHex, name } | null }
 
 // AUTO_DISMISS_DELAY_MS (imported above) applies only to pairing-progress'
 // collision/timeout screens and call-outcome — never confirm-delete or the
@@ -750,32 +740,24 @@ const pairingTimedOut = new Set();
 // outcomes.
 let pairingProgressAutoDismissHandle = null;
 
-/** Starts a passphrase pairing attempt for a brand-new contact — mirrors
- * CameraAgentService.startPairing. [passphrase] is never persisted — only
- * this attempt's own fresh keypair is, immediately, so it's ready to become
- * the pairing's permanent identity the moment SPAKE2 succeeds. */
-function startPairing(passphrase) {
-  const fresh = { id: crypto.randomUUID(), ownPrivateKeyHex: bytesToHex(generateSecretKey()), peerPublicKey: '', peerName: '' };
-  addOrUpdatePairing(fresh);
-  beginPakeAttempt(fresh, passphrase);
-  return fresh;
+/** Starts a passphrase pairing attempt for a brand-new contact — mirrors CameraAgentService.startPairing. The
+ * passphrase and the attempt's fresh keypair are never persisted: call-core holds the attempt in memory (its
+ * trim/NFC-normalization, rendezvous tag, live-window timeout all live there) and hands back the finished contact
+ * when a person confirms the match. Fills in `mine` (the attempt object the screens show) with the new id. */
+function startPairing(mine, passphrase) {
+  const start = JSON.parse(callCore.startAttempt(deviceName, passphrase));
+  mine.id = start.pairing_id;
+  mine.startedAt = Date.now();
+  mine.status = 'waiting';
+  kickHeartbeat();
+  // handleTimeout's own generation check makes this a no-op for an attempt that has already ended.
+  setTimeout(() => applyEffects(callCore.handleTimeout(start.pairing_id, start.generation)), PAKE_LIVE_WINDOW_MS);
 }
 
-/** Actually starts the SPAKE2 exchange for [pairing] — calls into
- * call-core, which trims/NFC-normalizes the raw typed passphrase and
- * derives the rendezvous tag internally (via pake-bridge), registers the
- * live attempt in call-core's own registry, and schedules its live-window
- * timeout. Mirrors CameraAgentService.beginPakeAttempt. */
-function beginPakeAttempt(pairing, passphrase) {
-  const ownPubkeyHex = getPublicKey(hexToBytes(pairing.ownPrivateKeyHex));
-  const start = JSON.parse(callCore.startAttempt(pairing.id, ownPubkeyHex, deviceName, passphrase));
-  pairingCollision.delete(pairing.id);
-  pairingTimedOut.delete(pairing.id);
-  kickHeartbeat();
-  // handleTimeout's own generation check makes this a no-op for a fresh
-  // retry or an already-resolved match.
-  setTimeout(() => applyEffects(callCore.handleTimeout(pairing.id, start.generation)), PAKE_LIVE_WINDOW_MS);
-  render();
+/** Gives up on the attempt in progress (cancel, retry, auto-dismiss). */
+function discardAttempt() {
+  if (attempt && attempt.id) callCore.cancelAttempt(attempt.id);
+  attempt = null;
 }
 
 /**
@@ -793,29 +775,34 @@ function applyEffects(effectsJson) {
   for (const effect of effects) {
     switch (effect.kind) {
       case 'SendBootstrap': {
-        const pairing = findPairing(effect.pairing_id);
-        if (pairing) sendPairingBootstrap(pairing.ownPrivateKeyHex, effect.rendezvous_tag, effect.target_pubkey, effect.payload);
+        sendPairingBootstrap(effect.own_private_key_hex, effect.rendezvous_tag, effect.target_pubkey, effect.payload);
         break;
       }
       case 'KickHeartbeat':
         kickHeartbeat();
         break;
       case 'SetCollision':
-        // Deleting the confirmed candidate here (not just flagging
-        // pairingCollision) disarms an already-shown confirm screen's
-        // Confirm button and triggers render()'s reactive bail-back to
-        // pairing-progress — see render()'s own doc for why both directions
-        // of that swap matter.
-        confirmedCandidate.delete(effect.pairing_id);
-        pairingCollision.add(effect.pairing_id);
-        schedulePairingProgressAutoDismiss(effect.pairing_id);
+        // Dropping the candidate here disarms an already-shown confirm
+        // screen's Confirm button and triggers render()'s reactive bail-back
+        // to pairing-progress — see render()'s own doc for why both
+        // directions of that swap matter.
+        if (attempt && attempt.id === effect.pairing_id) {
+          attempt.status = 'collided';
+          attempt.candidate = null;
+          schedulePairingProgressAutoDismiss(effect.pairing_id);
+        }
         break;
       case 'SetTimedOut':
-        pairingTimedOut.add(effect.pairing_id);
-        schedulePairingProgressAutoDismiss(effect.pairing_id);
+        if (attempt && attempt.id === effect.pairing_id) {
+          attempt.status = 'timedOut';
+          schedulePairingProgressAutoDismiss(effect.pairing_id);
+        }
         break;
       case 'SetConfirmedCandidate':
-        confirmedCandidate.set(effect.pairing_id, { pubkeyHex: effect.pubkey_hex, name: effect.name });
+        if (attempt && attempt.id === effect.pairing_id) {
+          attempt.status = 'matched';
+          attempt.candidate = { pubkeyHex: effect.pubkey_hex, name: effect.name };
+        }
         break;
       default:
         console.error('applyEffects: unknown effect kind from call-core', effect.kind);
@@ -833,21 +820,25 @@ function applyEffects(effectsJson) {
  * JSON.parse'd wire message (`{"type":"pake1",...}` or
  * `{"type":"pake-confirm",...}`).
  */
-/** A human tapped "Pair with [name]?" for a candidate the SPAKE2 exchange
- * already cryptographically confirmed — mirrors
- * CameraAgentService.confirmPeer. */
-function confirmPeer(pairingId, publicKeyHex) {
-  const candidate = confirmedCandidate.get(pairingId);
-  if (!candidate || candidate.pubkeyHex !== publicKeyHex) return;
-  confirmedCandidate.delete(pairingId);
-  // The SPAKE2 exchange was already consumed by finish() inside
-  // handleBootstrapMessage (call-core) by the time a candidate exists to
-  // confirm here — this just tells call-core to stop tracking the attempt.
-  callCore.cancelAttempt(pairingId);
-  updatePairingPeer(pairingId, publicKeyHex, candidate.name || '');
+/** A human tapped "Pair with [name]?" for the candidate the SPAKE2 exchange already cryptographically confirmed —
+ * mirrors CameraAgentService.confirmPeer. call-core ends the attempt and hands back the finished contact, which is
+ * saved here for the first time. */
+function confirmPeer() {
+  if (!attempt || !attempt.candidate) return;
+  const json = callCore.confirmAttempt(attempt.id, attempt.candidate.pubkeyHex);
+  attempt = null;
+  if (!json) return; // the attempt ended in the meantime; render() bails back
+  const confirmed = JSON.parse(json);
+  addOrUpdatePairing({
+    id: confirmed.pairing_id,
+    ownPrivateKeyHex: confirmed.own_private_key_hex,
+    peerPublicKey: confirmed.peer_public_key,
+    peerName: confirmed.peer_name,
+    lastSignalCreatedAt: 0,
+    lastSignalEventId: '',
+  });
   kickHeartbeat();
-  const peer = findPairing(pairingId);
-  if (peer) applyPresenceUpdate(callCore.markSeen(pairingId, ownPubkeyHexFor(peer.ownPrivateKeyHex), publicKeyHex, Date.now(), null, false));
+  applyPresenceUpdate(callCore.markSeen(confirmed.pairing_id, ownPubkeyHexFor(confirmed.own_private_key_hex), confirmed.peer_public_key, Date.now(), null, false));
   screen = 'waiting';
   render();
 }
@@ -1114,7 +1105,7 @@ function applyCallEffects(effectsJson) {
           pairingId: effect.pairing_id,
           callId: effect.call_id,
         };
-        currentPairingId = effect.pairing_id;
+        callPairingId = effect.pairing_id;
         resetCallControls();
         screen = 'incoming-call';
         break;
@@ -1134,7 +1125,7 @@ function applyCallEffects(effectsJson) {
         break;
       case 'ShowCallOutcome':
         pendingCallOutcome = { pairingId: effect.pairing_id, callId: effect.call_id, reason: effect.reason };
-        currentPairingId = effect.pairing_id;
+        callPairingId = effect.pairing_id;
         screen = 'call-outcome';
         clearTimeout(callOutcomeAutoDismissHandle);
         callOutcomeAutoDismissHandle = setTimeout(() => {
@@ -1349,7 +1340,7 @@ function closePeerConnection() {
 // ---------------------------------------------------------------------------
 
 let screen = 'name';
-let currentPairingId = null; // which pairing 'pair'/'pairing-progress' applies to
+let callPairingId = null; // which pairing the call screens (calling, ringing, live) are about
 let pendingDeletePairingId = null; // which pairing 'confirm-delete' applies to
 const el = (id) => document.getElementById(id);
 // A plain <input> outside a <form> does nothing on Enter by default — this
@@ -1546,7 +1537,7 @@ function render() {
   // Reactive swap: the moment a candidate is cryptographically confirmed
   // for the pairing attempt currently in progress, jump straight to the
   // name-confirm screen.
-  if (screen === 'pairing-progress' && currentPairingId && confirmedCandidate.has(currentPairingId)) {
+  if (screen === 'pairing-progress' && attempt && attempt.status === 'matched') {
     screen = 'pair';
   }
   // The reverse case, just as load-bearing: if we're already showing the
@@ -1557,9 +1548,11 @@ function render() {
   // button that quietly does nothing. Android's equivalent has no such gap
   // by construction (one reactive `when` over live state); this is that
   // same guarantee, written explicitly for JS's non-reactive DOM.
-  if (screen === 'pair' && currentPairingId && !confirmedCandidate.has(currentPairingId)) {
+  if (screen === 'pair' && attempt && attempt.status !== 'matched') {
     screen = 'pairing-progress';
   }
+  // No attempt at all (cancelled from elsewhere): nothing left to show.
+  if ((screen === 'pair' || screen === 'pairing-progress') && !attempt) screen = 'waiting';
 
   // Calling, ringing and live all show the one #screenCall (so the self-view
   // can animate between them), hence a Set rather than one entry per name.
@@ -1740,7 +1733,7 @@ function renderWaitingScreen() {
     setText(row.name, pairing.peerName || t('common.unnamedContact'));
     // The rule itself lives in call-core (call_arbitration::can_place_call),
     // shared with Android.
-    const canCall = callCore.canPlaceCall(isConfirmed(pairing), state.connected);
+    const canCall = callCore.canPlaceCall(state.connected);
     if (row.call.disabled === canCall) row.call.disabled = !canCall;
     setAttr(row.call, 'aria-label', t('contacts.callContact', { name: label }));
     setAttr(row.del, 'aria-label', t('contacts.deleteContact', { name: label }));
@@ -1910,9 +1903,9 @@ function openEnterPhrase() {
 // Guards against a double-submit: a second click (or Enter firing right
 // after a click) arriving before render() flips `screen` away from
 // 'enter-phrase' used to be indistinguishable from a first, legitimate
-// click — startPairing mints a fresh crypto.randomUUID() every time, so two
-// rapid submits for the same passphrase created two independent pending
-// pairings at the same rendezvous tag, with only the first ever resolving.
+// click — every start mints a fresh attempt, so two rapid submits for the same
+// passphrase created two independent attempts at the same rendezvous tag, with
+// only the first ever resolving.
 let phraseSubmitInFlight = false;
 el('phraseSubmit').addEventListener('click', async () => {
   if (phraseSubmitInFlight) return;
@@ -1923,24 +1916,15 @@ el('phraseSubmit').addEventListener('click', async () => {
     // Show the progress screen first: turning the phrase into the meeting
     // point (Argon2id) takes a moment, noticeably longer on a phone, and
     // blocks the page while it runs.
-    pairingPreparing = true;
-    pairingStartedAt = Date.now();
-    currentPairingId = null;
+    const mine = { id: null, startedAt: Date.now(), status: 'preparing', candidate: null };
+    attempt = mine;
     screen = 'pairing-progress';
     render();
     await new Promise((r) => setTimeout(r, 60));
-    const pairing = await startPairing(phrase);
-    pairingPreparing = false;
-    if (screen !== 'pairing-progress') {
-      // Cancelled while preparing.
-      removePairing(pairing.id);
-      return;
-    }
-    currentPairingId = pairing.id;
-    pairingStartedAt = Date.now();
+    if (attempt !== mine) return; // cancelled while the screen was coming up
+    startPairing(mine, phrase);
     render();
   } finally {
-    pairingPreparing = false;
     phraseSubmitInFlight = false;
   }
 });
@@ -1960,15 +1944,13 @@ function schedulePairingProgressAutoDismiss(pairingId) {
   pairingProgressAutoDismissHandle = setTimeout(() => {
     // Guards against a stale timer outliving the attempt it was meant for
     // (already retried, cancelled, or navigated away some other way).
-    if (screen !== 'pairing-progress' || currentPairingId !== pairingId) return;
-    removePairing(pairingId);
+    if (screen !== 'pairing-progress' || !attempt || attempt.id !== pairingId) return;
+    discardAttempt();
     screen = 'waiting';
     render();
   }, AUTO_DISMISS_DELAY_MS);
 }
 
-let pairingPreparing = false;
-let pairingStartedAt = 0;
 let pairingRefreshTimer = null;
 
 function connectedRelayCount() {
@@ -1981,33 +1963,33 @@ function formatMinutesSeconds(ms) {
 }
 
 function renderPairingProgressScreen() {
-  const collided = pairingCollision.has(currentPairingId);
-  const timedOut = pairingTimedOut.has(currentPairingId);
+  if (!attempt) return;
+  const collided = attempt.status === 'collided';
+  const timedOut = attempt.status === 'timedOut';
   el('progressWaiting').hidden = collided || timedOut;
   el('progressCollision').hidden = !collided;
   el('progressTimeout').hidden = !timedOut;
   if (collided || timedOut) return;
   // Which step this is is call-core's call (shared with Android); this only reports what it can see.
-  const pending = pendingPairingsList().find((p) => p.pairingId === currentPairingId);
-  const hasAttempt = !pairingPreparing && !!(pending && pending.rendezvousTag);
+  const pending = pendingPairingsList().find((p) => p.pairingId === attempt.id);
+  const hasAttempt = attempt.status !== 'preparing' && !!(pending && pending.rendezvousTag);
   const connected = connectedRelayCount();
   const view = JSON.parse(callCore.pairingPhase(hasAttempt, connected, !!(pending && pending.bootstrapTarget)));
   el('progressTitle').textContent = t(view.label_key);
   // Always two short lines (non-breaking spaces while preparing), so the spinner never moves between steps.
   const preparing = view.phase === 'preparing';
   el('progressRelays').textContent = preparing ? '\u00a0' : t('pairing.progressRelays', { connected, total: RELAYS.length });
-  el('progressCancelsIn').textContent = preparing ? '\u00a0' : t('pairing.progressCancelsIn', { left: formatMinutesSeconds(PAKE_LIVE_WINDOW_MS - (Date.now() - pairingStartedAt)) });
+  el('progressCancelsIn').textContent = preparing ? '\u00a0' : t('pairing.progressCancelsIn', { left: formatMinutesSeconds(PAKE_LIVE_WINDOW_MS - (Date.now() - attempt.startedAt)) });
 }
 function retryPairing() {
-  // The attempt so far (including its unconfirmed stub) is forgotten
-  // entirely, same as an explicit Cancel — startPairing mints an unrelated
-  // fresh id below, so there's nothing to reuse it for.
-  removePairing(currentPairingId);
+  // The attempt so far is forgotten entirely, same as an explicit Cancel —
+  // the next one is a new attempt with its own id and key.
+  discardAttempt();
   openEnterPhrase();
 }
 el('progressRetryCollision').addEventListener('click', retryPairing);
 el('progressRetryTimeout').addEventListener('click', retryPairing);
-el('progressCancel').addEventListener('click', () => { removePairing(currentPairingId); screen = 'waiting'; render(); });
+el('progressCancel').addEventListener('click', () => { discardAttempt(); screen = 'waiting'; render(); });
 
 // --- Name confirm (mirrors NameConfirmScreen) ----------------------------
 //
@@ -2016,19 +1998,16 @@ el('progressCancel').addEventListener('click', () => { removePairing(currentPair
 // fingerprint comparison.
 
 function renderPairScreen() {
-  const candidate = confirmedCandidate.get(currentPairingId);
+  const candidate = attempt && attempt.candidate;
   el('pairTitle').textContent = t('pairing.confirmTitle', { name: (candidate && candidate.name) || t('common.thisDevice') });
 }
-el('pairConfirm').addEventListener('click', () => {
-  const candidate = confirmedCandidate.get(currentPairingId);
-  if (candidate) confirmPeer(currentPairingId, candidate.pubkeyHex);
-});
-el('pairCancel').addEventListener('click', () => { removePairing(currentPairingId); screen = 'waiting'; render(); });
+el('pairConfirm').addEventListener('click', () => { confirmPeer(); });
+el('pairCancel').addEventListener('click', () => { discardAttempt(); screen = 'waiting'; render(); });
 
 // --- Calling (mirrors CallingScreen) -------------------------------------
 
 function startCallingUi(pairingId) {
-  currentPairingId = pairingId;
+  callPairingId = pairingId;
   resetCallControls();
   screen = 'calling';
   render();
@@ -2045,7 +2024,7 @@ function renderCallScreen() {
   const section = el('screenCall');
   for (const m of ['calling', 'incoming', 'connected']) section.classList.toggle(`mode-${m}`, m === mode);
 
-  const pairing = findPairing(currentPairingId);
+  const pairing = findPairing(callPairingId);
   const name = (pairing && pairing.peerName) || t('common.unnamedContact');
   const ringing = mode !== 'connected';
   el('callMessage').hidden = !ringing;

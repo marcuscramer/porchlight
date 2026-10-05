@@ -107,19 +107,40 @@ fn encode_bool(env: &mut JNIEnv, default: bool, f: impl FnOnce(&mut JNIEnv) -> O
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeStartAttempt<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
-    pairing_id: JString<'local>,
-    own_pubkey_hex: JString<'local>,
     own_name: JString<'local>,
     passphrase: JString<'local>,
 ) -> jstring {
     encode_nullable(&mut env, |env| {
-        let pairing_id = get_string(env, &pairing_id)?;
-        let own_pubkey_hex = get_string(env, &own_pubkey_hex)?;
         let own_name = get_string(env, &own_name)?;
         let passphrase = get_string(env, &passphrase)?;
-        let start_result = crate::start_attempt(&pairing_id, &own_pubkey_hex, &own_name, &passphrase);
+        let start_result = crate::start_attempt(&own_name, &passphrase);
         serde_json::to_string(&start_result).ok()
     })
+}
+
+/// See [`crate::confirm_attempt`]'s own doc. Returns a JSON-encoded
+/// [`crate::ConfirmedPairing`], or `null` if there is nothing to confirm.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeConfirmAttempt<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    pairing_id: JString<'local>,
+    candidate_pubkey: JString<'local>,
+) -> jstring {
+    encode_nullable(&mut env, |env| {
+        let pairing_id = get_string(env, &pairing_id)?;
+        let candidate_pubkey = get_string(env, &candidate_pubkey)?;
+        serde_json::to_string(&crate::confirm_attempt(&pairing_id, &candidate_pubkey)?).ok()
+    })
+}
+
+/// See [`crate::pending_attempt_ids`]'s own doc. Returns a JSON array of ids.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativePendingAttemptIds<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    encode_or_fallback(&mut env, || "[]".to_string(), |_| Some(crate::pending_attempt_ids()))
 }
 
 /// See [`crate::cancel_attempt`]'s own doc.
@@ -400,22 +421,15 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeIsOnline<'lo
 }
 
 /// See [`crate::presence::current_heartbeat_interval_ms`]'s own doc.
-/// `pending_pairing_ids_json` is a JSON array of pairing-id strings.
 /// Returns [`crate::presence::HEARTBEAT_INTERVAL_MS`] (the slow, steady-
-/// state cadence) on a panic or malformed input — the fail-closed choice:
-/// a performance detail, not a correctness one.
+/// state cadence) on a panic — the fail-closed choice: a performance
+/// detail, not a correctness one.
 #[no_mangle]
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCurrentHeartbeatIntervalMs<'local>(
-    mut env: JNIEnv<'local>,
+    _env: JNIEnv<'local>,
     _class: JClass<'local>,
-    pending_pairing_ids_json: JString<'local>,
 ) -> jni::sys::jint {
-    let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let json = get_string(&mut env, &pending_pairing_ids_json)?;
-        let pending: Vec<String> = serde_json::from_str(&json).ok()?;
-        Some(crate::presence::current_heartbeat_interval_ms(&pending))
-    }));
-    result.ok().flatten().unwrap_or(crate::presence::HEARTBEAT_INTERVAL_MS) as jni::sys::jint
+    catch_unwind(crate::presence::current_heartbeat_interval_ms).unwrap_or(crate::presence::HEARTBEAT_INTERVAL_MS) as jni::sys::jint
 }
 
 /// See [`crate::presence::remove_pairing`]'s own doc. No return value; a
@@ -907,10 +921,9 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeAgo<'local>(
 pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCanPlaceCall<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
-    is_paired: jni::sys::jboolean,
     connected: jni::sys::jboolean,
 ) -> jni::sys::jboolean {
-    encode_bool(&mut env, false, |_env| Some(crate::call_arbitration::can_place_call(is_paired != 0, connected != 0)))
+    encode_bool(&mut env, false, |_env| Some(crate::call_arbitration::can_place_call(connected != 0)))
 }
 
 /// See [`crate::ice_evidence::reset`]'s own doc.

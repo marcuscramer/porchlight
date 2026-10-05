@@ -330,12 +330,11 @@ export function callPhase(has_active_call, has_outcome, has_ring, accepted_incom
 /**
  * See [`crate::call_arbitration::can_place_call`]'s own doc. `false` (no
  * Call button) on a panic — the fail-closed choice.
- * @param {boolean} is_paired
  * @param {boolean} connected
  * @returns {boolean}
  */
-export function canPlaceCall(is_paired, connected) {
-    const ret = wasm.canPlaceCall(is_paired, connected);
+export function canPlaceCall(connected) {
+    const ret = wasm.canPlaceCall(connected);
     return ret !== 0;
 }
 
@@ -393,20 +392,36 @@ export function checkOnlineTimeouts(now_ms) {
 }
 
 /**
+ * See [`crate::confirm_attempt`]'s own doc. Returns a JSON-encoded
+ * [`crate::ConfirmedPairing`], or `undefined` if there is nothing to confirm.
+ * @param {string} pairing_id
+ * @param {string} candidate_pubkey
+ * @returns {string | undefined}
+ */
+export function confirmAttempt(pairing_id, candidate_pubkey) {
+    const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(candidate_pubkey, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.confirmAttempt(ptr0, len0, ptr1, len1);
+    let v3;
+    if (ret[0] !== 0) {
+        v3 = getStringFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v3;
+}
+
+/**
  * See [`crate::presence::current_heartbeat_interval_ms`]'s own doc.
- * Returns `u32` directly (a plain JS `number`) — small enough this module doesn't need
- * the `handleTimeout`-style `u32`-at-the-boundary workaround, it just is
- * one already. Falls back to [`crate::presence::HEARTBEAT_INTERVAL_MS`]
- * (the slow, steady-state cadence) on a panic, matching
- * `nativeCurrentHeartbeatIntervalMs`'s own fail-closed choice — a
- * performance detail, not a correctness one.
- * @param {string[]} pending_pairing_ids
+ * Returns `u32` directly (a plain JS `number`). Falls back to
+ * [`crate::presence::HEARTBEAT_INTERVAL_MS`] (the slow, steady-state
+ * cadence) on a panic, matching `nativeCurrentHeartbeatIntervalMs`'s own
+ * fail-closed choice — a performance detail, not a correctness one.
  * @returns {number}
  */
-export function currentHeartbeatIntervalMs(pending_pairing_ids) {
-    const ptr0 = passArrayJsValueToWasm0(pending_pairing_ids, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.currentHeartbeatIntervalMs(ptr0, len0);
+export function currentHeartbeatIntervalMs() {
+    const ret = wasm.currentHeartbeatIntervalMs();
     return ret >>> 0;
 }
 
@@ -781,6 +796,23 @@ export function peerConnectionClosed() {
 }
 
 /**
+ * See [`crate::pending_attempt_ids`]'s own doc. Returns a JSON array of ids.
+ * @returns {string}
+ */
+export function pendingAttemptIds() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.pendingAttemptIds();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * See [`crate::presence::remove_pairing`]'s own doc. No return value — a
  * panic here is swallowed the same way `nativePresenceRemovePairing`
  * swallows one.
@@ -988,36 +1020,30 @@ export function sanitizeName(name) {
  * function's existing "something went wrong, nothing to hand back"
  * signal); an exception here is easy for `app.js` to `.catch()` the same
  * way it already handles this function's genuine `Err` path.
- * @param {string} pairing_id
- * @param {string} own_pubkey_hex
  * @param {string} own_name
  * @param {string} passphrase
  * @returns {string}
  */
-export function startAttempt(pairing_id, own_pubkey_hex, own_name, passphrase) {
-    let deferred6_0;
-    let deferred6_1;
+export function startAttempt(own_name, passphrase) {
+    let deferred4_0;
+    let deferred4_1;
     try {
-        const ptr0 = passStringToWasm0(pairing_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr0 = passStringToWasm0(own_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(own_pubkey_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr1 = passStringToWasm0(passphrase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(own_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(passphrase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len3 = WASM_VECTOR_LEN;
-        const ret = wasm.startAttempt(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
-        var ptr5 = ret[0];
-        var len5 = ret[1];
+        const ret = wasm.startAttempt(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
         if (ret[3]) {
-            ptr5 = 0; len5 = 0;
+            ptr3 = 0; len3 = 0;
             throw takeFromExternrefTable0(ret[2]);
         }
-        deferred6_0 = ptr5;
-        deferred6_1 = len5;
-        return getStringFromWasm0(ptr5, len5);
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
     } finally {
-        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
 }
 function __wbg_get_imports() {
