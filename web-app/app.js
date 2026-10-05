@@ -1613,94 +1613,29 @@ el('renameCancel').addEventListener('click', () => { screen = 'settings'; render
 
 el('settingsBtn').addEventListener('click', () => { screen = 'settings'; render(); });
 
-/**
- * Mirrors WaitingScreen's own contact list (HomeScreens.kt): per-contact
- * Delete lives right on each row (no auto-answer toggle here — that's
- * Android/TV-only), and the list ends with a plain "Add contact" row.
- */
-function renderWaitingScreen() {
-  const listEl = el('contactList');
-  // Rebuilding from scratch (innerHTML = '') on every call resets scrollTop
-  // to 0 the moment real layout happens — confirmed live once a presence
-  // update or the signaling-status poll fires while the user is mid-scroll:
-  // the list silently snaps back to the top. Save/restore across the
-  // rebuild rather than avoiding the rebuild itself.
-  const savedScrollTop = listEl.scrollTop;
+// The contact list is built once and then kept in step with `pairings` and
+// the per-contact UI state: a status flip touches one dot, a rename one name,
+// and only an added or removed contact adds or removes that contact's row.
+// Rebuilding everything on each render() (presence updates and the status
+// poll land here) dropped keyboard focus and any press in progress.
+let waitingTopSpacer = null;
+let waitingAddBtn = null;
+const waitingRows = new Map(); // pairing id -> { group, dot, name, call, del }
+
+function setAttr(node, name, value) { if (node.getAttribute(name) !== value) node.setAttribute(name, value); }
+function setClass(node, value) { if (node.className !== value) node.className = value; }
+function setText(node, value) { if (node.textContent !== value) node.textContent = value; }
+
+function buildWaitingList(listEl) {
   listEl.innerHTML = '';
   // The first of .contact-list's two fade spacers — see its own doc
   // (styles.css) for why an empty row here, not scroll-position tracking,
   // keeps the permanent top fade from showing when there's nothing above to
   // scroll to.
-  const topFadeSpacer = document.createElement('div');
-  topFadeSpacer.className = 'contact-list-fade-spacer top';
-  topFadeSpacer.setAttribute('aria-hidden', 'true');
-  listEl.appendChild(topFadeSpacer);
-  for (const pairing of pairings) {
-    const state = uiState(pairing.id);
-    // No wrapping row div — nameGroup/Call/Delete are appended straight
-    // into #contactList (a CSS grid) as three direct children per contact,
-    // so grid-template-columns sizes each column once across every row.
-    const nameGroup = document.createElement('span');
-    nameGroup.className = 'contact-name-group';
-    // Busy/Online/Offline are purely informational — Call stays available
-    // regardless (see requestCall's own doc): tapping Call on an offline
-    // contact just defers, and on a busy one resolves via the real
-    // busy-signal exchange. A plain filled circle, not a text word — the
-    // color alone is still the whole signal; role="img" + aria-label carry
-    // the same meaning for a screen reader.
-    const dot = document.createElement('span');
-    dot.setAttribute('role', 'img');
-    switch (state.status) {
-      case 'busy':
-        dot.className = 'contact-status-dot busy';
-        dot.setAttribute('aria-label', t('contacts.statusBusy'));
-        break;
-      case 'online':
-        dot.className = 'contact-status-dot ok';
-        dot.setAttribute('aria-label', t('contacts.statusOnline'));
-        break;
-      default:
-        dot.className = 'contact-status-dot danger';
-        dot.setAttribute('aria-label', t('contacts.statusOffline'));
-    }
-    nameGroup.appendChild(dot);
-    const name = document.createElement('span');
-    name.className = 'contact-name';
-    name.textContent = pairing.peerName || t('common.unnamedContact');
-    nameGroup.appendChild(name);
-    listEl.appendChild(nameGroup);
-    // Always created, even when this contact isn't callable right now —
-    // hidden via .tv-button.call:disabled { visibility: hidden }, not left
-    // out of the grid, so column 2 keeps the same width on every row.
-    // `disabled` also takes it out of tab order.
-    //
-    // The rule itself lives in call-core (call_arbitration::can_place_call),
-    // shared with Android.
-    const canCall = callCore.canPlaceCall(isConfirmed(pairing), state.connected);
-    const btn = document.createElement('button');
-    btn.className = 'tv-button call';
-    // A phone-handset icon, not the word "Call" — same Material glyph path
-    // as Android's Icons.Filled.Call.
-    btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
-    btn.setAttribute('aria-label', t('contacts.callContact', { name: pairing.peerName || t('common.thisContact') }));
-    btn.disabled = !canCall;
-    btn.addEventListener('click', () => requestCall(pairing.id));
-    listEl.appendChild(btn);
-    // Destructive and irreversible (the pairing's own key is gone, not
-    // just unlinked) — confirms via #screenConfirmDelete before actually
-    // removing it. A real trash-can silhouette (tapered body, lid, handle,
-    // three slats), same path data as Android's DeleteBinIcon.
-    const del = document.createElement('button');
-    del.className = 'delete-icon-btn';
-    del.innerHTML = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M266.2 256l47.2 581.4c0 32.4 26.2 58.6 58.6 58.6h282c32.4 0 58.6-26.2 58.6-58.6L759.2 256H266.2z m123.2 530L376 320h37l13.8 466h-37.4z m140.6 0h-36V320h36v466z m104.6 0h-37.2l13.6-466H648l-13.4 466zM728 184h-72l-52.6-46c-7.4-6.4-16.8-10-26.4-10h-129.6c-9.8 0-19.4 3.6-26.8 10L368 184h-72c-35.2 0-60 16.8-60 52h552c0-35.2-24.8-52-60-52z"/></svg>';
-    del.setAttribute('aria-label', t('contacts.deleteContact', { name: pairing.peerName || t('common.thisContact') }));
-    del.addEventListener('click', () => {
-      pendingDeletePairingId = pairing.id;
-      screen = 'confirm-delete';
-      render();
-    });
-    listEl.appendChild(del);
-  }
+  waitingTopSpacer = document.createElement('div');
+  waitingTopSpacer.className = 'contact-list-fade-spacer top';
+  waitingTopSpacer.setAttribute('aria-hidden', 'true');
+  listEl.appendChild(waitingTopSpacer);
   // A blank row, not just a bigger gap — sets "Add contact" apart as its
   // own action rather than one more entry in the contact list.
   const spacer = document.createElement('div');
@@ -1709,23 +1644,108 @@ function renderWaitingScreen() {
   // Trailing row, not a separate Settings destination. .add-contact spans
   // every grid column and centers itself within that span — a standalone
   // action, not one more row sized to a single contact-list column.
-  const addBtn = document.createElement('button');
-  addBtn.className = 'tv-button add-contact';
+  waitingAddBtn = document.createElement('button');
+  waitingAddBtn.className = 'tv-button add-contact';
   // A person-with-"+" icon — same Material "person_add" glyph path as
   // Android's PersonAddIcon.
-  addBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
-  addBtn.setAttribute('aria-label', t('contacts.addContact'));
-  addBtn.addEventListener('click', () => openEnterPhrase());
-  listEl.appendChild(addBtn);
+  waitingAddBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
+  waitingAddBtn.addEventListener('click', () => openEnterPhrase());
+  listEl.appendChild(waitingAddBtn);
   // The second of .contact-list's two fade spacers — see the top one's own
   // doc, and .contact-list's (styles.css).
   const bottomFadeSpacer = document.createElement('div');
   bottomFadeSpacer.className = 'contact-list-fade-spacer bottom';
   bottomFadeSpacer.setAttribute('aria-hidden', 'true');
   listEl.appendChild(bottomFadeSpacer);
-  // See savedScrollTop's own doc above — an out-of-range scrollTop clamps
-  // to the real max on its own.
-  listEl.scrollTop = savedScrollTop;
+}
+
+function createWaitingRow(pairingId) {
+  // No wrapping row div — nameGroup/Call/Delete are direct children of
+  // #contactList (a CSS grid), three per contact, so grid-template-columns
+  // sizes each column once across every row.
+  const group = document.createElement('span');
+  group.className = 'contact-name-group';
+  // A plain filled circle, not a text word — the color alone is the whole
+  // signal; role="img" + aria-label carry the same meaning for a screen
+  // reader.
+  const dot = document.createElement('span');
+  dot.setAttribute('role', 'img');
+  group.appendChild(dot);
+  const name = document.createElement('span');
+  name.className = 'contact-name';
+  group.appendChild(name);
+  // Always present, even when this contact isn't callable right now —
+  // hidden via .tv-button.call:disabled { visibility: hidden }, not left
+  // out of the grid, so column 2 keeps the same width on every row.
+  // `disabled` also takes it out of tab order.
+  const call = document.createElement('button');
+  call.className = 'tv-button call';
+  // A phone-handset icon, not the word "Call" — same Material glyph path
+  // as Android's Icons.Filled.Call.
+  call.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
+  call.addEventListener('click', () => requestCall(pairingId));
+  // Destructive and irreversible (the pairing's own key is gone, not
+  // just unlinked) — confirms via #screenConfirmDelete before actually
+  // removing it. A real trash-can silhouette, same path data as
+  // Android's DeleteBinIcon.
+  const del = document.createElement('button');
+  del.className = 'delete-icon-btn';
+  del.innerHTML = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><path d="M266.2 256l47.2 581.4c0 32.4 26.2 58.6 58.6 58.6h282c32.4 0 58.6-26.2 58.6-58.6L759.2 256H266.2z m123.2 530L376 320h37l13.8 466h-37.4z m140.6 0h-36V320h36v466z m104.6 0h-37.2l13.6-466H648l-13.4 466zM728 184h-72l-52.6-46c-7.4-6.4-16.8-10-26.4-10h-129.6c-9.8 0-19.4 3.6-26.8 10L368 184h-72c-35.2 0-60 16.8-60 52h552c0-35.2-24.8-52-60-52z"/></svg>';
+  del.addEventListener('click', () => {
+    pendingDeletePairingId = pairingId;
+    screen = 'confirm-delete';
+    render();
+  });
+  return { group, dot, name, call, del };
+}
+
+/**
+ * Mirrors WaitingScreen's own contact list (HomeScreens.kt): per-contact
+ * Delete lives right on each row (no auto-answer toggle here — that's
+ * Android/TV-only), and the list ends with a plain "Add contact" row.
+ */
+function renderWaitingScreen() {
+  const listEl = el('contactList');
+  if (!waitingTopSpacer) buildWaitingList(listEl);
+  const present = new Set(pairings.map((p) => p.id));
+  for (const [id, row] of waitingRows) {
+    if (present.has(id)) continue;
+    row.group.remove(); row.call.remove(); row.del.remove();
+    waitingRows.delete(id);
+  }
+  // Rows sit between the top spacer and the blank row before "Add contact",
+  // in `pairings` order; a row is only moved when it isn't already there.
+  let cursor = waitingTopSpacer;
+  for (const pairing of pairings) {
+    let row = waitingRows.get(pairing.id);
+    if (!row) { row = createWaitingRow(pairing.id); waitingRows.set(pairing.id, row); }
+    if (cursor.nextSibling !== row.group) {
+      const before = cursor.nextSibling;
+      listEl.insertBefore(row.group, before);
+      listEl.insertBefore(row.call, before);
+      listEl.insertBefore(row.del, before);
+    }
+    cursor = row.del;
+    const state = uiState(pairing.id);
+    const label = pairing.peerName || t('common.thisContact');
+    // Busy/Online/Offline are purely informational — Call stays available
+    // regardless (see requestCall's own doc): tapping Call on an offline
+    // contact just defers, and on a busy one resolves via the real
+    // busy-signal exchange.
+    const [dotClass, dotLabel] = state.status === 'busy' ? ['contact-status-dot busy', t('contacts.statusBusy')]
+      : state.status === 'online' ? ['contact-status-dot ok', t('contacts.statusOnline')]
+      : ['contact-status-dot danger', t('contacts.statusOffline')];
+    setClass(row.dot, dotClass);
+    setAttr(row.dot, 'aria-label', dotLabel);
+    setText(row.name, pairing.peerName || t('common.unnamedContact'));
+    // The rule itself lives in call-core (call_arbitration::can_place_call),
+    // shared with Android.
+    const canCall = callCore.canPlaceCall(isConfirmed(pairing), state.connected);
+    if (row.call.disabled === canCall) row.call.disabled = !canCall;
+    setAttr(row.call, 'aria-label', t('contacts.callContact', { name: label }));
+    setAttr(row.del, 'aria-label', t('contacts.deleteContact', { name: label }));
+  }
+  setAttr(waitingAddBtn, 'aria-label', t('contacts.addContact'));
   updateContactListFadeShape();
 }
 
