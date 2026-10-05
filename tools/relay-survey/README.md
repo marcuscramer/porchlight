@@ -41,7 +41,7 @@ relay list), NIP-66 monitor events from a few relays (`--nip66 wss://…`, defau
 
 `weekly.mjs` runs the whole survey and decides whether `web-app/relays.json` should change; the workflow
 `.github/workflows/relay-survey.yml` runs it on GitHub and opens a pull request. Run it by hand from the Actions tab
-("Run workflow"); the default is a dry run that only produces the report (run summary and a downloadable artifact).
+("Run workflow"); the default is a dry run that only produces the report (run summary and a downloadable artifact). It also runs by itself every Monday at 03:17 UTC, as a real run with a 3-hour soak.
 
 ```
 node weekly.mjs --dry-run                       # locally: discover, probe, soak 3 h, report, decide

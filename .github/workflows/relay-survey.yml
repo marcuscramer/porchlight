@@ -2,7 +2,8 @@ name: Relay survey
 
 # Measures candidate relays and, if the list in web-app/relays.json needs to change, opens a pull request with the
 # new list and the report. Run it by hand from the Actions tab ("Run workflow"): a dry run (the default) only
-# produces the report, as a run summary and a downloadable artifact. See tools/relay-survey/README.md for what the
+# produces the report, as a run summary and a downloadable artifact. It also runs every Monday (see `schedule`
+# below). See tools/relay-survey/README.md for what the
 # survey measures and when a relay is replaced.
 #
 # One-time setting for the pull request step: Settings > Actions > General > "Allow GitHub Actions to create and
@@ -28,9 +29,10 @@ on:
         description: "Optional: only survey these relays (comma separated wss:// URLs) instead of discovering candidates"
         type: string
         default: ""
-  # Weekly, once the first manual reports have been read and look right:
-  # schedule:
-  #   - cron: "17 3 * * 1"
+  # Weekly, Mondays 03:17 UTC: a real run (it can open a pull request), 3 hours of soak. GitHub pauses scheduled
+  # workflows in a repository with no activity for 60 days; a manual run or any push re-enables them.
+  schedule:
+    - cron: "17 3 * * 1"
 
 permissions:
   contents: write
