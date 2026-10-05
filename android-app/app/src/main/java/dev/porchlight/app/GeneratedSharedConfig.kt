@@ -4,14 +4,14 @@ package dev.porchlight.app
 
 object GeneratedSharedConfig {
     /** Version of the relay list built in; a fetched list with a higher version replaces it. */
-    const val RELAYS_VERSION: Int = 1
+    const val RELAYS_VERSION: Int = 2
 
     val RELAYS: List<String> = listOf(
         "wss://relay.chorus.community",
         "wss://relay.cyberguy.fyi",
         "wss://relay.pyramid.li",
         "wss://nostr-01.uid.ovh",
-        "wss://relay.bullishbounty.com",
+        "wss://relay.earthly.city",
     )
 
     val STUN_SERVERS: List<String> = listOf(

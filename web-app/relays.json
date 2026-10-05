@@ -1,10 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "relays": [
     "wss://relay.chorus.community",
     "wss://relay.cyberguy.fyi",
     "wss://relay.pyramid.li",
     "wss://nostr-01.uid.ovh",
-    "wss://dead.invalid.example"
+    "wss://relay.earthly.city"
   ]
 }
