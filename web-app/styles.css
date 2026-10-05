@@ -141,15 +141,31 @@ html, body {
   font-size: var(--typography-body-font-size);
 }
 /* The status dot hugs the top-left of the name, as in the contact list. */
-.info-row .label { color: var(--color-text-dim); display: flex; align-items: flex-start; flex-shrink: 0; }
+.info-row .label { color: var(--color-text-primary); display: flex; align-items: flex-start; flex-shrink: 0; }
 .info-row .contact-status-dot { width: 6px; height: 6px; }
 .info-row .value { color: var(--color-text-primary); text-align: right; }
-.info-row .value.dim { color: var(--color-text-dim); }
+.info-row .value.dim { color: var(--color-text-primary); }
 /* A relay's detail is one line, ellipsized; tapping it (or hovering, via its
    title) shows the whole message. */
 .info-row .value.relay { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
 .info-row .value.relay em { font-style: italic; }
 .info-row .value.relay.expanded { white-space: normal; overflow: visible; }
+/* The button and its result on one line, centered as a whole, close under the relay list (the panel's gap is pulled in). */
+.relay-list-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: -16px;
+  /* The button's label and the result message share this size. */
+  font-size: var(--typography-caption-font-size, 14px);
+}
+.relay-list-actions p { margin: 0; font-size: inherit; color: var(--color-text-primary); }
+
+/* The relays block is set apart from the rows above it; each relay is one line (name left, details right), set in a smaller size and without the gap the other rows have between them. */
+.info-row.gap-above { margin-top: 18px; }
+.info-row.relay-row { font-size: var(--typography-caption-font-size, 14px); }
+.info-row.relay-row + .info-row.relay-row { margin-top: -6px; }
 .info-row .value.ok { color: var(--color-status-ok); }
 .info-row .value.warn { color: var(--color-status-busy); }
 .info-row .value.bad { color: var(--color-status-danger); }
@@ -214,6 +230,13 @@ html, body {
     background: color-mix(in srgb, var(--btn-hue) calc(var(--btn-container-op-focused) * 100%), transparent);
     border-color: color-mix(in srgb, var(--btn-hue) calc(var(--btn-border-op-focused) * 100%), transparent);
   }
+}
+
+/* A small button (the Status page's "Update list"): the neutral design at a reduced size. */
+.tv-button.small {
+  padding: 3px 10px;
+  font-size: inherit;
+  border-radius: 6px;
 }
 
 /* Call and Add contact carry an icon instead of a label — sized and tinted

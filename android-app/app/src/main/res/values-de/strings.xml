@@ -59,6 +59,15 @@
     <string name="connectionInfo_agoSeconds">vor %1$s s</string>
     <string name="connectionInfo_agoMinutes">vor %1$s Min.</string>
     <string name="connectionInfo_agoHours">vor %1$s Std.</string>
+    <string name="connectionInfo_relayList">Relay-Liste</string>
+    <string name="connectionInfo_relayListValue">v%1$s, geprüft %2$s</string>
+    <string name="connectionInfo_relayListCheck">Liste aktualisieren</string>
+    <string name="connectionInfo_relayListChecking">Wird geprüft…</string>
+    <string name="connectionInfo_relayListUpToDate">Aktuell (v%1$s)</string>
+    <string name="connectionInfo_relayListApplied">Neue Liste v%1$s aktiv</string>
+    <string name="connectionInfo_relayListFailed">Abruf fehlgeschlagen: %1$s</string>
+    <string name="connectionInfo_relayListDisabled">In dieser Version nicht verfügbar</string>
+    <string name="connectionInfo_relayListReloading">Neue Liste v%1$s gefunden, wird neu geladen…</string>
     <string name="pairing_addContactTitle">Kontakt hinzufügen</string>
     <string name="pairing_phraseInstructions">Einigt euch am Telefon — oder wie auch immer ihr gerade in Kontakt seid — auf eine kurze Phrase, auf die nur ihr beide kommen würdet. Gebt dann beide genau dieselbe Phrase auf eurem eigenen Gerät ein.</string>
     <string name="pairing_oneTimeNote">Das ist nur einmal nötig — sobald ihr gekoppelt seid, könnt ihr euch jederzeit anrufen.</string>

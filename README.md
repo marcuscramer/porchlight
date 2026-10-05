@@ -222,6 +222,15 @@ end.
    one of you cancels (or doesn't confirm in time), nothing is saved on
    either device.
 
+## Relays
+
+Signaling goes through public Nostr relays (see [SECURITY.md](SECURITY.md) for what they can see). Which relays is a
+file, [`web-app/relays.json`](web-app/relays.json), served next to the web page. The Portal app fetches it on start
+and every six hours (and sooner when a contact's heartbeat shows a newer version), the web page checks the same way
+and reloads itself when a newer list exists. **Settings, Status** shows the list version and has a "Check for relay
+updates" button at the bottom. `tools/relay-survey` measures candidate relays; the list is meant to be updated from its
+reports.
+
 ## Day to day
 
 - **Back**: on the Portal, the remote's **Back** key goes back or cancels on

@@ -173,8 +173,31 @@ class NostrSignalingClient(
 
     private val scope = CoroutineScope(executor.asCoroutineDispatcher() + SupervisorJob())
 
-    private val relayUrls: Set<NormalizedRelayUrl> =
-        GeneratedSharedConfig.RELAYS.mapNotNull { it.normalizeRelayUrlOrNull() }.toSet()
+    /**
+     * The relays in use: `call-core`'s current list plus the relays a newer list just dropped, which stay for their
+     * grace period (see `relay_list`). Read on [executor] and by [snapshot]; replaced by [refreshRelays] and the
+     * periodic [monitor] sweep, never edited in place. The built-in list is the fallback if `call-core` has none.
+     */
+    @Volatile private var relayUrls: Set<NormalizedRelayUrl> = currentRelaySet()
+
+    private fun currentRelaySet(): Set<NormalizedRelayUrl> {
+        val urls = CallCoreBridge.relayListCurrent(System.currentTimeMillis()).all.ifEmpty { GeneratedSharedConfig.RELAYS }
+        return urls.mapNotNull { it.normalizeRelayUrlOrNull() }.toSet()
+    }
+
+    /** The list changed (or a grace period ended): reconnect to the new set. Safe to call from any thread. */
+    fun refreshRelays() {
+        executor.execute { switchRelaysIfChanged() }
+    }
+
+    private fun switchRelaysIfChanged() {
+        if (closed) return
+        val next = currentRelaySet()
+        if (next.isEmpty() || next == relayUrls) return
+        Log.i(TAG, "relay list changed: ${relayUrls.size} -> ${next.size} relays")
+        relayUrls = next
+        rebuildConnections()
+    }
 
     // pingInterval: without it OkHttp never notices a relay socket that died
     // silently (NAT mapping expired, Wi-Fi roam, relay restart with no FIN) —
@@ -507,6 +530,8 @@ class NostrSignalingClient(
         listener.onPresenceUpdate(CallCoreBridge.checkOnlineTimeouts(now))
         listener.onCallTimeoutCheck(CallCoreBridge.checkCallTimeout(now))
         retryPendingPublishes()
+        // A grace period may have ended since the last tick.
+        switchRelaysIfChanged()
 
         when (CallCoreBridge.relayWatchdog(connectedRelays.size, relayUrls.size, now)) {
             CallCoreBridge.RelayWatchdogAction.NOTHING -> {}

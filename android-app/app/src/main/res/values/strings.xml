@@ -59,6 +59,15 @@
     <string name="connectionInfo_agoSeconds">%1$s s ago</string>
     <string name="connectionInfo_agoMinutes">%1$s min ago</string>
     <string name="connectionInfo_agoHours">%1$s h ago</string>
+    <string name="connectionInfo_relayList">Relay list</string>
+    <string name="connectionInfo_relayListValue">v%1$s, checked %2$s</string>
+    <string name="connectionInfo_relayListCheck">Update list</string>
+    <string name="connectionInfo_relayListChecking">Checking…</string>
+    <string name="connectionInfo_relayListUpToDate">Up to date (v%1$s)</string>
+    <string name="connectionInfo_relayListApplied">New list v%1$s in use</string>
+    <string name="connectionInfo_relayListFailed">Couldn\'t fetch: %1$s</string>
+    <string name="connectionInfo_relayListDisabled">Not available in this build</string>
+    <string name="connectionInfo_relayListReloading">New list v%1$s found, reloading…</string>
     <string name="pairing_addContactTitle">Add contact</string>
     <string name="pairing_phraseInstructions">On a phone call — or however else you\'re in touch right now — agree on a short phrase only the two of you would think of. Then have both of you type the exact same phrase into your own device.</string>
     <string name="pairing_oneTimeNote">This only needs to be done once — once paired, you\'ll be able to call each other any time.</string>

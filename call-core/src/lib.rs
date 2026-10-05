@@ -43,6 +43,7 @@
 //!   as one ordered result for the shell to execute;
 //! - `relay_status` — what the Status screens say about each relay;
 //! - `relay_watchdog` — when the Android shell should reconnect, or rebuild, its relay connections;
+//! - `relay_list` — the relay list as replaceable data: validation, versions, the grace period for dropped relays;
 //! - `call_ui` — which phase a call is in (ringing/calling/connecting/live/
 //!   outcome) and which text an ended call gets;
 //! - `wake_up` — the step-by-step decisions for getting the call screen in
@@ -79,6 +80,8 @@ pub mod signal_retry;
 pub mod relay_status;
 
 pub mod relay_watchdog;
+
+pub mod relay_list;
 
 pub mod ice_evidence;
 
@@ -222,6 +225,7 @@ struct AppState {
     retired_attempt_pubkeys: Vec<String>,
     relay_log: relay_status::RelayLogState,
     relay_watchdog: relay_watchdog::WatchdogState,
+    relay_list: relay_list::RelayListState,
     ice: ice_evidence::IceState,
 }
 
@@ -236,6 +240,7 @@ impl AppState {
             retired_attempt_pubkeys: Vec::new(),
             relay_log: relay_status::RelayLogState::new(),
             relay_watchdog: relay_watchdog::WatchdogState::new(),
+            relay_list: relay_list::RelayListState::new(),
             ice: ice_evidence::IceState::new(),
         }
     }

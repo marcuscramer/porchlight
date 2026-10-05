@@ -283,6 +283,8 @@ internal fun TvButton(
     // externally (e.g. brightening a label elsewhere on the same row) —
     // same pattern WaitingScreen's own Auto-answer Switch already uses.
     interactionSource: MutableInteractionSource? = null,
+    // A smaller button (label and padding), for a secondary action on a page of text rows.
+    compact: Boolean = false,
     content: @Composable RowScope.() -> Unit,
 ) {
     val hue = when (tint) {
@@ -364,13 +366,14 @@ internal fun TvButton(
         // Regular weight, not the token's own Medium — a local override
         // here rather than touching GeneratedType (shared with the web
         // client's own button styling via the same token source).
-        ProvideTextStyle(MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight(GeneratedType.fontWeightRegular))) {
+        val labelStyle = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge
+        ProvideTextStyle(labelStyle.copy(fontWeight = FontWeight(GeneratedType.fontWeightRegular))) {
             Row(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(
-                    horizontal = Dimens.buttonPaddingBaseHorizontal,
-                    vertical = Dimens.buttonPaddingBaseVertical,
+                    horizontal = if (compact) Dimens.dimension10 else Dimens.buttonPaddingBaseHorizontal,
+                    vertical = if (compact) Dimens.dimension4 else Dimens.buttonPaddingBaseVertical,
                 ),
                 content = content,
             )

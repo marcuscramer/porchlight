@@ -74,7 +74,16 @@
     "never": "never",
     "agoSeconds": "{seconds} s ago",
     "agoMinutes": "{minutes} min ago",
-    "agoHours": "{hours} h ago"
+    "agoHours": "{hours} h ago",
+    "relayList": "Relay list",
+    "relayListValue": "v{version}, checked {ago}",
+    "relayListCheck": "Update list",
+    "relayListChecking": "Checking…",
+    "relayListUpToDate": "Up to date (v{version})",
+    "relayListApplied": "New list v{version} in use",
+    "relayListFailed": "Couldn't fetch: {reason}",
+    "relayListDisabled": "Not available in this build",
+    "relayListReloading": "New list v{version} found, reloading…"
   },
   "pairing": {
     "addContactTitle": "Add contact",

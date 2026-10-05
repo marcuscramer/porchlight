@@ -1,12 +1,5 @@
 {
   "_comment": "Static values both clients must agree on, in one place — see tokens/build-shared.mjs for how this becomes android-app's GeneratedSharedConfig.kt and web-app/shared-config.js (run `npm run build:shared` after editing; both outputs are committed). Deliberately data, not code: nothing in call-core decides anything from these, so they live here instead of in the Rust crate (changing a relay shouldn't need a wasm rebuild). Decision logic both clients share lives in call-core.",
-  "relays": [
-    "wss://relay.primal.net",
-    "wss://relay.snort.social",
-    "wss://nostr-pub.wellorder.net",
-    "wss://nostr.oxtr.dev",
-    "wss://nostr.data.haus"
-  ],
   "stunServers": [
     "stun:stun.l.google.com:19302",
     "stun:stun1.l.google.com:19302"

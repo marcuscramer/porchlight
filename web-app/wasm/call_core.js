@@ -903,6 +903,56 @@ export function recordPublishResult(event_id, relay, accepted, reason, now_ms) {
 }
 
 /**
+ * See [`crate::relay_list::apply`]'s own doc. Returns the JSON-encoded outcome.
+ * @param {string} list_json
+ * @param {number} now_ms
+ * @returns {string}
+ */
+export function relayListApply(list_json, now_ms) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(list_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.relayListApply(ptr0, len0, now_ms);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * See [`crate::relay_list::current`]'s own doc. Returns the JSON-encoded [`crate::relay_list::Current`].
+ * @param {number} now_ms
+ * @returns {string}
+ */
+export function relayListCurrent(now_ms) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.relayListCurrent(now_ms);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * See [`crate::relay_list::init`]'s own doc. `relays_json` is a JSON array of URLs.
+ * @param {number} version
+ * @param {string} relays_json
+ */
+export function relayListInit(version, relays_json) {
+    const ptr0 = passStringToWasm0(relays_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.relayListInit(version, ptr0, len0);
+}
+
+/**
  * See [`crate::relay_status::view`]'s own doc. Returns a JSON array of
  * [`crate::relay_status::RelayView`]; `"[]"` on a panic.
  * @param {string[]} relays

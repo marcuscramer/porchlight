@@ -1044,3 +1044,43 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRelayWatchdo
     })
     .unwrap_or(0)
 }
+
+/// See [`crate::relay_list::init`]'s own doc. `relays_json` is a JSON array of URLs.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRelayListInit<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    version: jni::sys::jint,
+    relays_json: JString<'local>,
+) {
+    run_catching(&mut env, |env| {
+        let Some(json) = get_string(env, &relays_json) else { return };
+        if let Ok(relays) = serde_json::from_str::<Vec<String>>(&json) {
+            crate::relay_list::init(version.max(0) as u32, &relays);
+        }
+    });
+}
+
+/// See [`crate::relay_list::apply`]'s own doc. Returns the JSON-encoded outcome (`Rejected` on a panic).
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRelayListApply<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    list_json: JString<'local>,
+    now_ms: jlong,
+) -> jstring {
+    encode_or_fallback(&mut env, || r#"{"kind":"Rejected","reason":"internal error"}"#.to_string(), |env| {
+        let json = get_string(env, &list_json)?;
+        Some(crate::relay_list::apply(&json, now_ms))
+    })
+}
+
+/// See [`crate::relay_list::current`]'s own doc. Returns the JSON-encoded [`crate::relay_list::Current`].
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeRelayListCurrent<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    now_ms: jlong,
+) -> jstring {
+    encode_or_fallback(&mut env, || r#"{"version":0,"relays":[],"extra":[]}"#.to_string(), |_| Some(crate::relay_list::current(now_ms)))
+}

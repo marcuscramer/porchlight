@@ -33,12 +33,14 @@ import init, * as callCore from './wasm/call_core.js';
 // already falls back correctly once a second locale file exists, no code
 // here needs to change when one does.
 import { t as translate, resolveLocale } from './strings.js';
-import { RELAYS, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS, HEARTBEAT_SPREAD_MS, SELF_VIEW_SHRINK_MS, MAX_PHRASE_LENGTH, CAPTURE, PAUSE_WHEN_HIDDEN_MS } from './shared-config.js';
+import { RELAYS, RELAYS_VERSION, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS, HEARTBEAT_SPREAD_MS, SELF_VIEW_SHRINK_MS, MAX_PHRASE_LENGTH, CAPTURE, PAUSE_WHEN_HIDDEN_MS } from './shared-config.js';
 
 // call-core's WASM module — a top-level await (legal since this file is
 // loaded as type="module"), so nothing below can run a pairing attempt
 // before it's ready.
 await init();
+// The relay list this page was built with is the active one; see checkRelayList for how a newer one is picked up.
+callCore.relayListInit(RELAYS_VERSION, JSON.stringify(RELAYS));
 
 const LOCALE_STORAGE_KEY = 'porchlight-locale';
 // No language switcher yet (English-only infra pass) — this just means a
@@ -328,6 +330,8 @@ function connectRelayClient() {
   resubscribe();
   onlineCheckTimer = setInterval(monitorOnlineTimeouts, ONLINE_CHECK_INTERVAL_MS);
   scheduleHeartbeat(0);
+  backgroundRelayListCheck();
+  setInterval(backgroundRelayListCheck, RELAY_LIST_INTERVAL_MS);
 }
 
 /** Everything about an incoming event — dedup, unwrap and verify, parsing,
@@ -366,6 +370,65 @@ function handleIncomingEvent(event) {
   applyPresenceUpdate(JSON.stringify({ presence_effects: result.presence_effects, call_effects: result.call_effects }));
   for (const action of result.actions) applyRouteAction(action);
   if (result.bootstrap_effects.length) applyEffects(JSON.stringify(result.bootstrap_effects));
+  if (result.fetch_relay_list) backgroundRelayListCheck();
+}
+
+// --- Relay list updates ---------------------------------------------------
+//
+// The list is data (relays.json, served next to this page). This page's CSP only allows the relay hosts it was
+// built with, so a newer list is not applied in place: the page reloads, and the reloaded page (built from the same
+// deployment as that file) has the new list and the matching CSP. Mirrors Android's RelayListUpdater: checked at
+// start, every 6 h, when a contact's heartbeat shows a newer version, and from the Status page.
+
+const RELAY_LIST_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const RELAY_LIST_FORCED_GAP_MS = 10_000;
+const RELAY_LIST_RELOAD_GUARD_KEY = 'porchlight-relaylist-reload';
+const RELAY_LIST_RELOAD_GUARD_MS = 60 * 60 * 1000;
+let relayListCheckedAt = null;
+let relayListBusy = false;
+let relayListLastForcedAt = 0;
+let pendingRelayListReload = false;
+
+/** Resolves { kind: 'upToDate' | 'newer' | 'failed' | 'busy', version?, reason? }. */
+async function checkRelayList(force) {
+  if (relayListBusy) return { kind: 'busy' };
+  relayListBusy = true;
+  try {
+    const url = new URL('relays.json', location.href);
+    if (force) url.searchParams.set('t', String(Date.now()));
+    const res = await fetch(url, { cache: force ? 'no-store' : 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const file = JSON.parse((await res.text()).slice(0, 16_384));
+    if (!Number.isInteger(file.version) || file.version <= 0 || !Array.isArray(file.relays)) throw new Error('not a relay list');
+    relayListCheckedAt = Date.now();
+    return file.version > RELAYS_VERSION ? { kind: 'newer', version: file.version } : { kind: 'upToDate' };
+  } catch (err) {
+    return { kind: 'failed', reason: err && err.message ? err.message : String(err) };
+  } finally {
+    relayListBusy = false;
+  }
+}
+
+/** A background check found a newer list: reload at the next moment nothing is going on, at most once an hour (if the
+ * browser serves a stale copy of this page after the reload, it must not loop). */
+function scheduleRelayListReload() {
+  try {
+    const last = Number(sessionStorage.getItem(RELAY_LIST_RELOAD_GUARD_KEY) || 0);
+    if (Date.now() - last < RELAY_LIST_RELOAD_GUARD_MS) return;
+  } catch { /* no storage: the once-an-hour guard is lost, but a loop needs a stale page every time */ }
+  pendingRelayListReload = true;
+  reloadForRelayListIfIdle();
+}
+
+function reloadForRelayListIfIdle() {
+  if (!pendingRelayListReload || screen !== 'waiting') return;
+  pendingRelayListReload = false;
+  try { sessionStorage.setItem(RELAY_LIST_RELOAD_GUARD_KEY, String(Date.now())); } catch { /* see above */ }
+  location.reload();
+}
+
+function backgroundRelayListCheck() {
+  checkRelayList(false).then((r) => { if (r.kind === 'newer') scheduleRelayListReload(); });
 }
 
 function applyRouteAction(action) {
@@ -1561,6 +1624,7 @@ const contactUiState = new Map();
 function uiState(pairingId) { return contactUiState.get(pairingId) || { status: 'offline', connected: false }; }
 
 function render() {
+  reloadForRelayListIfIdle();
   // Reactive swap: the moment a candidate is cryptographically confirmed
   // for the pairing attempt currently in progress, jump straight to the
   // name-confirm screen.
@@ -1810,6 +1874,23 @@ function renderSettingsScreen() { el('renameInput').value = deviceName; }
 el('renameBtn').addEventListener('click', () => { screen = 'rename'; render(); });
 el('connectionBtn').addEventListener('click', () => { screen = 'connection'; render(); });
 el('connectionBack').addEventListener('click', () => { screen = 'settings'; render(); });
+el('relayListCheck').addEventListener('click', async () => {
+  const now = Date.now();
+  if (relayListBusy || now - relayListLastForcedAt < RELAY_LIST_FORCED_GAP_MS) return;
+  relayListLastForcedAt = now;
+  const out = el('relayListResult');
+  out.hidden = false;
+  out.textContent = t('connectionInfo.relayListChecking');
+  const r = await checkRelayList(true);
+  if (r.kind === 'newer') {
+    out.textContent = t('connectionInfo.relayListReloading', { version: r.version });
+    setTimeout(() => location.reload(), 1200);
+  } else if (r.kind === 'upToDate') {
+    out.textContent = t('connectionInfo.relayListUpToDate', { version: RELAYS_VERSION });
+  } else {
+    out.textContent = t('connectionInfo.relayListFailed', { reason: r.reason });
+  }
+});
 
 // --- Status (mirrors ConnectionInfoScreen) --------------------
 
@@ -1837,14 +1918,18 @@ function renderConnectionScreen() {
   // means fast, even on Wi-Fi), and browsers don't say Wi-Fi vs. mobile.
   const online = navigator.onLine;
   row(t('connectionInfo.network'), online ? t('connectionInfo.networkOther') : t('connectionInfo.networkOffline'), online ? 'ok' : 'bad');
+  row(t('connectionInfo.lastHeartbeat'), agoText(lastHeartbeatSentAt, now));
+  const peers = confirmedPeers();
+  row(t('connectionInfo.contactsOnline'), t('connectionInfo.contactsOnlineValue', { online: peers.filter((p) => uiState(p.pairingId).status !== 'offline').length, total: peers.length }));
 
-  // The pool keys relays by their normalized URL (a trailing slash), RELAYS
-  // doesn't have one — call-core compares without it. Which dot, which error,
-  // how it is trimmed and how long ago all come from call-core.
+  // The relays come last, set apart from the rows above. The pool keys relays
+  // by their normalized URL (a trailing slash), RELAYS doesn't have one —
+  // call-core compares without it. Which dot, which error, how it is trimmed
+  // and how long ago all come from call-core.
   const connectedUrls = pool ? [...pool.listConnectionStatus()].filter(([, up]) => up).map(([url]) => url) : [];
   const views = JSON.parse(callCore.relayView(RELAYS, connectedUrls, now));
   const up = views.filter((v) => v.state !== 'down').length;
-  row(t('connectionInfo.relays'), t('connectionInfo.relaysSummary', { up, total: RELAYS.length }), up > 0 ? 'ok' : 'bad');
+  rows.push({ label: t('connectionInfo.relays'), text: t('connectionInfo.relaysSummary', { up, total: RELAYS.length }), tone: up > 0 ? 'ok' : 'bad', gapAbove: true });
   for (const v of views) {
     const dot = { cls: { connected: 'ok', paused: 'busy', down: 'danger' }[v.state], label: v.state === 'down' ? t('connectionInfo.relayNotConnected') : t('connectionInfo.relayConnected') };
     const counts = t('connectionInfo.relayCounts', { accepted: v.accepted, rejected: v.rejected });
@@ -1857,15 +1942,15 @@ function renderConnectionScreen() {
       italic: v.error || '',
     });
   }
-
-  row(t('connectionInfo.lastHeartbeat'), agoText(lastHeartbeatSentAt, now));
-  const peers = confirmedPeers();
-  row(t('connectionInfo.contactsOnline'), t('connectionInfo.contactsOnlineValue', { online: peers.filter((p) => uiState(p.pairingId).status !== 'offline').length, total: peers.length }));
+  // The version in use; "checked" only once a check has succeeded.
+  row(t('connectionInfo.relayList'), relayListCheckedAt == null
+    ? `v${RELAYS_VERSION}`
+    : t('connectionInfo.relayListValue', { version: RELAYS_VERSION, ago: agoText(relayListCheckedAt, now) }));
 
   const container = el('connectionRows');
-  container.replaceChildren(...rows.map(({ label, dot, id, text, italic, tone }) => {
+  container.replaceChildren(...rows.map(({ label, dot, id, text, italic, tone, gapAbove }) => {
     const node = document.createElement('div');
-    node.className = 'info-row';
+    node.className = 'info-row' + (dot ? ' relay-row' : '') + (gapAbove ? ' gap-above' : '');
     const l = document.createElement('span'); l.className = 'label';
     if (dot) {
       const d = document.createElement('span');

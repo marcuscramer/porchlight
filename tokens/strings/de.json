@@ -74,7 +74,16 @@
     "never": "nie",
     "agoSeconds": "vor {seconds} s",
     "agoMinutes": "vor {minutes} Min.",
-    "agoHours": "vor {hours} Std."
+    "agoHours": "vor {hours} Std.",
+    "relayList": "Relay-Liste",
+    "relayListValue": "v{version}, geprüft {ago}",
+    "relayListCheck": "Liste aktualisieren",
+    "relayListChecking": "Wird geprüft…",
+    "relayListUpToDate": "Aktuell (v{version})",
+    "relayListApplied": "Neue Liste v{version} aktiv",
+    "relayListFailed": "Abruf fehlgeschlagen: {reason}",
+    "relayListDisabled": "In dieser Version nicht verfügbar",
+    "relayListReloading": "Neue Liste v{version} gefunden, wird neu geladen…"
   },
   "pairing": {
     "addContactTitle": "Kontakt hinzufügen",

@@ -644,3 +644,31 @@ pub fn ice_last_diagnosis() -> Option<String> {
     .ok()
     .flatten()
 }
+
+/// See [`crate::relay_list::init`]'s own doc. `relays_json` is a JSON array of URLs.
+#[wasm_bindgen(js_name = relayListInit)]
+pub fn relay_list_init(version: u32, relays_json: &str) {
+    let _ = catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let Ok(relays) = serde_json::from_str::<Vec<String>>(relays_json) {
+            crate::relay_list::init(version, &relays);
+        }
+    }));
+}
+
+/// See [`crate::relay_list::apply`]'s own doc. Returns the JSON-encoded outcome.
+#[wasm_bindgen(js_name = relayListApply)]
+pub fn relay_list_apply(list_json: &str, now_ms: f64) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::relay_list::apply(list_json, now_ms as i64)).ok()))
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| r#"{"kind":"Rejected","reason":"internal error"}"#.to_string())
+}
+
+/// See [`crate::relay_list::current`]'s own doc. Returns the JSON-encoded [`crate::relay_list::Current`].
+#[wasm_bindgen(js_name = relayListCurrent)]
+pub fn relay_list_current(now_ms: f64) -> String {
+    catch_unwind(std::panic::AssertUnwindSafe(|| serde_json::to_string(&crate::relay_list::current(now_ms as i64)).ok()))
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| r#"{"version":0,"relays":[],"extra":[]}"#.to_string())
+}

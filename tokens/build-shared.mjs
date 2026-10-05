@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 // Generates android-app's GeneratedSharedConfig.kt and web-app's
 // shared-config.js from shared/shared-config.json — the static values both
-// clients must agree on (the relay list, STUN servers, how long a passive
-// outcome screen stays up, the self-view position cycle). A small standalone
+// clients must agree on (STUN servers, how long a passive outcome screen
+// stays up, the self-view position cycle) — and from web-app/relays.json,
+// the relay list. The relay list is the one value that changes without a code
+// change: Pages serves web-app/relays.json as it is, devices fetch it, and a
+// higher "version" replaces the list the app was built with. What this script
+// bakes in is the built-in list used before the first fetch (and by the web
+// page, whose CSP lists the relay hosts and is rewritten here). A small standalone
 // script like build-strings.mjs, not a style-dictionary pass: these aren't
 // design tokens. Both outputs are committed; rerun `npm run build:shared`
 // after editing the JSON.
 //
 // Validates before writing: relay URLs must be wss://, STUN URLs stun:/stuns:,
 // no duplicates, positive timings, and a non-empty position cycle — so a typo
-// fails here instead of as a silent runtime misbehavior on one platform. Also
-// fails if SECURITY.md (which names every relay a user's traffic touches)
-// doesn't mention one of them, so the doc can't silently drift from the list.
+// fails here instead of as a silent runtime misbehavior on one platform.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +23,10 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(here, '..');
 const cfg = JSON.parse(readFileSync(path.join(here, 'shared', 'shared-config.json'), 'utf8'));
+const relayFile = JSON.parse(readFileSync(path.join(repoRoot, 'web-app', 'relays.json'), 'utf8'));
+cfg.relays = relayFile.relays;
+if (!Number.isInteger(relayFile.version) || relayFile.version <= 0) fail('web-app/relays.json: version must be a positive integer');
+if (relayFile.relays.length > 12) fail('web-app/relays.json: at most 12 relays');
 
 function fail(message) {
   console.error(`shared-config.json: ${message}`);
@@ -39,20 +46,17 @@ for (const key of ['autoDismissDelayMs', 'presenceTickIntervalMs', 'subscription
 for (const key of ['width', 'height', 'fps']) {
   if (!cfg.capture || !Number.isInteger(cfg.capture[key]) || cfg.capture[key] <= 0) fail(`capture.${key} must be a positive integer`);
 }
-const securityDoc = readFileSync(path.join(repoRoot, 'SECURITY.md'), 'utf8');
-for (const relay of cfg.relays) {
-  const host = new URL(relay).hostname;
-  if (!securityDoc.includes(host)) fail(`SECURITY.md doesn't mention relay ${host} — update its list of relays to match`);
-}
-
-// The web client's Content-Security-Policy only lets it open sockets to hosts it lists.
-const webHtml = readFileSync(path.join(repoRoot, 'web-app', 'index.html'), 'utf8');
-const csp = (webHtml.match(/http-equiv="Content-Security-Policy"\s+content="([^"]*)"/) || [, ''])[1];
-const connectSrc = (csp.match(/connect-src([^;]*)/) || [, ''])[1].split(/\s+/);
-if (!csp) fail("couldn't find the Content-Security-Policy meta tag in web-app/index.html");
-for (const relay of cfg.relays) {
-  if (!connectSrc.includes(relay)) fail(`web-app/index.html's Content-Security-Policy connect-src doesn't allow ${relay} — add it`);
-}
+// The web client's Content-Security-Policy only lets it open sockets to hosts it lists; rewrite the relay hosts in
+// connect-src to match the list (the other sources stay as they are).
+const htmlPath = path.join(repoRoot, 'web-app', 'index.html');
+const webHtml = readFileSync(htmlPath, 'utf8');
+const cspMatch = webHtml.match(/(http-equiv="Content-Security-Policy"\s+content=")([^"]*)(")/);
+if (!cspMatch) fail("couldn't find the Content-Security-Policy meta tag in web-app/index.html");
+const newCsp = cspMatch[2].replace(/connect-src([^;]*)/, (_, sources) => {
+  const kept = sources.split(/\s+/).filter((x) => x && !x.startsWith('wss://'));
+  return `connect-src ${[...kept, ...cfg.relays].join(' ')}`;
+});
+if (newCsp !== cspMatch[2]) writeFileSync(htmlPath, webHtml.replace(cspMatch[0], cspMatch[1] + newCsp + cspMatch[3]));
 
 const q = (s) => JSON.stringify(s);
 const kotlinMs = (n) => `${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '_')}L`;
@@ -63,6 +67,9 @@ const kotlin = `package dev.porchlight.app
 // ${header}
 
 object GeneratedSharedConfig {
+    /** Version of the relay list built in; a fetched list with a higher version replaces it. */
+    const val RELAYS_VERSION: Int = ${relayFile.version}
+
     val RELAYS: List<String> = listOf(
 ${cfg.relays.map((r) => `        ${q(r)},`).join('\n')}
     )
@@ -104,6 +111,9 @@ ${cfg.previewPositions.map((r) => `        ${q(r)},`).join('\n')}
 `;
 
 const js = `// ${header}
+
+// Version of the relay list built in; a fetched list with a higher version replaces it.
+export const RELAYS_VERSION = ${relayFile.version};
 
 export const RELAYS = ${JSON.stringify(cfg.relays, null, 2)};
 

@@ -91,6 +91,8 @@ pub struct RouteResult {
     pub actions: Vec<RouteAction>,
     /// Pairing-attempt effects, for a bootstrap event.
     pub bootstrap_effects: Vec<Effect>,
+    /// A contact's heartbeat reported a newer relay list than ours: the shell fetches it now.
+    pub fetch_relay_list: bool,
 }
 
 /// The JSON an empty result serializes to — the shells' fallback when the
@@ -170,6 +172,9 @@ fn route_wrap(event_json: &str, ctx: &RouteContext, now_ms: i64) -> RouteResult 
         Some(SignalMessage::Heartbeat { busy, hello, .. }) => (*busy, *hello),
         _ => (None, false),
     };
+    if let Some(SignalMessage::Heartbeat { list_version: Some(v), .. }) = &message {
+        result.fetch_relay_list = crate::relay_list::note_peer_version(*v, now_ms);
+    }
     let id = peer.pairing_id.as_str();
     let mut seen = presence::mark_seen(id, &own_pubkey, &peer.peer_public_key, now_ms, peer_busy, peer_hello);
     let wants_reply = seen.presence_effects.iter().any(|e| matches!(e, PresenceEffect::ReplyHeartbeat { pairing_id } if pairing_id == id));
@@ -286,6 +291,24 @@ mod tests {
         let signal = r.signal.expect("signal watermark");
         assert_eq!(signal.pairing_id, p.id);
         assert!(!signal.event_id.is_empty());
+    }
+
+    #[test]
+    fn a_heartbeat_with_a_newer_relay_list_version_asks_for_a_fetch() {
+        let _g = call_arbitration::reset_state_for_test();
+        let _l = crate::relay_list::TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        crate::relay_list::reset_for_test();
+        crate::relay_list::init(3, &["wss://a.example.com".to_string()]);
+        let p = pair(false);
+        let same = p.route(r#"{"type":"heartbeat","name":"Anna","busy":false,"listVersion":3}"#);
+        assert!(!same.fetch_relay_list, "same version");
+        let older = p.route(r#"{"type":"heartbeat","name":"Anna","busy":false,"listVersion":2}"#);
+        assert!(!older.fetch_relay_list);
+        let none = p.route(r#"{"type":"heartbeat","name":"Anna","busy":false}"#);
+        assert!(!none.fetch_relay_list, "an older client sends no version");
+        let newer = p.route(r#"{"type":"heartbeat","name":"Anna","busy":false,"listVersion":4}"#);
+        assert!(newer.fetch_relay_list);
+        crate::relay_list::reset_for_test();
     }
 
     #[test]

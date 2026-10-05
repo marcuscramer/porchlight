@@ -25,8 +25,8 @@ Please report security problems privately, not in a public issue: use
   identity — but pairing shows it for you to check against who you expect.
   A contact also sees whether you're online or busy, and — during a call —
   your IP address, since media goes directly between the two devices.
-- **Nostr relays** (`relay.primal.net`, `relay.snort.social`,
-  `nostr-pub.wellorder.net`, `nostr.oxtr.dev`, `nostr.data.haus`) — independent, free, third-party
+- **Nostr relays** (the list in [`web-app/relays.json`](web-app/relays.json); five at the
+  moment) — independent, free, third-party
   infrastructure this project doesn't run or control. Carries
   pairing/call-setup messages only. Pairing messages are public: relays, and
   anyone watching them, see the pairing tag, the per-pairing public key, and
@@ -36,7 +36,16 @@ Please report security problems privately, not in a public issue: use
   information during WebRTC's NAT-traversal (ICE) step only.
 - **GitHub** — hosts the web app (GitHub Pages) and the Android releases the
   app updates itself from. Whoever controls those can ship you different
-  code.
+  code. The same site also serves the **relay list** (`relays.json`): the web
+  app is built with it, and the Android app fetches it on start, every six
+  hours, and when a contact's heartbeat shows a newer version, replacing the
+  built-in list when its version is higher (a list must be `wss://` URLs, at
+  most twelve; relays a new list drops stay in use for 48 hours). The list is
+  not signed. Someone who took over the repository could point devices at
+  relays they run, which would see device addresses, pairing public keys and
+  message timing but not message contents; on Android that is the one thing a
+  repository takeover adds, because app updates are checked against the
+  release signing key.
 - **esm.sh and Google Fonts** — the web app loads its Nostr library from
   `esm.sh` (pinned to one version, but without an integrity hash) and its
   fonts from Google, so both see that you opened the page. A compromised
@@ -116,7 +125,7 @@ number.
 | Someone watching relay traffic guesses a weak pairing passphrase from the public rendezvous tag, then joins your pairing attempt as the other party | The tag is a slow, memory-hard hash (Argon2id) of the phrase, which makes each offline guess expensive but doesn't stop guessing a weak phrase. SPAKE2 still stops anyone without the phrase. A second party showing up at the same rendezvous point is refused for everyone (see the collision row). And the "Pair with [name]?" screen is a human check: you only confirm if the name is the contact you expect. | A weak phrase can be recovered offline. The name check stops a blind attacker, who can't see your contact's name (it is sent encrypted) and has to guess it, but it is self-reported and unverified, so it won't stop one who knows what your contact's device is called. If your contact is simply late, the attacker has until they arrive. Mitigation is a long phrase and reading the name on that screen carefully; a stronger design (a rendezvous code separate from the password) is not implemented. |
 | Someone guesses a pairing passphrase by trying it against a live attempt | SPAKE2 requires a live, interactive exchange per guess | A guess that lands mid-exchange shows up as a second candidate and gets rejected outright (see the collision case below), not silently paired. |
 | Two unrelated pairs reuse the same phrase at once, or someone deliberately collides an attempt | Pairing is refused outright for everyone at that rendezvous point, not left to a choice | Both sides have to retry with a fresh phrase. Indistinguishable from a deliberate collision by design — treated the same either way. |
-| A relay refuses to deliver, or goes offline | App talks to 5 independent relays at once, not one, and retries a signaling message that missed a relay (pausing a relay that rejects it for a while) | A relay can't forge a valid signed/encrypted message without either device's private key, but could drop traffic. Relay reliability is volunteer-grade, no SLA. |
+| A relay refuses to deliver, or goes offline | App talks to several independent relays at once (five today), not one, retries a signaling message that missed a relay (pausing a relay that rejects it for a while), and takes the relay list from a file it re-fetches, so a failing relay is replaced without a new release | A relay can't forge a valid signed/encrypted message without either device's private key, but could drop traffic. Relay reliability is volunteer-grade, no SLA. |
 | A relay (or anyone watching it) observes traffic | NIP-44 encryption + gift-wrapping | Relays still see call-setup *metadata*: that messages reached a pairing's public key, and roughly when — never call content, and never media (which never transits a relay at all). During pairing they see the tag, the public key and the key exchange, but not the device names. |
 | Relays keep signaling ciphertext and a key is compromised later | Media has forward secrecy (DTLS-SRTP) | Signaling is encrypted to each pairing's long-lived key, so it has no forward secrecy. Someone who later gets a pairing key and kept the relay traffic could read the old call-setup messages, which include IP addresses — never the audio/video. |
 | A paired contact (or someone with their key) has auto-answer enabled on your Portal | Auto-answer is off by default and per contact, with a 5-second on-screen countdown before it picks up | A contact you've enabled it for can start your Portal's camera and microphone without anyone tapping Accept. Only enable it for contacts you'd trust that far. |

@@ -7,6 +7,8 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
@@ -14,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,7 +67,22 @@ internal fun ConnectionInfoScreen(
     PageScreen(title = stringResource(R.string.connectionInfo_title)) {
         Column(verticalArrangement = Arrangement.spacedBy(Dimens.dimension8)) {
             InfoRow(stringResource(R.string.connectionInfo_network), stringResource(network.textRes), if (network.good) OK else BAD)
+            InfoRow(stringResource(R.string.connectionInfo_lastHeartbeat), agoText(CallCoreBridge.ago(snapshot?.lastHeartbeatSentAtMs, now)))
+            val peers = state.contacts
+            InfoRow(
+                stringResource(R.string.connectionInfo_contactsOnline),
+                stringResource(R.string.connectionInfo_contactsOnlineValue, peers.count { it.status != CallCoreBridge.PresenceStatus.OFFLINE }, peers.size),
+            )
+            InfoRow(stringResource(R.string.connectionInfo_wakeUpService), stringResource(if (wakeUpServiceOn) R.string.connectionInfo_on else R.string.connectionInfo_off))
+            InfoRow(stringResource(R.string.connectionInfo_overlay), stringResource(if (overlayAllowed) R.string.connectionInfo_allowed else R.string.connectionInfo_notAllowed))
+            InfoRow(
+                stringResource(R.string.connectionInfo_installVerifier),
+                stringResource(if (selfInstallPossible) R.string.connectionInfo_off else R.string.connectionInfo_verifierBlocking),
+                if (selfInstallPossible) OK else WARN,
+            )
 
+            // The relays come last, set apart from the rows above.
+            Spacer(Modifier.height(Dimens.dimension16))
             val relays = snapshot?.relays.orEmpty()
             val up = relays.count { it.state != CallCoreBridge.RelayState.DOWN }
             InfoRow(
@@ -90,20 +108,48 @@ internal fun ConnectionInfoScreen(
                 RelayRow(relay.host, detail, dot, dotDescription)
             }
 
-            InfoRow(stringResource(R.string.connectionInfo_lastHeartbeat), agoText(CallCoreBridge.ago(snapshot?.lastHeartbeatSentAtMs, now)))
-            val peers = state.contacts
+            // The version in use; "checked" only once a check has succeeded.
+            val listVersion = remember(now) { CallCoreBridge.relayListCurrent(System.currentTimeMillis()).version }
+            val listCheckedAt = service?.relayListStatus()?.checkedAtMs
             InfoRow(
-                stringResource(R.string.connectionInfo_contactsOnline),
-                stringResource(R.string.connectionInfo_contactsOnlineValue, peers.count { it.status != CallCoreBridge.PresenceStatus.OFFLINE }, peers.size),
+                stringResource(R.string.connectionInfo_relayList),
+                if (listCheckedAt == null) "v$listVersion"
+                else stringResource(R.string.connectionInfo_relayListValue, listVersion, agoText(CallCoreBridge.ago(listCheckedAt, now))),
             )
-            InfoRow(stringResource(R.string.connectionInfo_wakeUpService), stringResource(if (wakeUpServiceOn) R.string.connectionInfo_on else R.string.connectionInfo_off))
-            InfoRow(stringResource(R.string.connectionInfo_overlay), stringResource(if (overlayAllowed) R.string.connectionInfo_allowed else R.string.connectionInfo_notAllowed))
-            InfoRow(
-                stringResource(R.string.connectionInfo_installVerifier),
-                stringResource(if (selfInstallPossible) R.string.connectionInfo_off else R.string.connectionInfo_verifierBlocking),
-                if (selfInstallPossible) OK else WARN,
-            )
+            RelayListCheck(service)
         }
+    }
+}
+
+/** "Check for relay updates" and what came of it. Stays quiet until pressed. */
+@Composable
+private fun RelayListCheck(service: CameraAgentService?) {
+    var checking by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<RelayListUpdater.Result?>(null) }
+    val version = CallCoreBridge.relayListCurrent(System.currentTimeMillis()).version
+    // The button and its result on one line, centered as a whole.
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Dimens.dimension16, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TvButton(
+            onClick = {
+                checking = true
+                service?.checkRelayListNow { r -> result = r; checking = false }
+            },
+            enabled = !checking && service != null,
+            compact = true,
+        ) { Text(stringResource(R.string.connectionInfo_relayListCheck)) }
+        val shown = result
+        val message = if (checking) stringResource(R.string.connectionInfo_relayListChecking) else when (shown) {
+            null -> null
+            RelayListUpdater.Result.UpToDate -> stringResource(R.string.connectionInfo_relayListUpToDate, version)
+            is RelayListUpdater.Result.Applied -> stringResource(R.string.connectionInfo_relayListApplied, shown.version)
+            is RelayListUpdater.Result.Failed -> stringResource(R.string.connectionInfo_relayListFailed, shown.reason)
+            RelayListUpdater.Result.Disabled -> stringResource(R.string.connectionInfo_relayListDisabled)
+        }
+        if (message != null) Text(message, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -117,7 +163,7 @@ private fun InfoRow(label: String, value: String, valueColor: Color = GeneratedC
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap),
     ) {
-        Text(label, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        Text(label, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
         Text(value, color = valueColor, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
     }
 }
@@ -154,11 +200,11 @@ private fun RelayRow(host: String, detail: androidx.compose.ui.text.AnnotatedStr
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.spacingContactRowGap)) {
         Row(verticalAlignment = Alignment.Top) {
             StatusDot(hue = dot, contentDescription = dotDescription, size = Dimens.dimension6)
-            Text(host, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            Text(host, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.bodySmall, maxLines = 1)
         }
         Text(
             detail,
-            color = GeneratedColor.colorTextDim,
+            color = GeneratedColor.colorTextPrimary,
             style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.End,
             maxLines = 1,

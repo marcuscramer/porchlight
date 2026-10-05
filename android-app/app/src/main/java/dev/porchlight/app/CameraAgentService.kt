@@ -831,6 +831,8 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
 
         val executor = Executors.newSingleThreadScheduledExecutor()
         callExecutor = executor
+        // Before anything connects: the relay list (built in, or the last one fetched) must be in call-core.
+        relayListUpdater.init()
         engine = WebRtcEngine(context = this, listener = this, executor = executor).also { it.start() }
         signaling = NostrSignalingClient(context = this, resolver = PairingResolverImpl(), listener = this, executor = executor).also { it.connect() }
         for (pairing in config.pairings) addPairingState(pairing)
@@ -847,6 +849,24 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         _state.value = _state.value.copy(running = true, statusText = getString(R.string.notifications_connectingStatus))
 
         scheduleUpdateCheck()
+        scheduleRelayListFetch()
+    }
+
+    // The relay list: fetched on start, then every RelayListUpdater.FETCH_INTERVAL_MS, when a contact's heartbeat
+    // shows a newer one, and when the Status page asks (checkRelayListNow). Applying a new list reconnects.
+    private val relayListUpdater = RelayListUpdater(this) { signaling?.refreshRelays() }
+
+    /** The relay list's last check and result, for the Status page. */
+    fun relayListStatus(): RelayListUpdater.Status = relayListUpdater.status
+
+    /** The Status page's "Check now". */
+    fun checkRelayListNow(onDone: (RelayListUpdater.Result) -> Unit) = relayListUpdater.fetch(force = true, onDone = onDone)
+
+    private fun scheduleRelayListFetch() {
+        relayListUpdater.fetch(force = false)
+        callExecutor?.safeSchedule(RelayListUpdater.FETCH_INTERVAL_MS, TimeUnit.MILLISECONDS) {
+            if (engine != null) scheduleRelayListFetch()
+        }
     }
 
     // Deliberately not on callExecutor: UpdateChecker.checkAndMaybeNotify
@@ -1034,6 +1054,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
             }
         }
         if (result.bootstrapEffects.isNotEmpty()) applyEffects(result.bootstrapEffects)
+        if (result.fetchRelayList) relayListUpdater.fetch(force = false)
     }
 
     /**

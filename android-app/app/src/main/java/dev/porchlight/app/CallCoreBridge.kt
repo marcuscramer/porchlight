@@ -196,6 +196,15 @@ object CallCoreBridge {
     private external fun nativeRelayWatchdog(connected: Int, total: Int, nowMs: Long): Int
 
     @JvmStatic
+    private external fun nativeRelayListInit(version: Int, relaysJson: String)
+
+    @JvmStatic
+    private external fun nativeRelayListApply(listJson: String, nowMs: Long): String
+
+    @JvmStatic
+    private external fun nativeRelayListCurrent(nowMs: Long): String
+
+    @JvmStatic
     private external fun nativeCallPhase(hasActiveCall: Boolean, hasOutcome: Boolean, hasRing: Boolean, acceptedIncoming: Boolean, peerConnected: Boolean, peerOffline: Boolean): String
 
     @JvmStatic
@@ -566,6 +575,8 @@ object CallCoreBridge {
         val update: PresenceUpdateResult,
         val actions: List<RouteAction>,
         val bootstrapEffects: List<Effect>,
+        /** A contact's heartbeat reported a newer relay list than ours: fetch it now. */
+        val fetchRelayList: Boolean = false,
     )
 
     /** The single entry point for an incoming relay event: dedup, unwrap and
@@ -968,7 +979,7 @@ object CallCoreBridge {
                 else -> error("CallCoreBridge: unknown route action kind from native layer: $kind")
             }
         }
-        return RouteResult(signal, parsePresenceUpdateResult(json), actions, parseEffects(obj.getJSONArray("bootstrap_effects").toString()))
+        return RouteResult(signal, parsePresenceUpdateResult(json), actions, parseEffects(obj.getJSONArray("bootstrap_effects").toString()), obj.optBoolean("fetch_relay_list", false))
     }
 
     private fun parsePresenceUpdateResult(json: String): PresenceUpdateResult {
@@ -983,5 +994,37 @@ object CallCoreBridge {
             }
         }
         return PresenceUpdateResult(presenceEffects, parseCallEffects(obj.getJSONArray("call_effects").toString()))
+    }
+
+    /** The relay list in use: the active [relays], and [extra] ones a newer list dropped that are still used for a
+     * while. See the Rust crate's `relay_list` module. */
+    data class RelayListCurrent(val version: Int, val relays: List<String>, val extra: List<String>) {
+        val all: List<String> get() = relays + extra
+    }
+
+    sealed interface RelayListOutcome {
+        data class Applied(val version: Int, val relays: List<String>, val added: List<String>, val removed: List<String>) : RelayListOutcome
+        data class Unchanged(val version: Int) : RelayListOutcome
+        data class Rejected(val reason: String) : RelayListOutcome
+    }
+
+    /** Sets the list this build ships with; does nothing if a list is already active in this process. */
+    fun relayListInit(version: Int, relays: List<String>) = nativeRelayListInit(version, JSONArray(relays).toString())
+
+    /** Replaces the active list with [listJson] if its version is higher. */
+    fun relayListApply(listJson: String, nowMs: Long): RelayListOutcome {
+        val obj = JSONObject(nativeRelayListApply(listJson, nowMs))
+        fun strings(name: String) = obj.getJSONArray(name).let { arr -> (0 until arr.length()).map { arr.getString(it) } }
+        return when (obj.getString("kind")) {
+            "Applied" -> RelayListOutcome.Applied(obj.getInt("version"), strings("relays"), strings("added"), strings("removed"))
+            "Unchanged" -> RelayListOutcome.Unchanged(obj.getInt("version"))
+            else -> RelayListOutcome.Rejected(obj.optString("reason", ""))
+        }
+    }
+
+    fun relayListCurrent(nowMs: Long): RelayListCurrent {
+        val obj = JSONObject(nativeRelayListCurrent(nowMs))
+        fun strings(name: String) = obj.getJSONArray(name).let { arr -> (0 until arr.length()).map { arr.getString(it) } }
+        return RelayListCurrent(obj.getInt("version"), strings("relays"), strings("extra"))
     }
 }

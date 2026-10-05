@@ -284,6 +284,10 @@ pub enum SignalMessage {
         /// [`crate::presence::mark_seen`] for how a receiver answers.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         hello: bool,
+        /// The version of the sender's relay list ([`crate::relay_list`]). A contact whose version is higher than
+        /// ours makes us fetch the list now. Absent from older versions, which is read as "unknown".
+        #[serde(rename = "listVersion", default, skip_serializing_if = "Option::is_none")]
+        list_version: Option<u32>,
     },
     #[serde(rename = "leaving")]
     Leaving,
@@ -342,18 +346,30 @@ fn ensure_call_id(call_id: String) -> String {
 /// [`crate::presence::take_hello`] — the shell just builds one heartbeat per
 /// tick and sends that same payload to every peer.
 pub fn build_heartbeat_payload(name: &str, busy: bool) -> Option<String> {
-    build_heartbeat_payload_with(name, busy, crate::presence::take_hello())
+    build_heartbeat(name, busy, crate::presence::take_hello(), list_version_tag())
+}
+
+/// The relay list version a heartbeat reports; `None` before a list is set.
+fn list_version_tag() -> Option<u32> {
+    let v = crate::relay_list::version();
+    (v > 0).then_some(v)
 }
 
 /// A heartbeat that answers a peer's `hello`: never carries one itself (two
 /// devices would answer each other forever) and leaves this device's own
 /// pending `hello` for its next scheduled heartbeat.
 pub(crate) fn build_heartbeat_reply_payload(name: &str, busy: bool) -> Option<String> {
-    build_heartbeat_payload_with(name, busy, false)
+    build_heartbeat(name, busy, false, list_version_tag())
 }
 
+fn build_heartbeat(name: &str, busy: bool, hello: bool, list_version: Option<u32>) -> Option<String> {
+    serde_json::to_string(&SignalMessage::Heartbeat { name: name.to_string(), busy: Some(busy), hello, list_version }).ok()
+}
+
+/// A heartbeat without the list version, so the wire-format tests do not depend on the process-wide list state.
+#[cfg(test)]
 fn build_heartbeat_payload_with(name: &str, busy: bool, hello: bool) -> Option<String> {
-    serde_json::to_string(&SignalMessage::Heartbeat { name: name.to_string(), busy: Some(busy), hello }).ok()
+    build_heartbeat(name, busy, hello, None)
 }
 
 /// Mirrors `close()`'s/its web twin's `sendToConfirmedPeer(peer, "leaving")` — no fields at all.
@@ -418,8 +434,8 @@ pub fn build_ice_payload(sdp_mid: Option<&str>, sdp_m_line_index: i32, candidate
 pub fn parse_signal_payload(payload_json: &str) -> Option<SignalMessage> {
     let message: SignalMessage = serde_json::from_str(payload_json).ok()?;
     Some(match message {
-        SignalMessage::Heartbeat { name, busy, hello } => {
-            SignalMessage::Heartbeat { name: crate::sanitize_name(crate::truncate_chars(&name, crate::MAX_NAME_LENGTH)), busy, hello }
+        SignalMessage::Heartbeat { name, busy, hello, list_version } => {
+            SignalMessage::Heartbeat { name: crate::sanitize_name(crate::truncate_chars(&name, crate::MAX_NAME_LENGTH)), busy, hello, list_version }
         }
         SignalMessage::Leaving => SignalMessage::Leaving,
         SignalMessage::Bye { call_id, reason } => SignalMessage::Bye { call_id: ensure_call_id(call_id), reason },
@@ -925,7 +941,7 @@ mod tests {
     fn every_build_payload_round_trips_through_parse_signal_payload() {
         assert_eq!(
             parse_signal_payload(&build_heartbeat_payload_with("Alice", false, false).unwrap()).unwrap(),
-            SignalMessage::Heartbeat { name: "Alice".to_string(), busy: Some(false), hello: false }
+            SignalMessage::Heartbeat { name: "Alice".to_string(), busy: Some(false), hello: false, list_version: None }
         );
         assert_eq!(parse_signal_payload(&build_leaving_payload().unwrap()).unwrap(), SignalMessage::Leaving);
         assert_eq!(
@@ -1051,7 +1067,7 @@ mod tests {
     #[test]
     fn parse_signal_payload_leaves_a_missing_heartbeat_busy_as_none() {
         let message = parse_signal_payload(r#"{"type":"heartbeat","name":"Alice"}"#).unwrap();
-        assert_eq!(message, SignalMessage::Heartbeat { name: "Alice".to_string(), busy: None, hello: false });
+        assert_eq!(message, SignalMessage::Heartbeat { name: "Alice".to_string(), busy: None, hello: false, list_version: None });
     }
 }
 
