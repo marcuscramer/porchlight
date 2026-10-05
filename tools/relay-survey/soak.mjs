@@ -36,8 +36,9 @@ class Soaker {
 
   event(type, extra = {}) { this.log({ t: Date.now(), url: this.url, type, ...extra }); }
 
-  async connect() {
-    while (!this.stopped) {
+  /** Connects, retrying with backoff until the soak is over; false if it never got through (a relay that is down must not hold the whole run open). */
+  async connect(untilMs = Infinity) {
+    while (!this.stopped && Date.now() < untilMs) {
       const A = new RelayConn(this.url);
       const B = new RelayConn(this.url);
       try {
@@ -50,14 +51,15 @@ class Soaker {
         this.A = A; this.B = B;
         this.backoff = 1000;
         this.event('up');
-        return;
+        return true;
       } catch (e) {
         A.close(); B.close();
         this.event('connect_failed', { reason: e.message });
-        await sleep(this.backoff);
+        await sleep(Math.max(0, Math.min(this.backoff, untilMs - Date.now())));
         this.backoff = Math.min(this.backoff * 2, 60_000);
       }
     }
+    return false;
   }
 
   #dropped(which) {
@@ -88,7 +90,11 @@ class Soaker {
   }
 
   async run(untilMs) {
-    await this.connect();
+    if (!(await this.connect(untilMs))) {
+      this.stopped = true;
+      this.event('end');
+      return;
+    }
     let lastOffer = Date.now();
     const pinger = setInterval(async () => {
       for (const [name, c] of [['A', this.A], ['B', this.B]]) {

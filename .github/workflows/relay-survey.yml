@@ -1,0 +1,141 @@
+name: Relay survey
+
+# Measures candidate relays and, if the list in web-app/relays.json needs to change, opens a pull request with the
+# new list and the report. Run it by hand from the Actions tab ("Run workflow"): a dry run (the default) only
+# produces the report, as a run summary and a downloadable artifact. See tools/relay-survey/README.md for what the
+# survey measures and when a relay is replaced.
+#
+# One-time setting for the pull request step: Settings > Actions > General > "Allow GitHub Actions to create and
+# approve pull requests". Pull requests opened with the default token do not start the CI workflow; the unit tests
+# for the selection policy run in this job instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: write the report only, no pull request, no history update"
+        type: boolean
+        default: true
+      soak_hours:
+        description: "Hours to soak the best candidates (the job limit is 6)"
+        type: string
+        default: "3"
+      list_size:
+        description: "Relays in the list"
+        type: string
+        default: "5"
+      urls:
+        description: "Optional: only survey these relays (comma separated wss:// URLs) instead of discovering candidates"
+        type: string
+        default: ""
+  # Weekly, once the first manual reports have been read and look right:
+  # schedule:
+  #   - cron: "17 3 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: relay-survey
+  cancel-in-progress: false
+
+jobs:
+  survey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    env:
+      DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run }}
+      SOAK_HOURS: ${{ inputs.soak_hours || '3' }}
+      LIST_SIZE: ${{ inputs.list_size || '5' }}
+      URLS: ${{ inputs.urls }}
+      GH_TOKEN: ${{ github.token }}
+      RELAY_HISTORY_FILE: /tmp/history.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Unit tests for the selection policy
+        run: node --test tools/relay-survey/test/select.test.mjs
+
+      # The history of earlier surveys lives on its own branch, so a week with no change leaves main alone.
+      # Until that branch exists the copy committed with the repo is the starting point.
+      - name: Load history
+        run: |
+          git fetch origin relay-survey-data 2>/dev/null || true
+          if git show origin/relay-survey-data:history.json > /tmp/history.json 2>/dev/null; then
+            echo "history from the relay-survey-data branch"
+          else
+            cp tools/relay-survey/history.json /tmp/history.json
+            echo "history from the repository seed"
+          fi
+
+      - name: Survey
+        id: survey
+        run: |
+          args="--soak-hours $SOAK_HOURS --size $LIST_SIZE"
+          if [ "$DRY_RUN" = "true" ]; then args="$args --dry-run"; fi
+          if [ -n "$URLS" ]; then args="$args --urls $URLS --min-probed 1"; fi
+          node tools/relay-survey/weekly.mjs $args
+
+      - name: Report
+        if: always()
+        run: |
+          if [ -f tools/relay-survey/out/weekly-report.md ]; then
+            cat tools/relay-survey/out/weekly-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Keep the files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-survey
+          path: |
+            tools/relay-survey/out/weekly-report.md
+            tools/relay-survey/out/proposal.json
+            tools/relay-survey/out/ranked.json
+            tools/relay-survey/out/report.md
+            /tmp/history.json
+          if-no-files-found: ignore
+
+      - name: Save history to the data branch
+        if: env.DRY_RUN != 'true' && steps.survey.outputs.aborted != 'true'
+        run: |
+          git config user.name "porchlight-relay-survey"
+          git config user.email "relay-survey@users.noreply.github.com"
+          dir=$(mktemp -d)
+          if git rev-parse --verify origin/relay-survey-data >/dev/null 2>&1; then
+            git worktree add -B relay-survey-data "$dir" origin/relay-survey-data
+          else
+            git worktree add --orphan -b relay-survey-data "$dir"
+          fi
+          cp /tmp/history.json "$dir/history.json"
+          cp tools/relay-survey/out/weekly-report.md "$dir/latest-report.md"
+          cd "$dir"
+          git add history.json latest-report.md
+          git commit -m "Relay survey $(date -u +%F)" || echo "nothing new to save"
+          git push origin relay-survey-data
+
+      - name: Open a pull request for the new list
+        if: env.DRY_RUN != 'true' && steps.survey.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.survey.outputs.new_version }}
+        run: |
+          git config user.name "porchlight-relay-survey"
+          git config user.email "relay-survey@users.noreply.github.com"
+          branch="relay-list-v${NEW_VERSION}"
+          git checkout -b "$branch"
+          (cd tokens && node build-shared.mjs)
+          git add web-app/relays.json web-app/shared-config.js web-app/index.html android-app/app/src/main/java/dev/porchlight/app/GeneratedSharedConfig.kt
+          git commit -m "Relay list v${NEW_VERSION}"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" --title "Relay list v${NEW_VERSION}" --body-file tools/relay-survey/out/weekly-report.md
+
+      - name: Open an issue if the survey could not be trusted
+        if: env.DRY_RUN != 'true' && steps.survey.outputs.aborted == 'true'
+        run: |
+          gh issue create --title "Relay survey not trusted ($(date -u +%F))" --body-file tools/relay-survey/out/weekly-report.md
