@@ -66,3 +66,26 @@ export function bootstrapEvent(sender, tag) {
   const payload = JSON.stringify({ type: 'pake1', msg: '02' + crypto.randomBytes(32).toString('hex') });
   return JSON.parse(core.buildBootstrapEvent(sender.sk, tag, null, payload));
 }
+
+/** Deterministic key pair from a label, so several processes can agree on each other's keys without sharing files. */
+export function keysFrom(label) {
+  const sk = crypto.createHash('sha256').update(label).digest('hex');
+  const e = crypto.createECDH('secp256k1');
+  e.setPrivateKey(sk, 'hex');
+  return { sk, pk: e.getPublicKey('hex', 'compressed').slice(2) };
+}
+
+/** On-the-wire size of a real gift-wrapped message, to size the stand-ins below like the real thing. */
+export function wrappedBytes(payloadJson) {
+  const a = newKeys(), b = newKeys();
+  return JSON.stringify(JSON.parse(core.buildWrappedEvent(a.sk, b.pk, payloadJson))).length;
+}
+
+/** A signed event whose content is plain JSON (the link test has no way to unwrap real gift wraps), padded so the
+ * whole event is about `totalBytes` long. Kind 20331 carries a `p` tag when a target is given, so it can be
+ * subscribed to by recipient exactly like the app's wraps. */
+export function plainEvent(sender, targetPk, obj, totalBytes) {
+  const build = (pad) => JSON.parse(core.buildBootstrapEvent(sender.sk, 'linktest', targetPk, JSON.stringify({ ...obj, pad })));
+  const base = JSON.stringify(build('')).length;
+  return build('x'.repeat(Math.max(0, totalBytes - base)));
+}
