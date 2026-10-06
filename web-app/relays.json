@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "relays": [
     "wss://relay.chorus.community",
     "wss://relay.cyberguy.fyi",
