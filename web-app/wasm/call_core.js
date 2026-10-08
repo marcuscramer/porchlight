@@ -1093,6 +1093,17 @@ export function sanitizeName(name) {
 }
 
 /**
+ * See [`crate::subscription_plan::should_refresh_after_relay_close`]'s own doc. `now_ms` is `f64` (`Date.now()`);
+ * false (do nothing) on a panic.
+ * @param {number} now_ms
+ * @returns {boolean}
+ */
+export function shouldRefreshAfterRelayClose(now_ms) {
+    const ret = wasm.shouldRefreshAfterRelayClose(now_ms);
+    return ret !== 0;
+}
+
+/**
  * See [`crate::start_attempt`]'s own doc. Returns a JSON-encoded
  * [`crate::StartResult`], or a JS exception on a panic — matches
  * `nativeStartAttempt`'s `null`-on-panic in spirit (both are this

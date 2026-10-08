@@ -21,9 +21,6 @@ export const AUTO_DISMISS_DELAY_MS = 20000;
 // How often the presence-timeout / call-timeout / publish-retry sweep runs.
 export const PRESENCE_TICK_INTERVAL_MS = 10000;
 
-// Minimum gap between two re-subscribes after a relay closes our subscription.
-export const SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS = 10000;
-
 // Gap between the heartbeats to successive contacts, so a relay isn't hit by a burst.
 export const HEARTBEAT_SPREAD_MS = 400;
 

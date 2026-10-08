@@ -26,6 +26,9 @@
 //!   the old subscriptions). Test: `a_changed_relay_list_replaces_both`.
 //! - **A refresh replaces everything** (a relay ended a subscription, so it is opened again). Test:
 //!   `a_refresh_replaces_both`.
+//! - **After a relay ends a subscription, the refresh is not repeated sooner than the cooldown**, so a relay that
+//!   keeps closing for a persistent reason is not hammered in a loop. Tests:
+//!   `a_relay_close_refreshes_once_per_cooldown`, `the_cooldown_is_measured_from_the_last_refresh`.
 //! - **A fresh client (`reset`) opens everything and closes nothing**: the old
 //!   subscriptions went with the old client. Test:
 //!   `a_reset_opens_everything_and_closes_nothing`.
@@ -39,6 +42,7 @@ pub(crate) struct PlanState {
     pairing: Option<Held>,
     relays: Vec<String>,
     next_seq: u64,
+    last_close_refresh_ms: Option<i64>,
 }
 
 struct Held {
@@ -48,7 +52,7 @@ struct Held {
 
 impl PlanState {
     pub(crate) fn new() -> Self {
-        PlanState { wrap: None, pairing: None, relays: Vec::new(), next_seq: 0 }
+        PlanState { wrap: None, pairing: None, relays: Vec::new(), next_seq: 0, last_close_refresh_ms: None }
     }
 }
 
@@ -65,6 +69,23 @@ pub struct Subscription {
 pub struct SubscriptionPlan {
     pub subscribe: Vec<Subscription>,
     pub close: Vec<String>,
+}
+
+/// Minimum gap between two refreshes after a relay ends one of our subscriptions (NIP-01 CLOSED: rate limiting,
+/// auth required, ...). The connection itself stays up, so nothing else would notice; opening the subscriptions
+/// again is the remedy, but not in a tight loop against a relay that keeps closing them.
+const CLOSE_REFRESH_COOLDOWN_MS: i64 = 10_000;
+
+/// A relay ended one of our subscriptions: true if the shell should refresh them now (call [`plan`] with
+/// `refresh`), false while a refresh from the last 10 seconds is still recent.
+pub fn should_refresh_after_relay_close(now_ms: i64) -> bool {
+    let mut app = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    let state = &mut app.subscription_plan;
+    if state.last_close_refresh_ms.is_some_and(|t| now_ms - t < CLOSE_REFRESH_COOLDOWN_MS) {
+        return false;
+    }
+    state.last_close_refresh_ms = Some(now_ms);
+    true
 }
 
 fn sorted(mut values: Vec<String>) -> Vec<String> {
@@ -223,6 +244,24 @@ mod tests {
         assert_eq!(again.close.len(), 2);
         assert!(again.close.contains(&first.subscribe[0].id) && again.close.contains(&first.subscribe[1].id));
         assert_eq!(again.subscribe.len(), 2);
+    }
+
+    #[test]
+    fn a_relay_close_refreshes_once_per_cooldown() {
+        let _g = fresh();
+        assert!(should_refresh_after_relay_close(1_000));
+        assert!(!should_refresh_after_relay_close(1_001));
+        assert!(!should_refresh_after_relay_close(1_000 + CLOSE_REFRESH_COOLDOWN_MS - 1));
+        assert!(should_refresh_after_relay_close(1_000 + CLOSE_REFRESH_COOLDOWN_MS));
+    }
+
+    #[test]
+    fn the_cooldown_is_measured_from_the_last_refresh() {
+        let _g = fresh();
+        assert!(should_refresh_after_relay_close(0));
+        // Suppressed calls do not push the next refresh further out.
+        assert!(!should_refresh_after_relay_close(5_000));
+        assert!(should_refresh_after_relay_close(CLOSE_REFRESH_COOLDOWN_MS));
     }
 
     #[test]

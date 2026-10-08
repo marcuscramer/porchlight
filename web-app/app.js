@@ -33,7 +33,7 @@ import init, * as callCore from './wasm/call_core.js';
 // already falls back correctly once a second locale file exists, no code
 // here needs to change when one does.
 import { t as translate, resolveLocale } from './strings.js';
-import { RELAYS, RELAYS_VERSION, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS, HEARTBEAT_SPREAD_MS, SELF_VIEW_SHRINK_MS, MAX_PHRASE_LENGTH, CAPTURE, PAUSE_WHEN_HIDDEN_MS } from './shared-config.js';
+import { RELAYS, RELAYS_VERSION, STUN_SERVERS, AUTO_DISMISS_DELAY_MS, PREVIEW_POSITIONS, PRESENCE_TICK_INTERVAL_MS, HEARTBEAT_SPREAD_MS, SELF_VIEW_SHRINK_MS, MAX_PHRASE_LENGTH, CAPTURE, PAUSE_WHEN_HIDDEN_MS } from './shared-config.js';
 
 // call-core's WASM module — a top-level await (legal since this file is
 // loaded as type="module"), so nothing below can run a pairing attempt
@@ -251,18 +251,13 @@ function pendingPairingsList() {
 // state or recovery) - this is the same gap, cross-platform. Re-subscribing
 // is the fix; debounced so a relay that keeps closing for a persistent
 // reason doesn't get hammered in a tight loop.
-let lastCloseResubscribeMs = 0;
-const SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS = SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS;
 function onSubscriptionClosed(reasons) {
   // resubscribe() closes the old subscriptions itself, which reports "closed by caller" once per relay; only a relay
   // ending one is news (and re-subscribing on our own close would just feed back into itself).
   const byRelays = (Array.isArray(reasons) ? reasons : []).filter((r) => !r || r.reason !== 'closed by caller');
   if (byRelays.length === 0) return;
   console.warn('relay closed our subscription:', byRelays);
-  const now = Date.now();
-  if (now - lastCloseResubscribeMs < SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS) return;
-  lastCloseResubscribeMs = now;
-  resubscribe(false, true);
+  if (callCore.shouldRefreshAfterRelayClose(Date.now())) resubscribe(false, true);
 }
 
 /** Brings the relay subscriptions in line with what this page wants to hear (its contacts' wrapped messages and the

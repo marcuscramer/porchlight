@@ -608,6 +608,16 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativePlanSubscrip
     })
 }
 
+/// See [`crate::subscription_plan::should_refresh_after_relay_close`]'s own doc. Returns false (do nothing) on a panic.
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeShouldRefreshAfterRelayClose<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    now_ms: jlong,
+) -> jni::sys::jboolean {
+    catch_unwind(|| crate::subscription_plan::should_refresh_after_relay_close(now_ms)).unwrap_or(false) as jni::sys::jboolean
+}
+
 /// See [`crate::nostr_protocol::build_heartbeat_payload`]'s own doc.
 /// Returns the wire JSON, or `null` on a panic (this one never fails on
 /// input alone — every argument is already a plain owned value).

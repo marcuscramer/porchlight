@@ -40,7 +40,7 @@ function checkList(name, list, pattern) {
 checkList('relays', cfg.relays, /^wss:\/\/[a-z0-9.-]+(:\d+)?(\/.*)?$/i);
 checkList('stunServers', cfg.stunServers, /^stuns?:[a-z0-9.-]+(:\d+)?$/i);
 checkList('previewPositions', cfg.previewPositions, /^[a-z]+(-[a-z]+)?$/);
-for (const key of ['autoDismissDelayMs', 'presenceTickIntervalMs', 'subscriptionResubscribeCooldownMs', 'heartbeatSpreadMs', 'selfViewShrinkMs', 'maxPhraseLength', 'pauseWhenHiddenMs']) {
+for (const key of ['autoDismissDelayMs', 'presenceTickIntervalMs', 'heartbeatSpreadMs', 'selfViewShrinkMs', 'maxPhraseLength', 'pauseWhenHiddenMs']) {
   if (!Number.isInteger(cfg[key]) || cfg[key] <= 0) fail(`${key} must be a positive integer`);
 }
 for (const key of ['width', 'height', 'fps']) {
@@ -83,9 +83,6 @@ ${cfg.stunServers.map((r) => `        ${q(r)},`).join('\n')}
     /** How often the presence-timeout / call-timeout / publish-retry sweep runs. */
     const val PRESENCE_TICK_INTERVAL_MS: Long = ${kotlinMs(cfg.presenceTickIntervalMs)}
 
-    /** Minimum gap between two re-subscribes after a relay closes our subscription. */
-    const val SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS: Long = ${kotlinMs(cfg.subscriptionResubscribeCooldownMs)}
-
     /** Gap between the heartbeats to successive contacts, so a relay isn't hit by a burst. */
     const val HEARTBEAT_SPREAD_MS: Long = ${kotlinMs(cfg.heartbeatSpreadMs)}
 
@@ -123,9 +120,6 @@ export const AUTO_DISMISS_DELAY_MS = ${cfg.autoDismissDelayMs};
 
 // How often the presence-timeout / call-timeout / publish-retry sweep runs.
 export const PRESENCE_TICK_INTERVAL_MS = ${cfg.presenceTickIntervalMs};
-
-// Minimum gap between two re-subscribes after a relay closes our subscription.
-export const SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS = ${cfg.subscriptionResubscribeCooldownMs};
 
 // Gap between the heartbeats to successive contacts, so a relay isn't hit by a burst.
 export const HEARTBEAT_SPREAD_MS = ${cfg.heartbeatSpreadMs};

@@ -428,6 +428,13 @@ pub fn plan_subscriptions(own_pubkeys: Vec<String>, pending_tags: Vec<String>, r
     .unwrap_or_else(|_| "{\"subscribe\":[],\"close\":[]}".to_string())
 }
 
+/// See [`crate::subscription_plan::should_refresh_after_relay_close`]'s own doc. `now_ms` is `f64` (`Date.now()`);
+/// false (do nothing) on a panic.
+#[wasm_bindgen(js_name = shouldRefreshAfterRelayClose)]
+pub fn should_refresh_after_relay_close(now_ms: f64) -> bool {
+    catch_unwind(|| crate::subscription_plan::should_refresh_after_relay_close(now_ms as i64)).unwrap_or(false)
+}
+
 /// See [`crate::nostr_protocol::build_heartbeat_payload`]'s own doc.
 #[wasm_bindgen(js_name = buildHeartbeatPayload)]
 pub fn build_heartbeat_payload(name: &str, busy: bool) -> Option<String> {

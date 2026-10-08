@@ -130,6 +130,7 @@ object CallCoreBridge {
     private external fun nativeBuildBootstrapEvent(ownPrivateKeyHex: String, rendezvousTag: String, targetPubkeyHex: String, payloadJson: String): String?
 
     @JvmStatic
+    private external fun nativeShouldRefreshAfterRelayClose(nowMs: Long): Boolean
     private external fun nativePlanSubscriptions(ownPubkeysJson: String, pendingTagsJson: String, relaysJson: String, reset: Boolean, refresh: Boolean): String
 
     // --- Signal message schema (SignalMessage) — see call-core's own
@@ -778,6 +779,10 @@ object CallCoreBridge {
             )
         }
     }
+
+    /** A relay ended one of our subscriptions: true if they should be refreshed now (`planSubscriptions` with
+     * `refresh`), false while a recent refresh is still within the cooldown. */
+    fun shouldRefreshAfterRelayClose(nowMs: Long): Boolean = nativeShouldRefreshAfterRelayClose(nowMs)
 
     /** Which subscriptions to close and open to match what this device wants to listen for. [reset] is true when
      * the relay client was just rebuilt (nothing is held on it); [refresh] is true when a relay ended a subscription

@@ -24,9 +24,6 @@ object GeneratedSharedConfig {
     /** How often the presence-timeout / call-timeout / publish-retry sweep runs. */
     const val PRESENCE_TICK_INTERVAL_MS: Long = 10_000L
 
-    /** Minimum gap between two re-subscribes after a relay closes our subscription. */
-    const val SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS: Long = 10_000L
-
     /** Gap between the heartbeats to successive contacts, so a relay isn't hit by a burst. */
     const val HEARTBEAT_SPREAD_MS: Long = 400L
 

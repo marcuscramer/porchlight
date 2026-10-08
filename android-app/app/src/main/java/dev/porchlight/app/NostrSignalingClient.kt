@@ -409,21 +409,12 @@ class NostrSignalingClient(
             // persistent reason doesn't get hammered in a tight loop.
             override fun onClosed(message: String, relay: NormalizedRelayUrl, forFilters: List<Filter>?) {
                 Log.w(TAG, "relay closed our subscription: $relay: $message")
-                executor.safeExecute { resubscribeIfNotRecentlyClosed() }
+                executor.safeExecute { if (CallCoreBridge.shouldRefreshAfterRelayClose(System.currentTimeMillis())) resubscribe(refresh = true) }
             }
             override fun onCannotConnect(relay: NormalizedRelayUrl, message: String, forFilters: List<Filter>?) {
                 Log.w(TAG, "cannot subscribe on $relay: $message")
             }
         }
-
-    private var lastCloseResubscribeMs = 0L
-
-    private fun resubscribeIfNotRecentlyClosed() {
-        val now = System.currentTimeMillis()
-        if (now - lastCloseResubscribeMs < SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS) return
-        lastCloseResubscribeMs = now
-        resubscribe(refresh = true)
-    }
 
     /**
      * Everything about an incoming event — dedup, unwrap and verify,
@@ -797,6 +788,5 @@ class NostrSignalingClient(
         // See resubscribe()'s onClosed override: a relay sending NIP-01
         // CLOSED for a persistent reason (PoW/auth it'll never satisfy)
         // would otherwise get re-subscribed in a tight loop forever.
-        private const val SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS = GeneratedSharedConfig.SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS
     }
 }
