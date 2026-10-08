@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -35,6 +37,19 @@ import kotlinx.coroutines.delay
 // ---------------------------------------------------------------------------
 
 /**
+ * Holds the screen on while a pairing screen is showing. The Portal's screen-off timeout is a minute, and without
+ * this its screensaver covers a pairing that is still waiting for the other person (the attempt keeps counting down).
+ */
+@Composable
+private fun KeepScreenOn() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+}
+
+/**
  * The one and only pairing entry screen, for a brand-new contact. Nothing to
  * generate or show/read here, so nothing for either side to be "first" at:
  * both people agree on a phrase together (verbally, during a call) and each
@@ -43,6 +58,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
     BackHandler(onBack = onCancel)
+    KeepScreenOn()
     var phrase by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     RequestFocusOnMount(focusRequester)
@@ -99,6 +115,7 @@ fun PairingProgressScreen(
     onRetry: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    KeepScreenOn()
     val candidate = attempt?.candidate
     when {
         attempt?.notAccepted == true -> {
