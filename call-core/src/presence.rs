@@ -57,9 +57,10 @@
 //!   `a_reload_hello_is_answered_once_and_the_answer_does_not_ask_for_another`.
 //! - **Nothing speeds the heartbeat up for a call.** A call placed to an
 //!   offline-looking peer asks for exactly one prompt `hello` heartbeat
-//!   (`CallEffect::KickHeartbeat`); only a live pairing attempt shortens the
+//!   (`CallEffect::KickHeartbeat`); a live pairing attempt has its own republish cadence and never shortens the
 //!   tick. Tests: `a_deferred_call_does_not_speed_the_heartbeat_up`,
-//!   `a_live_pairing_attempt_uses_the_pairing_cadence_a_dead_one_does_not`.
+//!   `the_heartbeat_is_steady_even_while_a_pairing_attempt_is_live`,
+//!   `pairing_republishes_on_its_own_cadence_only_while_an_attempt_is_live`.
 
 use crate::call_arbitration::CallEffect;
 use serde::Serialize;
@@ -69,15 +70,15 @@ use std::collections::HashMap;
 /// `pub(crate)` so the JNI/WASM bindings can fail closed to this exact
 /// value on a panic, rather than hand-duplicating the number.
 pub(crate) const HEARTBEAT_INTERVAL_MS: u32 = 25_000;
-/// Cadence while a pairing attempt is live (see
-/// [`current_heartbeat_interval_ms`]). Not the main mechanism for getting a
+/// How often a live pairing attempt's messages are republished (see
+/// [`current_pairing_republish_interval_ms`]). Not the main mechanism for getting a
 /// joiner through quickly — answering a newcomer immediately is
-/// (`Effect::KickHeartbeat` on first sight of a candidate, see
+/// (`Effect::RepublishPairing` on first sight of a candidate, see
 /// `handle_bootstrap_message`) — but the backstop for a lost message, and
 /// the only thing that gets a pairing message out when the *other* side is
-/// the one who has to speak first. Used to be 3s for the first 30s and then
-/// the steady 25s, which both wasted traffic early and left a late joiner
-/// waiting out 25s.
+/// the one who has to speak first. Kept apart from the heartbeat cadence:
+/// it used to be the same tick, which sent every contact a heartbeat every
+/// 10s for as long as an attempt was live.
 const PAIRING_REPUBLISH_INTERVAL_MS: u32 = 10_000;
 /// How long without a heartbeat before a peer is declared offline by
 /// [`check_online_timeouts`].
@@ -379,20 +380,28 @@ pub fn is_online(pairing_id: &str) -> bool {
     current_status(&state.presence, pairing_id) != PresenceStatus::Offline
 }
 
-/// The delay before the next heartbeat tick: `PAIRING_REPUBLISH_INTERVAL_MS`
-/// while a pairing attempt is live (its bootstrap messages are republished on
-/// the same tick), otherwise the steady `HEARTBEAT_INTERVAL_MS`. Everything
-/// else that wants a prompt heartbeat asks for exactly one — a `hello` (see
-/// [`mark_seen`]) or an explicit kick — instead of raising the rate: a
-/// deferred call used to speed everything up to 3s even though our own
-/// heartbeats do nothing to make the peer answer sooner.
+/// The delay before the next heartbeat tick: always the steady
+/// `HEARTBEAT_INTERVAL_MS`. Anything that wants a prompt heartbeat asks for
+/// exactly one — a `hello` (see [`mark_seen`]) or an explicit kick — instead
+/// of raising the rate: a deferred call used to speed everything up to 3s even
+/// though our own heartbeats do nothing to make the peer answer sooner. A live
+/// pairing attempt has its own, separate cadence
+/// ([`current_pairing_republish_interval_ms`]).
 pub fn current_heartbeat_interval_ms() -> u32 {
-    let state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
-    heartbeat_interval_ms(!state.pairing_registry.is_empty())
+    HEARTBEAT_INTERVAL_MS
 }
 
-fn heartbeat_interval_ms(pairing_attempt_live: bool) -> u32 {
-    if pairing_attempt_live { PAIRING_REPUBLISH_INTERVAL_MS } else { HEARTBEAT_INTERVAL_MS }
+/// The delay between republishing a live pairing attempt's messages, or 0 when
+/// no attempt is live (the shell's pairing timer then stops). Separate from the
+/// heartbeat cadence so a pairing attempt does not multiply the traffic to
+/// every contact.
+pub fn current_pairing_republish_interval_ms() -> u32 {
+    let state = crate::STATE.lock().unwrap_or_else(|p| p.into_inner());
+    pairing_republish_interval_ms(!state.pairing_registry.is_empty())
+}
+
+fn pairing_republish_interval_ms(pairing_attempt_live: bool) -> u32 {
+    if pairing_attempt_live { PAIRING_REPUBLISH_INTERVAL_MS } else { 0 }
 }
 
 /// Clears `last_seen_at`/`status`/`last_hello_reply_at` for a deleted
@@ -553,20 +562,27 @@ mod tests {
         assert!(is_online(&id_c));
     }
 
-    // --- current_heartbeat_interval_ms ---
+    // --- heartbeat and pairing cadences ---
 
     #[test]
-    fn the_heartbeat_is_steady_unless_a_pairing_attempt_is_live() {
-        assert_eq!(heartbeat_interval_ms(false), HEARTBEAT_INTERVAL_MS);
-        assert_eq!(heartbeat_interval_ms(true), PAIRING_REPUBLISH_INTERVAL_MS);
+    fn the_heartbeat_is_steady_even_while_a_pairing_attempt_is_live() {
+        let _guard = reset_state_for_test();
+        assert_eq!(current_heartbeat_interval_ms(), HEARTBEAT_INTERVAL_MS);
+        let live = fresh_id();
+        crate::start_attempt_with(&live, "test-private-key", "pubkey-a", "A", "cadence test");
+        assert_eq!(current_heartbeat_interval_ms(), HEARTBEAT_INTERVAL_MS);
+        crate::cancel_attempt(&live);
     }
 
     #[test]
-    fn a_live_pairing_attempt_uses_the_pairing_cadence() {
+    fn pairing_republishes_on_its_own_cadence_only_while_an_attempt_is_live() {
+        assert_eq!(pairing_republish_interval_ms(false), 0);
+        assert_eq!(pairing_republish_interval_ms(true), PAIRING_REPUBLISH_INTERVAL_MS);
         let _guard = reset_state_for_test();
+        assert_eq!(current_pairing_republish_interval_ms(), 0);
         let live = fresh_id();
         crate::start_attempt_with(&live, "test-private-key", "pubkey-a", "A", "cadence test");
-        assert_eq!(current_heartbeat_interval_ms(), PAIRING_REPUBLISH_INTERVAL_MS);
+        assert_eq!(current_pairing_republish_interval_ms(), PAIRING_REPUBLISH_INTERVAL_MS);
         crate::cancel_attempt(&live);
     }
 

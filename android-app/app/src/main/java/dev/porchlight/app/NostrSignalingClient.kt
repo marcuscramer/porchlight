@@ -318,6 +318,7 @@ class NostrSignalingClient(
                         // theirs about this one may be too. Say hello now
                         // rather than waiting out a full heartbeat interval.
                         CallCoreBridge.requestHello()
+                        resubscribe()
                         kickHeartbeat()
                     }
                 }
@@ -374,27 +375,59 @@ class NostrSignalingClient(
      * currently-live pairing attempt's rendezvous tag if there are any.
      * Either half is simply omitted when empty.
      */
-    private fun currentFilters(): List<Filter> {
+    private fun pendingTags(): List<String> = resolver.pendingPairings().mapNotNull { it.rendezvousTag }.sorted()
+
+    private fun wrapFilters(): List<Filter> {
         val ownPubkeys = resolver.confirmedPeers().map { ownPubkeyHexFor(it.ownPrivateKeyHex) }
-        val rendezvousTags = resolver.pendingPairings().mapNotNull { it.rendezvousTag }
-        val relayFilters = CallCoreBridge.buildRelayFilters(ownPubkeys, rendezvousTags)
-        val filters = mutableListOf<Filter>()
-        relayFilters.wrapFilter?.let { filters += Filter(kinds = listOf(it.kind), tags = mapOf(it.tagName.toString() to it.tagValues)) }
-        relayFilters.bootstrapFilter?.let { filters += Filter(kinds = listOf(it.kind), tags = mapOf(it.tagName.toString() to it.tagValues)) }
-        return filters
+        val relayFilters = CallCoreBridge.buildRelayFilters(ownPubkeys, emptyList())
+        return listOfNotNull(relayFilters.wrapFilter?.let { Filter(kinds = listOf(it.kind), tags = mapOf(it.tagName.toString() to it.tagValues)) })
+    }
+
+    private fun pairingFilters(tags: List<String>): List<Filter> {
+        val relayFilters = CallCoreBridge.buildRelayFilters(emptyList(), tags)
+        return listOfNotNull(relayFilters.bootstrapFilter?.let { Filter(kinds = listOf(it.kind), tags = mapOf(it.tagName.toString() to it.tagValues)) })
     }
 
     /**
      * Re-issues the subscription with a freshly-built filter set — a plain
      * REQ with the same subscription id is how Nostr itself defines
      * "replace this subscription's filters," so this is safe to call as
-     * often as needed. Called from [kickHeartbeat] — every call site that
-     * already calls that is exactly the same set of moments the *filter
-     * set* itself needs recomputing too.
+     * often as needed. Called from [republishPairing] and [contactsChanged] —
+     * exactly the moments the *filter set* itself needs recomputing — and when
+     * signaling comes back.
      */
     private fun resubscribe() {
         if (closed) return
-        client.subscribe(SUB_ID, relayUrls.associateWith { currentFilters() }, object : SubscriptionListener {
+        client.subscribe(SUB_ID, relayUrls.associateWith { wrapFilters() }, subscriptionListener)
+        resubscribePairing()
+    }
+
+    private var pairingSubClient: NostrClient? = null
+    private var pairingSubRelays: List<NormalizedRelayUrl> = emptyList()
+    private var pairingSubTags: List<String> = emptyList()
+    private var pairingSubId: String? = null
+    private var pairingSubSeq = 0
+
+    /**
+     * The live pairing attempts' rendezvous filter is its own subscription, under a fresh id each time the set of
+     * attempts changes (the old one is closed), instead of being folded into [SUB_ID]'s filters. Replacing one
+     * subscription's filters in place left a second attempt started soon after a cancelled one with no working
+     * subscription: relays delivered nothing for its tag, not even this device's own messages, so the attempt
+     * waited for a peer that was already publishing.
+     */
+    private fun resubscribePairing() {
+        val tags = pendingTags()
+        val relays = relayUrls.toList()
+        if (pairingSubClient === client && tags == pairingSubTags && relays == pairingSubRelays) return
+        if (pairingSubClient === client) pairingSubId?.let { client.unsubscribe(it) }
+        pairingSubClient = client
+        pairingSubTags = tags
+        pairingSubRelays = relays
+        pairingSubId = if (tags.isEmpty()) null else "$SUB_ID-pair-${++pairingSubSeq}"
+        pairingSubId?.let { id -> client.subscribe(id, relays.associateWith { pairingFilters(tags) }, subscriptionListener) }
+    }
+
+    private val subscriptionListener = object : SubscriptionListener {
             override fun onEvent(event: Event, isLive: Boolean, relay: NormalizedRelayUrl, forFilters: List<Filter>?) {
                 // safeExecute: this is NostrClient's own event-delivery
                 // thread, which can hand us one more buffered/in-flight
@@ -419,8 +452,7 @@ class NostrSignalingClient(
             override fun onCannotConnect(relay: NormalizedRelayUrl, message: String, forFilters: List<Filter>?) {
                 Log.w(TAG, "cannot subscribe on $relay: $message")
             }
-        })
-    }
+        }
 
     private var lastCloseResubscribeMs = 0L
 
@@ -469,6 +501,10 @@ class NostrSignalingClient(
                 else executor.safeSchedule(i * GeneratedSharedConfig.HEARTBEAT_SPREAD_MS, TimeUnit.MILLISECONDS) { sendToConfirmedPeer(peer) { heartbeat } }
             }
         }
+    }
+
+    /** Republishes every live pairing attempt's messages (they are ephemeral events: only whoever is subscribed right now gets one). */
+    private fun pairingTick() {
         for (pending in resolver.pendingPairings()) {
             val tag = pending.rendezvousTag ?: continue
             for (payload in pending.bootstrapPayloads) publishBootstrap(pending.ownPrivateKeyHex, tag, pending.bootstrapTarget, payload)
@@ -476,13 +512,10 @@ class NostrSignalingClient(
     }
 
     /**
-     * Slower or faster only for one reason: a live pairing attempt republishes
-     * its bootstrap messages on this same tick, so the tick runs more often
-     * while one exists (the decision, and the cadence itself, live in
-     * `call-core`'s `presence::current_heartbeat_interval_ms`). Everything else
-     * that wants a prompt heartbeat — a call placed to an offline-looking peer,
-     * regained connectivity, a peer coming online — asks for exactly one via
-     * [kickHeartbeat] and a `hello`, instead of raising the rate.
+     * The heartbeat cadence is steady (`call-core`'s `presence::current_heartbeat_interval_ms`). Everything that
+     * wants a prompt heartbeat — a call placed to an offline-looking peer, regained connectivity, a peer coming
+     * online — asks for exactly one via [kickHeartbeat] and a `hello`. A live pairing attempt republishes its
+     * messages on its own, separate timer ([schedulePairing]), so it does not multiply the heartbeats to contacts.
      */
     private fun currentHeartbeatIntervalMs(): Long = CallCoreBridge.currentHeartbeatIntervalMs().toLong()
 
@@ -498,20 +531,46 @@ class NostrSignalingClient(
         }
     }
 
-    /**
-     * Sends a heartbeat/bootstrap message right now, switches to the fast
-     * cadence immediately, and re-subscribes with a freshly-built filter
-     * set — called the moment pairing state actually changed (a new
-     * pending attempt starting, a confirmation, a reconnect, a removal) so
-     * neither the fast heartbeat rate nor the new/removed pairing's own
-     * subscription filter waits for whatever's already scheduled to
-     * naturally elapse first.
-     */
+    /** Sends a heartbeat to every contact right now (the next one follows a full interval later). */
     fun kickHeartbeat() {
         if (closed) return
-        resubscribe()
         heartbeatFuture?.cancel(false)
         scheduleHeartbeat(0)
+    }
+
+    /**
+     * The pairing state changed (an attempt started, found a candidate, accepted or ended): re-subscribe with the
+     * new filter set and republish the live attempts' messages now, then keep republishing while one is live.
+     * Contacts' heartbeats are not touched.
+     */
+    fun republishPairing() {
+        if (closed) return
+        resubscribe()
+        schedulePairing(0)
+    }
+
+    /**
+     * The set of contacts changed (one added or removed): the subscription filters follow it, and a new contact
+     * wants a heartbeat so it sees this device online.
+     */
+    fun contactsChanged(sendHeartbeat: Boolean) {
+        if (closed) return
+        resubscribe()
+        if (sendHeartbeat) kickHeartbeat()
+    }
+
+    private var pairingFuture: java.util.concurrent.ScheduledFuture<*>? = null
+
+    /** Runs [pairingTick] after [delayMs], then again every `call-core` pairing interval until no attempt is live. */
+    private fun schedulePairing(delayMs: Long) {
+        if (closed) return
+        pairingFuture?.cancel(false)
+        pairingFuture = executor.safeSchedule(delayMs, TimeUnit.MILLISECONDS) {
+            if (closed) return@safeSchedule
+            pairingTick()
+            val next = CallCoreBridge.currentPairingRepublishIntervalMs()
+            if (next > 0) schedulePairing(next.toLong())
+        }
     }
 
     /**
@@ -732,6 +791,7 @@ class NostrSignalingClient(
         executor.execute {
             closed = true
             heartbeatFuture?.cancel(false)
+            pairingFuture?.cancel(false)
             for (peer in resolver.confirmedPeers()) sendToConfirmedPeer(peer) { CallCoreBridge.buildLeavingPayload() }
             // Best-effort flush window for the "leaving" publishes above —
             // if they don't make it out in time, peers just fall back to

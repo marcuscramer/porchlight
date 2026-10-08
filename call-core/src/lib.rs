@@ -361,7 +361,7 @@ pub fn accept_attempt(pairing_id: &str, candidate_pubkey: &str) -> Vec<Effect> {
         attempt.generation = next_generation();
         effects.push(Effect::SetWaitingForPeer { pairing_id: pairing_id.to_string(), generation: attempt.generation, timeout_ms: PAKE_LIVE_WINDOW_MS });
     }
-    effects.push(Effect::KickHeartbeat);
+    effects.push(Effect::RepublishPairing);
     effects
 }
 
@@ -532,7 +532,7 @@ pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &s
         registry.remove(pairing_id);
         return vec![
             Effect::SetCollision { pairing_id: pairing_id.to_string() },
-            Effect::KickHeartbeat,
+            Effect::RepublishPairing,
         ];
     }
 
@@ -549,7 +549,7 @@ pub fn handle_bootstrap_message(pairing_id: &str, sender_pubkey: &str, type_: &s
     // leave them stuck for up to a full interval — and they can't finish
     // without our `pake1`, which a relay will not replay.
     if first_sight && attempt_still_live(registry, pairing_id) {
-        effects.push(Effect::KickHeartbeat);
+        effects.push(Effect::RepublishPairing);
     }
     effects
 }
@@ -592,7 +592,7 @@ fn handle_decision(
     if let Some(old) = registry.remove(pairing_id) {
         retire(retired, old.own_pubkey_hex);
     }
-    vec![Effect::SetNotAccepted { pairing_id: pairing_id.to_string() }, Effect::KickHeartbeat]
+    vec![Effect::SetNotAccepted { pairing_id: pairing_id.to_string() }, Effect::RepublishPairing]
 }
 
 fn handle_pake1(registry: &mut HashMap<String, PakeAttempt>, pairing_id: &str, sender_pubkey: &str, payload_json: &str) -> Vec<Effect> {
@@ -753,7 +753,7 @@ pub fn handle_timeout(pairing_id: &str, generation: u64) -> Vec<Effect> {
     let accepted = old.local_accepted;
     retire(&mut app.retired_attempt_pubkeys, old.own_pubkey_hex);
     effects.push(if accepted { Effect::SetNotAccepted { pairing_id: pairing_id.to_string() } } else { Effect::SetTimedOut { pairing_id: pairing_id.to_string() } });
-    effects.push(Effect::KickHeartbeat);
+    effects.push(Effect::RepublishPairing);
     effects
 }
 
@@ -766,7 +766,10 @@ pub fn handle_timeout(pairing_id: &str, generation: u64) -> Vec<Effect> {
 #[serde(tag = "kind")]
 pub enum Effect {
     SendBootstrap { pairing_id: String, own_private_key_hex: String, rendezvous_tag: String, target_pubkey: String, payload: BootstrapPayload },
-    KickHeartbeat,
+    /// The pairing state changed (an attempt started, found a candidate, accepted, ended): the shell re-subscribes
+    /// with the new filters and republishes the live attempts' messages now. Contacts' heartbeats are not part of
+    /// this; they run on their own cadence.
+    RepublishPairing,
     SetCollision { pairing_id: String },
     SetTimedOut { pairing_id: String },
     SetConfirmedCandidate { pairing_id: String, pubkey_hex: String, name: String },
@@ -889,10 +892,10 @@ mod tests {
     }
 
     /// The one `SendBootstrap(pake-confirm)` among `effects` — a first-sight
-    /// message also yields a `KickHeartbeat` (see `handle_bootstrap_message`),
+    /// message also yields a `RepublishPairing` (see `handle_bootstrap_message`),
     /// which is allowed to ride along but nothing else is.
     fn expect_send_confirm(effects: &[Effect]) -> SentConfirm {
-        let rest: Vec<&Effect> = effects.iter().filter(|e| !matches!(e, Effect::KickHeartbeat)).collect();
+        let rest: Vec<&Effect> = effects.iter().filter(|e| !matches!(e, Effect::RepublishPairing)).collect();
         match rest.as_slice() {
             [Effect::SendBootstrap { payload: BootstrapPayload::PakeConfirm { confirmation, sealed_name }, .. }] => {
                 SentConfirm { confirmation: confirmation.clone(), sealed_name: sealed_name.clone() }
@@ -965,7 +968,7 @@ mod tests {
         let b = start_attempt_with(&id, "test-private-key", "ghost-replacement", "Me", "ghost phrase two");
         assert!(handle_bootstrap_message(&id, "ghost-replaced", "pake1", &pake1_json(&a.outbound_hex)).is_empty());
         let timed_out = handle_timeout(&id, b.generation);
-        assert!(matches!(timed_out.as_slice(), [Effect::SetTimedOut { .. }, Effect::KickHeartbeat]));
+        assert!(matches!(timed_out.as_slice(), [Effect::SetTimedOut { .. }, Effect::RepublishPairing]));
         let next = fresh_pairing_id();
         let _ = start_attempt_with(&next, "test-private-key", "ghost-next", "Me", "ghost phrase two");
         assert!(handle_bootstrap_message(&next, "ghost-replacement", "pake1", &pake1_json(&b.outbound_hex)).is_empty());
@@ -1073,7 +1076,7 @@ mod tests {
         // B cancels instead of accepting.
         let b_cancel = cancel_attempt(&id_b);
         let a_after = deliver(&b_cancel, &id_a, "pubkey-b");
-        assert!(matches!(a_after.as_slice(), [Effect::SetNotAccepted { .. }, Effect::KickHeartbeat]), "{a_after:?}");
+        assert!(matches!(a_after.as_slice(), [Effect::SetNotAccepted { .. }, Effect::RepublishPairing]), "{a_after:?}");
         assert!(build_bootstrap_payload(&id_a).is_none(), "A's attempt is gone");
         assert!(the_complete(&a_after).is_none());
     }
@@ -1167,7 +1170,7 @@ mod tests {
         // The timer from when the attempt started no longer applies.
         assert!(handle_timeout(&id_a, 0).is_empty());
         let after = handle_timeout(&id_a, generation);
-        assert!(matches!(after.as_slice(), [Effect::SendBootstrap { payload: BootstrapPayload::PakeCancel { .. }, .. }, Effect::SetNotAccepted { .. }, Effect::KickHeartbeat]), "{after:?}");
+        assert!(matches!(after.as_slice(), [Effect::SendBootstrap { payload: BootstrapPayload::PakeCancel { .. }, .. }, Effect::SetNotAccepted { .. }, Effect::RepublishPairing]), "{after:?}");
         // B, still on its screen, finds out when it taps.
         assert!(deliver(&after, &id_b, "pubkey-a").is_empty());
         assert!(matches!(accept_attempt(&id_b, "pubkey-a").as_slice(), [Effect::SetNotAccepted { .. }]));
@@ -1218,7 +1221,7 @@ mod tests {
         let _ = handle_bootstrap_message(&id, "candidate-1", "pake1", &pake1_json(&peer.outbound_hex));
         let effects = handle_bootstrap_message(&id, "candidate-2", "pake1", &pake1_json(&peer.outbound_hex));
         assert!(
-            matches!(effects.as_slice(), [Effect::SetCollision { .. }, Effect::KickHeartbeat]),
+            matches!(effects.as_slice(), [Effect::SetCollision { .. }, Effect::RepublishPairing]),
             "a second distinct sender must collide the attempt: {effects:?}"
         );
         // The attempt must actually be gone — a further message for either
@@ -1236,7 +1239,7 @@ mod tests {
         let (id_a, _id_b) = run_to_resolved_match("late collision test phrase");
         let effects = handle_bootstrap_message(&id_a, "a-completely-different-sender", "pake1", &pake1_json("aabbcc"));
         assert!(
-            matches!(effects.as_slice(), [Effect::SetCollision { .. }, Effect::KickHeartbeat]),
+            matches!(effects.as_slice(), [Effect::SetCollision { .. }, Effect::RepublishPairing]),
             "a late second party must still collide the attempt even after a resolved match: {effects:?}"
         );
     }
@@ -1276,7 +1279,7 @@ mod tests {
         let stash_effects = handle_bootstrap_message(&id_a, "pubkey-b", "pake-confirm", &pake_confirm_json(&b_confirm));
         // Stashed (nothing resolves yet); the only effect is the first-sight
         // kick that makes this side publish its own pake1 right away.
-        assert_eq!(stash_effects, vec![Effect::KickHeartbeat], "an early pake-confirm must be stashed: {stash_effects:?}");
+        assert_eq!(stash_effects, vec![Effect::RepublishPairing], "an early pake-confirm must be stashed: {stash_effects:?}");
 
         // Now A processes B's pake1 — this must trigger the stashed
         // recheck and resolve immediately, in the same call.
@@ -1319,7 +1322,7 @@ mod tests {
         let start = start_attempt_with(&id, "test-private-key", "pubkey-a", "Alice", "timeout test");
         let effects = handle_timeout(&id, start.generation);
         assert!(
-            matches!(effects.as_slice(), [Effect::SetTimedOut { .. }, Effect::KickHeartbeat]),
+            matches!(effects.as_slice(), [Effect::SetTimedOut { .. }, Effect::RepublishPairing]),
             "{effects:?}"
         );
     }
@@ -1475,7 +1478,7 @@ mod tests {
         // A has been waiting; B only now types the phrase and publishes its pake1.
         let b = start_attempt_with(&id_b, "test-private-key", "pubkey-b", "Bob", "late joiner");
         let effects_a = handle_bootstrap_message(&id_a, "pubkey-b", "pake1", &pake1_json(&b.outbound_hex));
-        assert!(effects_a.contains(&Effect::KickHeartbeat), "A must answer immediately: {effects_a:?}");
+        assert!(effects_a.contains(&Effect::RepublishPairing), "A must answer immediately: {effects_a:?}");
         let a_confirm = expect_send_confirm(&effects_a);
 
         // B never saw A's original pake1 (published before B subscribed). All it

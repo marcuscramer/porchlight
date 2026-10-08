@@ -612,7 +612,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     private fun beginPakeAttempt(rawPassphrase: String) {
         val start = CallCoreBridge.startAttempt(Config.load(this).deviceName, rawPassphrase)
         updateState { it.copy(pairingAttempt = PairingAttemptState(id = start.pairingId)) }
-        signaling?.kickHeartbeat()
+        signaling?.republishPairing()
         scheduleAttemptTimer(start.pairingId, start.generation, PAKE_LIVE_WINDOW_MS)
     }
 
@@ -640,7 +640,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                     signaling?.sendPairingBootstrap(effect.ownPrivateKeyHex, effect.rendezvousTag, effect.targetPubkey) {
                         effect.payload.keys().forEach { key -> put(key, effect.payload.get(key)) }
                     }
-                CallCoreBridge.Effect.KickHeartbeat -> signaling?.kickHeartbeat()
+                CallCoreBridge.Effect.RepublishPairing -> signaling?.republishPairing()
                 is CallCoreBridge.Effect.SetCollision -> updateAttempt(effect.pairingId) { it.copy(candidate = null, collision = true) }
                 is CallCoreBridge.Effect.SetTimedOut -> updateAttempt(effect.pairingId) { it.copy(timedOut = true) }
                 is CallCoreBridge.Effect.SetConfirmedCandidate ->
@@ -655,7 +655,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                     Config.addOrUpdatePairing(this, pairing)
                     addPairingState(pairing)
                     updateAttempt(effect.pairingId) { it.copy(accepted = false, completed = true) }
-                    signaling?.kickHeartbeat()
+                    signaling?.contactsChanged(sendHeartbeat = true)
                     scheduleAttemptTimer(effect.pairingId, effect.generation, effect.lingerMs)
                 }
             }
@@ -748,7 +748,7 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         applyCallEffects(CallCoreBridge.forgetPairing(pairingId))
         CallCoreBridge.presenceRemovePairing(pairingId)
         Config.removePairing(this, pairingId)
-        signaling?.kickHeartbeat()
+        signaling?.contactsChanged(sendHeartbeat = false)
         updateState { it.copy(contacts = it.contacts.filterNot { c -> c.id == pairingId }) }
     } ?: Unit
 

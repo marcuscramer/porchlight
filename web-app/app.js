@@ -173,6 +173,7 @@ function removePairing(pairingId) {
   applyCallEffects(callCore.forgetPairing(pairingId));
   callCore.presenceRemovePairing(pairingId);
   contactUiState.delete(pairingId);
+  contactsChanged(false);
 }
 // This device's own pubkey for a given pairing's own key — cached, since
 // every heartbeat tick touches every confirmed pairing's signer. Mirrors
@@ -253,7 +254,11 @@ function pendingPairingsList() {
 let lastCloseResubscribeMs = 0;
 const SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS = SUBSCRIPTION_RESUBSCRIBE_COOLDOWN_MS;
 function onSubscriptionClosed(reasons) {
-  console.warn('relay closed our subscription:', reasons);
+  // resubscribe() closes the old subscriptions itself, which reports "closed by caller" once per relay; only a relay
+  // ending one is news (and re-subscribing on our own close would just feed back into itself).
+  const byRelays = (Array.isArray(reasons) ? reasons : []).filter((r) => !r || r.reason !== 'closed by caller');
+  if (byRelays.length === 0) return;
+  console.warn('relay closed our subscription:', byRelays);
   const now = Date.now();
   if (now - lastCloseResubscribeMs < SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS) return;
   lastCloseResubscribeMs = now;
@@ -509,16 +514,20 @@ function heartbeatTick() {
       if (i === 0) send(); else setTimeout(send, i * HEARTBEAT_SPREAD_MS);
     });
   }
+}
+
+/** Republishes every live pairing attempt's messages (ephemeral events: only whoever is subscribed right now gets one). */
+function pairingTick() {
   for (const pending of pendingPairingsList()) {
     if (!pending.rendezvousTag) continue;
     for (const payload of pending.bootstrapPayloads) sendPairingBootstrap(pending.ownPrivateKeyHex, pending.rendezvousTag, pending.bootstrapTarget, payload);
   }
 }
 
-/** The delay until the next tick — steady, or shorter while a live pairing
- * attempt republishes its bootstrap messages on it. See call-core's own
- * `presence::current_heartbeat_interval_ms` doc: anything else that wants a
- * prompt heartbeat asks for exactly one (kickHeartbeat + hello) instead. */
+/** The delay until the next heartbeat tick — steady. See call-core's own
+ * `presence::current_heartbeat_interval_ms` doc: anything that wants a prompt
+ * heartbeat asks for exactly one (kickHeartbeat + hello) instead. A live pairing
+ * attempt republishes on its own timer (schedulePairing). */
 function currentHeartbeatIntervalMs() {
   return callCore.currentHeartbeatIntervalMs();
 }
@@ -531,12 +540,36 @@ function scheduleHeartbeat(delayMs) {
   }, delayMs);
 }
 
-/** Sends a heartbeat/bootstrap message right now, switches to the fast
- * cadence immediately, and re-subscribes with a freshly-built filter set —
- * mirrors NostrSignalingClient.kt's kickHeartbeat exactly. */
+/** Sends a heartbeat to every contact right now — mirrors NostrSignalingClient.kt's kickHeartbeat. */
 function kickHeartbeat() {
-  resubscribe();
   scheduleHeartbeat(0);
+}
+
+let pairingTimeoutHandle = null;
+
+/** Runs pairingTick after `delayMs`, then again every call-core pairing interval until no attempt is live. */
+function schedulePairing(delayMs) {
+  clearTimeout(pairingTimeoutHandle);
+  pairingTimeoutHandle = setTimeout(() => {
+    pairingTick();
+    const next = callCore.currentPairingRepublishIntervalMs();
+    if (next > 0) schedulePairing(next);
+  }, delayMs);
+}
+
+/** The pairing state changed (an attempt started, found a candidate, accepted or ended): re-subscribe with the new
+ * filter set and republish the live attempts' messages now, then keep republishing while one is live. Mirrors
+ * NostrSignalingClient.kt's republishPairing. */
+function republishPairing() {
+  resubscribe();
+  schedulePairing(0);
+}
+
+/** The set of contacts changed: the subscription filters follow it, and a new contact wants a heartbeat so it sees
+ * this device online. Mirrors NostrSignalingClient.kt's contactsChanged. */
+function contactsChanged(sendHeartbeat) {
+  resubscribe();
+  if (sendHeartbeat) kickHeartbeat();
 }
 
 function monitorOnlineTimeouts() {
@@ -710,6 +743,7 @@ document.addEventListener('visibilitychange', () => {
   if (connectionPaused) resumeConnection();
   else {
     callCore.requestHello();
+    resubscribe();
     kickHeartbeat();
   }
   // iOS pauses a playing video when the page is backgrounded; resume it
@@ -747,6 +781,7 @@ function maybePauseConnection() {
 async function pauseConnection() {
   connectionPaused = true;
   clearTimeout(heartbeatTimeoutHandle);
+  clearTimeout(pairingTimeoutHandle);
   clearInterval(onlineCheckTimer);
   onlineCheckTimer = null;
   // The "leaving" messages have to be out before the sockets close.
@@ -781,6 +816,7 @@ async function resumeConnection() {
 // as coming back to a backgrounded tab — say hello so peers answer right away.
 window.addEventListener('online', () => {
   callCore.requestHello();
+  resubscribe();
   kickHeartbeat();
 });
 
@@ -814,7 +850,7 @@ function startPairing(mine, passphrase) {
   mine.id = start.pairing_id;
   mine.startedAt = Date.now();
   mine.status = 'waiting';
-  kickHeartbeat();
+  republishPairing();
   scheduleAttemptTimer(start.pairing_id, start.generation, PAKE_LIVE_WINDOW_MS);
 }
 
@@ -850,8 +886,8 @@ function applyEffects(effectsJson) {
         sendPairingBootstrap(effect.own_private_key_hex, effect.rendezvous_tag, effect.target_pubkey, effect.payload);
         break;
       }
-      case 'KickHeartbeat':
-        kickHeartbeat();
+      case 'RepublishPairing':
+        republishPairing();
         break;
       case 'SetCollision':
         // Dropping the candidate here disarms an already-shown confirm
@@ -928,7 +964,7 @@ function savePairedContact(confirmed) {
     lastSignalCreatedAt: 0,
     lastSignalEventId: '',
   });
-  kickHeartbeat();
+  contactsChanged(true);
   applyPresenceUpdate(callCore.markSeen(confirmed.pairing_id, ownPubkeyHexFor(confirmed.own_private_key_hex), confirmed.peer_public_key, Date.now(), null, false));
   screen = 'waiting';
 }

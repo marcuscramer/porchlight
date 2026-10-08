@@ -417,6 +417,17 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCurrentHeart
     catch_unwind(crate::presence::current_heartbeat_interval_ms).unwrap_or(crate::presence::HEARTBEAT_INTERVAL_MS) as jni::sys::jint
 }
 
+/// See [`crate::presence::current_pairing_republish_interval_ms`]'s own doc.
+/// 0 means no attempt is live. Returns 0 on a panic (the shell's pairing timer
+/// just stops; the next pairing change starts it again).
+#[no_mangle]
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeCurrentPairingRepublishIntervalMs<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jni::sys::jint {
+    catch_unwind(crate::presence::current_pairing_republish_interval_ms).unwrap_or(0) as jni::sys::jint
+}
+
 /// See [`crate::presence::remove_pairing`]'s own doc. No return value; a
 /// panic here is swallowed the same way [`nativePeerConnectionClosed`]
 /// swallows one.

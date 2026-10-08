@@ -440,6 +440,17 @@ export function currentHeartbeatIntervalMs() {
 }
 
 /**
+ * See [`crate::presence::current_pairing_republish_interval_ms`]'s own doc.
+ * 0 means no attempt is live. Falls back to 0 on a panic (the shell's pairing
+ * timer just stops; the next pairing change starts it again).
+ * @returns {number}
+ */
+export function currentPairingRepublishIntervalMs() {
+    const ret = wasm.currentPairingRepublishIntervalMs();
+    return ret >>> 0;
+}
+
+/**
  * See [`crate::signal_retry::due_for_retry`]'s own doc. Returns a
  * JSON-encoded `Vec<`[`crate::signal_retry::PendingRetry`]`>`, falling back
  * to `"[]"` on a panic — fail-closed, nothing to retry this tick.

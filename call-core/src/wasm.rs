@@ -317,6 +317,14 @@ pub fn current_heartbeat_interval_ms() -> u32 {
     catch_unwind(crate::presence::current_heartbeat_interval_ms).unwrap_or(crate::presence::HEARTBEAT_INTERVAL_MS)
 }
 
+/// See [`crate::presence::current_pairing_republish_interval_ms`]'s own doc.
+/// 0 means no attempt is live. Falls back to 0 on a panic (the shell's pairing
+/// timer just stops; the next pairing change starts it again).
+#[wasm_bindgen(js_name = currentPairingRepublishIntervalMs)]
+pub fn current_pairing_republish_interval_ms() -> u32 {
+    catch_unwind(crate::presence::current_pairing_republish_interval_ms).unwrap_or(0)
+}
+
 /// See [`crate::presence::remove_pairing`]'s own doc. No return value — a
 /// panic here is swallowed the same way `nativePresenceRemovePairing`
 /// swallows one.

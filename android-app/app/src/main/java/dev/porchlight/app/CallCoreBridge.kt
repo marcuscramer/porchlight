@@ -108,6 +108,7 @@ object CallCoreBridge {
 
     @JvmStatic
     private external fun nativeCurrentHeartbeatIntervalMs(): Int
+    private external fun nativeCurrentPairingRepublishIntervalMs(): Int
 
     @JvmStatic
     private external fun nativePresenceRemovePairing(pairingId: String)
@@ -261,7 +262,8 @@ object CallCoreBridge {
      * enum one-for-one; see its own doc for what each means. */
     sealed interface Effect {
         data class SendBootstrap(val pairingId: String, val ownPrivateKeyHex: String, val rendezvousTag: String, val targetPubkey: String, val payload: JSONObject) : Effect
-        data object KickHeartbeat : Effect
+        /** The pairing state changed: re-subscribe and republish the live attempts' messages now. */
+        data object RepublishPairing : Effect
         data class SetCollision(val pairingId: String) : Effect
         data class SetTimedOut(val pairingId: String) : Effect
         data class SetConfirmedCandidate(val pairingId: String, val pubkeyHex: String, val name: String) : Effect
@@ -515,6 +517,9 @@ object CallCoreBridge {
     /** See the Rust crate's own `presence::current_heartbeat_interval_ms`
      * doc: the delay until the next heartbeat tick. */
     fun currentHeartbeatIntervalMs(): Int = nativeCurrentHeartbeatIntervalMs()
+
+    /** Delay between republishing a live pairing attempt's messages; 0 when no attempt is live. */
+    fun currentPairingRepublishIntervalMs(): Int = nativeCurrentPairingRepublishIntervalMs()
 
     /** See the Rust crate's own `presence::remove_pairing` doc — call
      * alongside [forgetPairing] from `removePairing`. */
@@ -913,7 +918,7 @@ object CallCoreBridge {
             val obj = array.getJSONObject(i)
             when (val kind = obj.getString("kind")) {
                 "SendBootstrap" -> Effect.SendBootstrap(obj.getString("pairing_id"), obj.getString("own_private_key_hex"), obj.getString("rendezvous_tag"), obj.getString("target_pubkey"), obj.getJSONObject("payload"))
-                "KickHeartbeat" -> Effect.KickHeartbeat
+                "RepublishPairing" -> Effect.RepublishPairing
                 "SetCollision" -> Effect.SetCollision(obj.getString("pairing_id"))
                 "SetTimedOut" -> Effect.SetTimedOut(obj.getString("pairing_id"))
                 "SetConfirmedCandidate" -> Effect.SetConfirmedCandidate(obj.getString("pairing_id"), obj.getString("pubkey_hex"), obj.getString("name"))
