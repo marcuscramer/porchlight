@@ -277,7 +277,7 @@ private fun PairingDialogScreen(
     CenteredDialogScreen(onBack = onBack) {
         // Bright, not dimmed — the one thing the screen exists to say, the same
         // role CallingScreen's contact name plays; matches web's `.panel h1`.
-        Text(title, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall)
+        Text(title, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Text(text, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, minLines = textLines)
         Box(modifier = Modifier.heightIn(min = PairingActionSlotHeight), contentAlignment = Alignment.Center) { action() }
     }
