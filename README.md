@@ -21,6 +21,17 @@ where it isn't (for example, both people on separate, more restrictive
 office or mobile networks) — in that case the call may simply fail to
 connect.
 
+Porchlight is a good fit for a Portal at a senior's home, with a few
+optional features for it. When you call, the Portal wakes up, the TV turns on
+and switches to the right HDMI input, and, with Auto-answer switched on for you
+as a trusted contact, the call connects by itself after a short countdown, so
+the person at home never has to press anything. [Kiosk mode](#3-kiosk-mode)
+brings Porchlight back up after a restart, and updates install from inside the
+app, so you can fix things without a visit (see the
+[convenience setup](#convenience-optional-but-recommended)). Because
+Auto-answer turns the camera and microphone on without anyone pressing Accept,
+it is off by default and set per contact.
+
 ### Privacy model
 
 🔒 Audio/video: direct P2P  
@@ -40,144 +51,184 @@ Open Porchlight in your browser:
 
 Have someone else open it too. Agree on a phrase. Pair. Call. No signup required.
 
-## What you need
-### Just a browser
-The web version needs nothing installed. See
-  "Using the web version" below.
-
-### A Meta Portal TV
-If you want it running there too:  
-  - USB debugging enabled on the Portal — Porchlight is sideload-only.
-  - A USB-connected computer to run `adb install` from, for the initial install (see
-    below).
-
-Porchlight installs and shows up on the stock Portal home screen on its own — no third-party launcher required.
-[Immortal](https://github.com/starbrightlab/immortal) is still worth
-considering for reasons that have nothing to do with running
-Porchlight itself: its provisioning kit can freeze the device against further Meta OS updates and it gives you a proper on-device catalog for managing whatever else you sideload.
-
 ## Installing on a Portal TV
 
-Sideload the
-APK directly from a computer with [adb](https://developer.android.com/tools/adb)
-installed:
+Porchlight is sideloaded from a computer, so you need three things:
+
+1. **USB debugging allowed on the Portal**, in its Settings (**Settings >
+   Debug > ADB Enabled**).
+2. **The Portal connected to the computer by USB.** The first time, the
+   Portal asks "Allow USB debugging?" on its screen: choose Allow, and tick
+   "Always allow".
+3. **adb and the Porchlight APK on the computer:** download Google's
+   [platform-tools](https://developer.android.com/tools/releases/platform-tools)
+   (which contain [adb](https://developer.android.com/tools/adb)) and
+   `app-release.apk` from the
+   [latest release](https://github.com/marcuscramer/porchlight/releases/latest).
+
+Then, from the folder with the APK, install it:
 
 ```
 adb install app-release.apk
 ```
 
-The app appears on the Portal's own home screen once installed. If you use
-Immortal, it also shows up in its app list/catalog the same way any other
-sideloaded app does.
+The app appears on the Portal's own home screen once installed. You may have to
+grant camera and microphone permissions.
 
-On first launch, grant the camera and microphone permissions the app asks for
-(and notifications, on Android versions that ask).
+### Convenience (optional but recommended)
 
-### Convenience (highly recommended)
-
-Two one-time setups make a Portal much nicer to live with. Both are done with
-`adb` commands run from the same computer you used for the install, because
-they touch protected system settings that no ordinary app is allowed to
-change (the first one's "Install unknown apps" part can also be switched on
-from the Portal itself).
-Neither is needed for calls to work, but you'll want both on any Portal that
-isn't sitting next to you.
+A few one-time setups make a Portal much nicer to live with. Most are done
+with `adb` commands run from the same computer you used for the install,
+because they touch protected system settings that no ordinary app is allowed
+to change. None of them is needed for calls to
+work.
 
 #### 1. Updating from inside the app
 
 Porchlight checks for new releases and can install them for you from
-Settings. For that to actually work, two things need to be switched on
-once. (The Status page in Settings shows whether the verifier is
-still blocking.)
-
-**Allow Porchlight to install apps.** Android only lets an app install
-packages once you've allowed it. The first time you press Install, the Portal
-opens its "Install unknown apps" page for Porchlight; switch it on there. If
-you'd rather not hunt for that page with the remote, grant it from the
-computer instead:
+Settings. For that to work, run these three commands once:
 
 ```
 adb shell appops set dev.porchlight.app REQUEST_INSTALL_PACKAGES allow
-```
-
-(Without it, Install just keeps opening that page. It is also set back to
-"not allowed" whenever the app is uninstalled and installed afresh, so this
-is worth repeating after a full reinstall.)
-
-**Turn off Meta's install verifier.** Meta's own on-device install
-verifier silently rejects *any* sideloaded app's install, including
-Porchlight's own updates, no matter how the install is triggered, so it
-needs to be turned off once:
-
-```
 adb shell pm disable-user --user 0 com.facebook.appverifier
 adb shell settings put global package_verifier_enable 0
 ```
 
-The first command turns off the specific app that does the rejecting;
-the second turns off Android's own install-verification system as a
-whole, which is what asks that app to approve or reject installs in the
-first place. Both are reversible (`adb shell pm enable
-com.facebook.appverifier` and setting the value back to `1` restore
-them).
+**The first command allows Porchlight to install apps.** Android only lets an
+app install packages once you've allowed it. Without this command, the first
+time you press Install the Portal opens its "Install unknown apps" page for
+Porchlight, and you can switch it on there instead; until you do, Install
+just keeps opening that page. The permission is also reset whenever the app is
+uninstalled and installed afresh, so it's worth repeating after a full
+reinstall. To take it back:
+`adb shell appops set dev.porchlight.app REQUEST_INSTALL_PACKAGES deny`.
+
+**The other two turn off Meta's install verifier.** Meta's own on-device
+install verifier silently rejects *any* sideloaded app's install, including
+Porchlight's own updates, no matter how the install is triggered. The first
+of the two turns off the specific app that does the rejecting; the second
+turns off Android's own install-verification system as a whole, which is what
+asks that app to approve or reject installs in the first place. Both are
+reversible (`adb shell pm enable com.facebook.appverifier` and setting the
+value back to `1` restore them).
 
 If you'd rather not touch these settings, skip this step. In-app updates won't
 install, but you can still update the way you installed: download the new APK
 and run `adb install -r` yourself.
 
-If you're using [Immortal](https://github.com/starbrightlab/immortal),
-you don't need to do this manually — its provisioning kit disables the
-same verifier automatically as part of setup, for the same reason (it
-needs to install and update apps on-device too).
-
 #### 2. Waking the Portal and turning on the TV for incoming calls
 
-This one is optional as a whole: skip it and calls still ring, but if the
+Skip this and calls still ring, but if the
 Portal is asleep when one arrives its screensaver can take over the screen so
 the call is there but never visible, and the TV stays off, or on whatever HDMI
-input it was showing. With it, when a call rings Porchlight presses the
-Portal's Home key, which ends the screensaver and makes the Portal turn the TV
-on if it's off and switch it to its input. It's two commands, and you want
-both.
+input it was showing. With it, when a call rings Porchlight ends the screensaver
+and makes the Portal turn the TV on if it's off and switch it to its input.
 
-First, Porchlight needs its accessibility service switched on. The Portal's
-own Settings has no screen for this:
+It takes two steps. The first one runs inside the Portal's own shell. Open that shell first:
 
 ```
-adb shell '
+adb shell
+```
+
+Wait for the Portal's prompt to appear, then paste these lines (the last one
+leaves the shell again):
+
+```
 S=dev.porchlight.app/dev.porchlight.app.CallWakeUpAccessibilityService
 settings put secure enabled_accessibility_services "$(settings get secure enabled_accessibility_services):$S"
 settings put secure accessibility_enabled 1
-'
+exit
 ```
 
-It adds Porchlight to the Portal's existing accessibility services and doesn't
-replace them (the Portal already runs two of its own). Running it twice is
-harmless. The service can't read anything on the screen; all Porchlight does
-with it is press Home when a call rings.
-
-Second, let Porchlight cover the screen for the moment it's pressing Home.
-Without this you'd see the Portal's own home screen flash for well under a
-second as the call comes in; with it, nothing but the call screen itself ever
-shows. It needs Android's "Allow display over other apps" access:
+Then, back in your own terminal:
 
 ```
 adb shell appops set dev.porchlight.app SYSTEM_ALERT_WINDOW allow
 ```
 
-That's a normal, narrow permission. The cover is just a plain color, drawn
-while Home is being pressed and removed the moment the call screen is
-confirmed up, with a safety timer so it can never stay covering the screen.
+**The first step switches on Porchlight's accessibility service.** It adds
+Porchlight to the Portal's existing accessibility services without replacing
+them. The service can't read anything on the screen; all Porchlight does with
+it is press Home when a call rings. Once it is on, Settings in Porchlight has a
+**Call wake-up** switch to turn the feature off and on without touching `adb`
+again (until the service is enabled, the switch is off and can't be reached).
 
-Once the service is on, Settings in Porchlight has a **Call wake-up** switch
-to turn the feature off and on without touching `adb` again (until the service
-is enabled, the switch is off and can't be reached). To remove it
-completely, read the service list with
+**The second step is purely cosmetic.** It lets Porchlight cover the
+screen for the moment it's pressing Home. Without it everything still works,
+but you'd see the Portal's own home screen flash briefly as the call comes in.
+It needs Android's "Allow display over other apps" access, which is a normal,
+narrow permission.
+
+To undo this completely, read the service list with
 `adb shell settings get secure enabled_accessibility_services`, remove the
 `dev.porchlight.app/…` entry and put the rest back with
 `adb shell settings put secure enabled_accessibility_services "<the rest>"`;
 revoke the cover with
 `adb shell appops set dev.porchlight.app SYSTEM_ALERT_WINDOW deny`.
+
+#### 3. Kiosk mode
+
+Settings in Porchlight has a **Kiosk mode** switch, off by default. Calls don't
+need it: Porchlight's background service starts by itself when the Portal
+boots and rings either way. What the switch adds is the screen. With Kiosk mode
+on, Porchlight's own screen comes up by itself after the Portal restarts and
+whenever the screensaver ends, so the Portal always lands on Porchlight
+instead of on Meta's home screen. That's what you want for a Portal that only
+makes calls, such as one you set up for someone else. Leave it off if the
+Portal is also used for other things, since Porchlight would otherwise pull
+itself back to the front each time the screensaver ends. Unlike the other
+steps this needs no `adb`: it is just a switch in Porchlight's Settings, and
+you can turn it off again at any time. (An app update doesn't bring the screen
+up by itself, even with Kiosk mode on.)
+
+#### 4. Granting camera and microphone up front
+
+Porchlight needs the camera and the microphone, and Android normally asks for
+each the first time they're used, with a pop-up on the screen. If you'd rather
+not deal with those pop-ups with the remote, or you're setting the Portal up
+for someone else and want it to just work, grant them from the computer:
+
+```
+adb shell pm grant dev.porchlight.app android.permission.CAMERA
+adb shell pm grant dev.porchlight.app android.permission.RECORD_AUDIO
+```
+
+Like the install permission in step 1, these are forgotten when the app is
+uninstalled, so repeat them after a full reinstall. Together with steps 1 and
+2 that is every permission Porchlight asks for that you'd otherwise have to
+grant by hand: install apps, display over other apps, the accessibility
+service, the camera and the microphone. (Everything else it uses, such as the
+network, is granted automatically.) To take them back:
+`adb shell pm revoke dev.porchlight.app android.permission.CAMERA`, and the
+same for the microphone.
+
+#### 5. Preventing updates from Meta
+
+The setup above is made of settings on the Portal, and a system update from
+Meta could in principle put some of it back: turn the install verifier on again,
+for instance, which would stop in-app updates without any warning. Worse, an
+update could also switch USB debugging off, and without it you can no longer
+reach the Portal from a computer, which makes it a lot less useful as a
+device. If you'd rather that couldn't happen, you can switch off the part of
+the Portal that installs Meta's system updates:
+
+```
+adb shell pm disable-user --user 0 com.facebook.aloha.otaui
+adb shell pm disable-user --user 0 com.facebook.aloha.alohaotasetup
+```
+
+Some Portal builds don't have the second one; if adb complains about it,
+that's fine.
+
+The price is that your Portal then gets no more operating-system or security
+updates from Meta at all. Meta has discontinued the Portal, so there aren't
+many to miss, but it is your call, and it's a good reason to skip this step
+on a Portal that does more than make calls. To get updates back:
+
+```
+adb shell pm enable com.facebook.aloha.otaui
+adb shell pm enable com.facebook.aloha.alohaotasetup
+```
 
 ## Using the web version
 
@@ -224,12 +275,10 @@ end.
 
 ## Relays
 
-Signaling goes through public Nostr relays (see [SECURITY.md](SECURITY.md) for what they can see). Which relays is a
+Signaling goes through public Nostr relays (see [SECURITY.md](SECURITY.md) for what they can see). The relay list is a
 file, [`web-app/relays.json`](web-app/relays.json), served next to the web page. The Portal app fetches it on start
 and every six hours (and sooner when a contact's heartbeat shows a newer version), the web page checks the same way
-and reloads itself when a newer list exists. **Settings, Status** shows the list version and has a "Check for relay
-updates" button at the bottom. `tools/relay-survey` measures candidate relays; the list is meant to be updated from its
-reports.
+and reloads itself when a newer list exists. **Settings > Status** shows the list version and has an "Update list" button at the bottom.
 
 ## Day to day
 
@@ -253,14 +302,14 @@ reports.
 - **TV off, or on a different HDMI input**: if your Portal TV is plugged into
   a TV that's off or showing something else when a call comes in, the call
   still rings and connects, but whether the TV follows depends on the call
-  wake-up setup above. With it, Porchlight presses the Portal's Home key as
-  the call rings, and the Portal then asks the TV (over HDMI-CEC) to turn on
+  wake-up setup above. With it, as the call rings, the Portal asks the TV
+  (over HDMI-CEC) to turn on
   if it's off and to switch to its input — so the call just appears (a TV
   that was off can take several seconds to come up). Without it, you'll need
   to turn the TV on and switch the input yourself to see the call. (A
   sideloaded app can't send that HDMI-CEC request itself — the permission is
   restricted to apps signed with Meta's own key — which is why this goes
-  through the Home key.) It needs a TV with HDMI-CEC turned on.
+  through a "hacky" Home-key press.) It needs a TV with HDMI-CEC turned on.
 - **When a call doesn't go through**, the screen says why instead of a
   generic failure: *Call declined* (they pressed decline), *No answer* (it
   rang for a minute and nobody picked up), *Not reachable* (they appear to be
@@ -284,44 +333,6 @@ reports.
 - **Removing a contact**: tap the bin icon next to their name. This is
   permanent — to reconnect with them later, pair again with a fresh
   phrase.
-
-## Setting one up for the grandparents
-
-The goal is a Portal that someone who never wants to touch it can leave
-plugged in, and you can call whenever you like. Do this once, ideally on a
-phone call with them so you can agree the pairing phrase.
-
-1. Install Porchlight on their Portal and do the
-   [convenience setup](#convenience-highly-recommended) — both parts. Updating
-   from inside the app means you can push fixes later without a visit, and
-   call wake-up means a call appears even if the Portal is asleep and the TV
-   is off or on another input.
-2. Pair it with your own phone or browser (see [Pairing two devices](#pairing-two-devices)).
-3. In Porchlight's Settings on their Portal, turn on **Kiosk mode** so Porchlight
-   comes back up by itself after a restart and when the screensaver ends. Set
-   **Ringtone volume** to something they'll hear from across the room.
-4. On their contact list, switch **Auto-answer** on for your contact — and for
-   anyone else they'd want connected without a tap.
-
-From then on, when you call, their Portal wakes, the TV turns on and switches
-over, and a short countdown ("… will automatically connect in 5 seconds") runs
-before the call connects on its own. Pressing Back during the countdown
-declines the call, so nobody is ever surprised without a way out. The green dot
-next to their name on your device tells you the Portal is reachable before you
-call.
-
-Worth knowing:
-
-- **Auto-answer means the camera and microphone go live on that contact's
-  call** without anyone pressing Accept. Only turn it on for people you'd
-  trust with that, and tell the person at the other end. It's per contact,
-  off by default.
-- The Portal's physical **camera cover** has to be open for video. If it's
-  closed the call can't use the camera, so ask them to leave it open — or
-  close it deliberately when they want privacy.
-- Leave the Portal powered and on Wi-Fi. Porchlight keeps itself running in
-  the background to receive calls, and with Kiosk mode on it also starts
-  again by itself after a restart.
 
 ## Privacy and security, in brief
 
@@ -353,8 +364,7 @@ pipeline could work at all. It's since diverged substantially: two-way
 (not just one-way) calling, symmetric peer roles, Nostr-based signaling
 with no self-hosted server and no account of any kind, per-contact signing
 keys with explicit human-confirmed pairing, boot-launch and crash
-recovery, and sideload-specific work (screensaver handling, dual stock/
-Immortal launcher support, wake-lock behavior).
+recovery, and sideload-specific work (screensaver handling, wake-lock behavior).
 
 Implementation was done with [Claude](https://claude.com/claude-code)
 (Anthropic).

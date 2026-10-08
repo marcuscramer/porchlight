@@ -37,10 +37,11 @@ Please report security problems privately, not in a public issue: use
 - **GitHub** — hosts the web app (GitHub Pages) and the Android releases the
   app updates itself from. Whoever controls those can ship you different
   code. The same site also serves the **relay list** (`relays.json`): the web
-  app is built with it, and the Android app fetches it on start, every six
-  hours, and when a contact's heartbeat shows a newer version, replacing the
-  built-in list when its version is higher (a list must be `wss://` URLs, at
-  most twelve; relays a new list drops stay in use for 48 hours). The list is
+  app is built with it, and both the web app and the Android app fetch it on
+  start, every six hours, and when a contact's heartbeat shows a newer version,
+  replacing the built-in list when its version is higher (a list must be
+  `wss://` URLs, at most twelve; on Android, relays a new list drops stay in use
+  for 48 hours; the web page reloads itself to pick up a new list). The list is
   not signed. Someone who took over the repository could point devices at
   relays they run, which would see device addresses, pairing public keys and
   message timing but not message contents; on Android that is the one thing a
@@ -151,30 +152,40 @@ number.
   posture than a locked-down consumer device. This is a property of
   sideloading generally, not specific to this app.
 - **The convenience setup weakens the device further.** The README's
-  "Convenience" section has two parts, both skippable. To let the app update
-  itself, you allow it to install apps ("Install unknown apps") and turn off
-  Meta's install verifier and Android's package verification as a whole, so the
-  device stops checking any sideloaded install. The first of those is a real
-  grant: an app that may install packages could install any APK if it were
-  ever compromised, not only its own updates (Android itself only accepts an
-  update of Porchlight if it carries the same signing key). To let an incoming call show over the screensaver, turn the TV
-  on and switch it to the Portal (the call wake-up, which is optional as a
-  whole), you run
-  two `adb` commands. The first switches on Porchlight's accessibility
-  service, which is declared with no access to screen content and no events;
-  the app only uses it to press the Home key when a call rings. Android's
-  accessibility mechanism is powerful in general, so this still means
-  trusting the app's code and its updates, but it is a much narrower grant
-  than a permission to change system settings, which Porchlight does not
-  use. The second grants "display over other apps", so the app can cover the
-  screen with a plain panel for the moment it's pressing Home and the
-  Portal's own home screen never flashes through. That is the same category
-  of permission a floating-chat-head app would hold, used only while a call
-  is ringing and removed as soon as the call screen is up, with a timer that
-  force-removes it regardless. None of this is needed for calls to work;
-  skipping it costs only convenience.
+  "Convenience" section has several steps, all optional, and none is needed
+  for calls to work; skipping them costs only convenience.
+  - *In-app updates.* You allow Porchlight to install apps ("Install unknown
+    apps") and turn off Meta's install verifier and Android's package
+    verification as a whole, so the device stops checking any sideloaded
+    install. The first of those is a real grant: an app that may install
+    packages could install any APK if it were ever compromised, not only its
+    own updates (Android itself only accepts an update of Porchlight if it
+    carries the same signing key).
+  - *Call wake-up.* To let an incoming call show over the screensaver, turn
+    the TV on and switch it to the Portal, you run two `adb` commands. The
+    first switches on Porchlight's accessibility service, which is declared
+    with no access to screen content and no events; the app only uses it to
+    press the Home key when a call rings. Android's accessibility mechanism is
+    powerful in general, so this still means trusting the app's code and its
+    updates, but it is a much narrower grant than a permission to change
+    system settings, which Porchlight does not use. The second grants "display
+    over other apps", so the app can cover the screen with a plain panel for
+    the moment it's pressing Home and the Portal's own home screen never
+    flashes through. That is the same category of permission a chat-head app would
+    hold, used only while a call is ringing and removed as soon as the call
+    screen is up, with a timer that force-removes it regardless.
+  - *Blocking Meta's system updates.* This switches off the part of the Portal
+    that installs Meta's updates, so that a Meta update can't undo the setup
+    above or switch USB debugging off. The price is that no operating-system
+    or security updates from Meta arrive at all, which makes the next point
+    permanent instead of merely likely.
+  - *Kiosk mode and granting camera and microphone up front* add no further
+    risk: the first only brings Porchlight's own screen to the front, and the
+    second grants permissions the app would otherwise ask for on screen.
 - **The platform itself is unmaintained.** Meta Portal hardware is
   discontinued and Meta doesn't guarantee further updates, so any weakness in
   the underlying Android build stays unpatched, with or without Porchlight.
+  (Blocking Meta's updates, an optional step in the README, makes that
+  certain.)
 
 See [README.md](README.md) for what this app is and how to use it.
