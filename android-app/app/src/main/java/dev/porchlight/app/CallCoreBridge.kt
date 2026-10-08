@@ -130,7 +130,7 @@ object CallCoreBridge {
     private external fun nativeBuildBootstrapEvent(ownPrivateKeyHex: String, rendezvousTag: String, targetPubkeyHex: String, payloadJson: String): String?
 
     @JvmStatic
-    private external fun nativeBuildRelayFilters(confirmedOwnPubkeysJson: String, pendingRendezvousTagsJson: String): String
+    private external fun nativePlanSubscriptions(ownPubkeysJson: String, pendingTagsJson: String, relaysJson: String, reset: Boolean, refresh: Boolean): String
 
     // --- Signal message schema (SignalMessage) — see call-core's own
     // `nostr_protocol::SignalMessage` doc. `sdpMid` crosses the same way
@@ -527,15 +527,12 @@ object CallCoreBridge {
 
     // --- Nostr protocol ---
 
-    /** One relay filter's worth of data — see the Rust crate's own
-     * `nostr_protocol::FilterSpec` doc for why this is deliberately not a
-     * richer `Filter` type: the caller translates this into whatever its
-     * own relay-client library's own filter type expects. */
-    data class FilterSpec(val kind: Int, val tagName: Char, val tagValues: List<String>)
+    /** One subscription to open on every relay: the filter is `kinds = [kind]` plus the tag filter `#tagName in
+     * tagValues`. The caller translates it into its relay-client library's own filter type. */
+    data class Subscription(val id: String, val kind: Int, val tagName: Char, val tagValues: List<String>)
 
-    /** See the Rust crate's own `nostr_protocol::RelayFilters` doc.
-     * Either half is `null` when there's nothing to filter for yet. */
-    data class RelayFilters(val wrapFilter: FilterSpec?, val bootstrapFilter: FilterSpec?)
+    /** What to close and what to open — see the Rust crate's own `subscription_plan::plan` doc. */
+    data class SubscriptionPlan(val subscribe: List<Subscription>, val close: List<String>)
 
     /** Mirrors `publish`'s full two-layer gift wrap exactly — see the Rust
      * crate's own `nostr_protocol::build_wrapped_event` doc. Returns the
@@ -782,11 +779,22 @@ object CallCoreBridge {
         }
     }
 
-    /** Mirrors `currentFilters`'s exact filter-set construction — see the
-     * Rust crate's own `nostr_protocol::build_relay_filters` doc. */
-    fun buildRelayFilters(confirmedOwnPubkeys: List<String>, pendingRendezvousTags: List<String>): RelayFilters {
-        val json = nativeBuildRelayFilters(JSONArray(confirmedOwnPubkeys).toString(), JSONArray(pendingRendezvousTags).toString())
-        return parseRelayFilters(json)
+    /** Which subscriptions to close and open to match what this device wants to listen for. [reset] is true when
+     * the relay client was just rebuilt (nothing is held on it); [refresh] is true when a relay ended a subscription
+     * (everything is opened again). See the Rust crate's own
+     * `subscription_plan::plan` doc. */
+    fun planSubscriptions(ownPubkeys: List<String>, pendingTags: List<String>, relays: List<String>, reset: Boolean, refresh: Boolean): SubscriptionPlan {
+        val obj = JSONObject(nativePlanSubscriptions(JSONArray(ownPubkeys).toString(), JSONArray(pendingTags).toString(), JSONArray(relays).toString(), reset, refresh))
+        val subscribe = obj.getJSONArray("subscribe")
+        val close = obj.getJSONArray("close")
+        return SubscriptionPlan(
+            subscribe = (0 until subscribe.length()).map {
+                val sub = subscribe.getJSONObject(it)
+                val values = sub.getJSONArray("tag_values")
+                Subscription(sub.getString("id"), sub.getInt("kind"), sub.getString("tag_name")[0], (0 until values.length()).map { i -> values.getString(i) })
+            },
+            close = (0 until close.length()).map { close.getString(it) },
+        )
     }
 
     /** Mirrors `heartbeatTick`'s payload — see the Rust crate's own
@@ -895,21 +903,6 @@ object CallCoreBridge {
     val wakeUpConstants: WakeUpConstants by lazy {
         val obj = JSONObject(nativeWakeUpConstants())
         WakeUpConstants(obj.getLong("own_press_window_ms"), obj.getLong("mask_timeout_ms"))
-    }
-
-    private fun parseFilterSpec(obj: JSONObject?): FilterSpec? {
-        if (obj == null) return null
-        val tagValuesArray = obj.getJSONArray("tag_values")
-        val tagValues = (0 until tagValuesArray.length()).map { tagValuesArray.getString(it) }
-        return FilterSpec(obj.getInt("kind"), obj.getString("tag_name")[0], tagValues)
-    }
-
-    private fun parseRelayFilters(json: String): RelayFilters {
-        val obj = JSONObject(json)
-        return RelayFilters(
-            wrapFilter = parseFilterSpec(if (obj.isNull("wrap_filter")) null else obj.getJSONObject("wrap_filter")),
-            bootstrapFilter = parseFilterSpec(if (obj.isNull("bootstrap_filter")) null else obj.getJSONObject("bootstrap_filter")),
-        )
     }
 
     private fun parseEffects(json: String): List<Effect> {

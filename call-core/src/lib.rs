@@ -83,6 +83,8 @@ pub mod relay_watchdog;
 
 pub mod relay_list;
 
+pub mod subscription_plan;
+
 pub mod ice_evidence;
 
 /// A peer's self-reported, untrusted display name is capped and stripped
@@ -226,6 +228,7 @@ struct AppState {
     relay_log: relay_status::RelayLogState,
     relay_watchdog: relay_watchdog::WatchdogState,
     relay_list: relay_list::RelayListState,
+    subscription_plan: subscription_plan::PlanState,
     ice: ice_evidence::IceState,
 }
 
@@ -241,6 +244,7 @@ impl AppState {
             relay_log: relay_status::RelayLogState::new(),
             relay_watchdog: relay_watchdog::WatchdogState::new(),
             relay_list: relay_list::RelayListState::new(),
+            subscription_plan: subscription_plan::PlanState::new(),
             ice: ice_evidence::IceState::new(),
         }
     }

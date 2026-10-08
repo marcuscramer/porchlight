@@ -290,7 +290,7 @@ class NostrSignalingClient(
         // is never touched from more than one thread.
         listenToConnections()
         client.connect()
-        resubscribe()
+        resubscribe(reset = true)
 
         scheduleHeartbeat(0)
         executor.scheduleWithFixedDelay({ monitor() }, ONLINE_CHECK_INTERVAL_MS, ONLINE_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS)
@@ -318,7 +318,7 @@ class NostrSignalingClient(
                         // theirs about this one may be too. Say hello now
                         // rather than waiting out a full heartbeat interval.
                         CallCoreBridge.requestHello()
-                        resubscribe()
+                        resubscribe(refresh = true)
                         kickHeartbeat()
                     }
                 }
@@ -369,62 +369,24 @@ class NostrSignalingClient(
     }
 
     /**
-     * Builds the current subscription filter set from scratch — a
-     * [WRAP_KIND] filter matching *any* of this device's per-pairing
-     * pubkeys if there are any, and a [SIGNAL_KIND] filter matching *any*
-     * currently-live pairing attempt's rendezvous tag if there are any.
-     * Either half is simply omitted when empty.
+     * Brings the relay subscriptions in line with what this device wants to hear — its contacts' wrapped messages
+     * and the live pairing attempts' rendezvous tags. Which ones to close and open is `call-core`'s
+     * `subscription_plan` (a subscription is never edited in place, and an unchanged wish costs no relay traffic);
+     * this only carries it out. [reset] is true when the relay client was just rebuilt, [refresh] when a relay ended a
+     * subscription. Called from
+     * [republishPairing], [contactsChanged] and when signaling comes back.
      */
-    private fun pendingTags(): List<String> = resolver.pendingPairings().mapNotNull { it.rendezvousTag }.sorted()
-
-    private fun wrapFilters(): List<Filter> {
-        val ownPubkeys = resolver.confirmedPeers().map { ownPubkeyHexFor(it.ownPrivateKeyHex) }
-        val relayFilters = CallCoreBridge.buildRelayFilters(ownPubkeys, emptyList())
-        return listOfNotNull(relayFilters.wrapFilter?.let { Filter(kinds = listOf(it.kind), tags = mapOf(it.tagName.toString() to it.tagValues)) })
-    }
-
-    private fun pairingFilters(tags: List<String>): List<Filter> {
-        val relayFilters = CallCoreBridge.buildRelayFilters(emptyList(), tags)
-        return listOfNotNull(relayFilters.bootstrapFilter?.let { Filter(kinds = listOf(it.kind), tags = mapOf(it.tagName.toString() to it.tagValues)) })
-    }
-
-    /**
-     * Re-issues the subscription with a freshly-built filter set — a plain
-     * REQ with the same subscription id is how Nostr itself defines
-     * "replace this subscription's filters," so this is safe to call as
-     * often as needed. Called from [republishPairing] and [contactsChanged] —
-     * exactly the moments the *filter set* itself needs recomputing — and when
-     * signaling comes back.
-     */
-    private fun resubscribe() {
+    private fun resubscribe(reset: Boolean = false, refresh: Boolean = false) {
         if (closed) return
-        client.subscribe(SUB_ID, relayUrls.associateWith { wrapFilters() }, subscriptionListener)
-        resubscribePairing()
-    }
-
-    private var pairingSubClient: NostrClient? = null
-    private var pairingSubRelays: List<NormalizedRelayUrl> = emptyList()
-    private var pairingSubTags: List<String> = emptyList()
-    private var pairingSubId: String? = null
-    private var pairingSubSeq = 0
-
-    /**
-     * The live pairing attempts' rendezvous filter is its own subscription, under a fresh id each time the set of
-     * attempts changes (the old one is closed), instead of being folded into [SUB_ID]'s filters. Replacing one
-     * subscription's filters in place left a second attempt started soon after a cancelled one with no working
-     * subscription: relays delivered nothing for its tag, not even this device's own messages, so the attempt
-     * waited for a peer that was already publishing.
-     */
-    private fun resubscribePairing() {
-        val tags = pendingTags()
+        val ownPubkeys = resolver.confirmedPeers().map { ownPubkeyHexFor(it.ownPrivateKeyHex) }
+        val pendingTags = resolver.pendingPairings().mapNotNull { it.rendezvousTag }
         val relays = relayUrls.toList()
-        if (pairingSubClient === client && tags == pairingSubTags && relays == pairingSubRelays) return
-        if (pairingSubClient === client) pairingSubId?.let { client.unsubscribe(it) }
-        pairingSubClient = client
-        pairingSubTags = tags
-        pairingSubRelays = relays
-        pairingSubId = if (tags.isEmpty()) null else "$SUB_ID-pair-${++pairingSubSeq}"
-        pairingSubId?.let { id -> client.subscribe(id, relays.associateWith { pairingFilters(tags) }, subscriptionListener) }
+        val plan = CallCoreBridge.planSubscriptions(ownPubkeys, pendingTags, relays.map { it.url }, reset, refresh)
+        for (id in plan.close) client.unsubscribe(id)
+        for (sub in plan.subscribe) {
+            val filter = Filter(kinds = listOf(sub.kind), tags = mapOf(sub.tagName.toString() to sub.tagValues))
+            client.subscribe(sub.id, relays.associateWith { listOf(filter) }, subscriptionListener)
+        }
     }
 
     private val subscriptionListener = object : SubscriptionListener {
@@ -460,7 +422,7 @@ class NostrSignalingClient(
         val now = System.currentTimeMillis()
         if (now - lastCloseResubscribeMs < SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS) return
         lastCloseResubscribeMs = now
-        resubscribe()
+        resubscribe(refresh = true)
     }
 
     /**
@@ -624,7 +586,7 @@ class NostrSignalingClient(
         closeSockets(oldHttp)
         listenToConnections()
         client.connect()
-        resubscribe()
+        resubscribe(reset = true)
     }
 
     private fun closeSockets(http: OkHttpClient) {
@@ -810,7 +772,6 @@ class NostrSignalingClient(
 
     companion object {
         private const val TAG = "NostrSignaling"
-        private const val SUB_ID = "porchlight-signal"
 
         // One custom, unregistered kind (outside any NIP's reserved range)
         // for every message type this app sends — used two ways (see the

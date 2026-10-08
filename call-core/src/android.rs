@@ -586,26 +586,25 @@ pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeOutcomeText<
     })
 }
 
-/// See [`crate::nostr_protocol::build_relay_filters`]'s own doc.
-/// `confirmed_own_pubkeys_json`/`pending_rendezvous_tags_json` are each a
-/// JSON array of strings. Returns a JSON-encoded
-/// [`crate::nostr_protocol::RelayFilters`] — falls back to
-/// `{"wrap_filter":null,"bootstrap_filter":null}` on malformed input or a
-/// panic, the same "nothing to filter for" no-op both platforms' own
-/// "omit if empty" behavior already treats as unremarkable.
+/// See [`crate::subscription_plan::plan`]'s own doc. The three lists are JSON
+/// arrays of strings; returns the JSON-encoded plan. Falls back to an empty
+/// plan (`{"subscribe":[],"close":[]}`: change nothing) on malformed input or a
+/// panic.
 #[no_mangle]
-pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativeBuildRelayFilters<'local>(
+pub extern "system" fn Java_dev_porchlight_app_CallCoreBridge_nativePlanSubscriptions<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
-    confirmed_own_pubkeys_json: JString<'local>,
-    pending_rendezvous_tags_json: JString<'local>,
+    own_pubkeys_json: JString<'local>,
+    pending_tags_json: JString<'local>,
+    relays_json: JString<'local>,
+    reset: jni::sys::jboolean,
+    refresh: jni::sys::jboolean,
 ) -> jstring {
-    encode_or_fallback(&mut env, || "{\"wrap_filter\":null,\"bootstrap_filter\":null}".to_string(), |env| {
-        let confirmed_json = get_string(env, &confirmed_own_pubkeys_json)?;
-        let pending_json = get_string(env, &pending_rendezvous_tags_json)?;
-        let confirmed: Vec<String> = serde_json::from_str(&confirmed_json).ok()?;
-        let pending: Vec<String> = serde_json::from_str(&pending_json).ok()?;
-        Some(crate::nostr_protocol::build_relay_filters(&confirmed, &pending))
+    encode_or_fallback(&mut env, || "{\"subscribe\":[],\"close\":[]}".to_string(), |env| {
+        let own: Vec<String> = serde_json::from_str(&get_string(env, &own_pubkeys_json)?).ok()?;
+        let tags: Vec<String> = serde_json::from_str(&get_string(env, &pending_tags_json)?).ok()?;
+        let relays: Vec<String> = serde_json::from_str(&get_string(env, &relays_json)?).ok()?;
+        Some(crate::subscription_plan::plan(&own, &tags, &relays, reset != 0, refresh != 0))
     })
 }
 

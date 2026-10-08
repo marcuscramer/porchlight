@@ -278,32 +278,6 @@ export function buildOfferPayload(sdp, call_id) {
 }
 
 /**
- * See [`crate::nostr_protocol::build_relay_filters`]'s own doc. Returns a
- * JSON-encoded [`crate::nostr_protocol::RelayFilters`], falling back to
- * `{"wrap_filter":null,"bootstrap_filter":null}` on a panic — same
- * "nothing to filter for" no-op `nativeBuildRelayFilters` falls back to.
- * @param {string[]} confirmed_own_pubkeys
- * @param {string[]} pending_rendezvous_tags
- * @returns {string}
- */
-export function buildRelayFilters(confirmed_own_pubkeys, pending_rendezvous_tags) {
-    let deferred3_0;
-    let deferred3_1;
-    try {
-        const ptr0 = passArrayJsValueToWasm0(confirmed_own_pubkeys, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArrayJsValueToWasm0(pending_rendezvous_tags, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.buildRelayFilters(ptr0, len0, ptr1, len1);
-        deferred3_0 = ret[0];
-        deferred3_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
-    }
-}
-
-/**
  * See [`crate::nostr_protocol::build_wrapped_event`]'s own doc. Returns
  * the signed outer event as JSON, or `undefined` on any failure —
  * including a panic, matching `nativeBuildWrappedEvent`'s own convention.
@@ -835,6 +809,35 @@ export function pendingAttemptIds() {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * See [`crate::subscription_plan::plan`]'s own doc. Returns the JSON-encoded plan, falling back to an empty plan
+ * (`{"subscribe":[],"close":[]}`: change nothing) on a panic.
+ * @param {string[]} own_pubkeys
+ * @param {string[]} pending_tags
+ * @param {string[]} relays
+ * @param {boolean} reset
+ * @param {boolean} refresh
+ * @returns {string}
+ */
+export function planSubscriptions(own_pubkeys, pending_tags, relays, reset, refresh) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passArrayJsValueToWasm0(own_pubkeys, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayJsValueToWasm0(pending_tags, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayJsValueToWasm0(relays, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.planSubscriptions(ptr0, len0, ptr1, len1, ptr2, len2, reset, refresh);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
     }
 }
 

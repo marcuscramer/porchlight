@@ -202,8 +202,8 @@ function ownPubkeyHexFor(ownPrivateKeyHex) {
 // ---------------------------------------------------------------------------
 
 let pool = null;
-let wrapSub = null;
-let bootstrapSub = null;
+// Open relay subscriptions by the id call-core's subscription plan gave them.
+const subscriptions = new Map();
 let heartbeatTimeoutHandle = null;
 let onlineCheckTimer = null;
 
@@ -262,24 +262,33 @@ function onSubscriptionClosed(reasons) {
   const now = Date.now();
   if (now - lastCloseResubscribeMs < SUBSCRIPTION_CLOSE_RESUBSCRIBE_COOLDOWN_MS) return;
   lastCloseResubscribeMs = now;
-  resubscribe();
+  resubscribe(false, true);
 }
 
-function resubscribe() {
-  if (wrapSub) { wrapSub.close(); wrapSub = null; }
-  if (bootstrapSub) { bootstrapSub.close(); bootstrapSub = null; }
+/** Brings the relay subscriptions in line with what this page wants to hear (its contacts' wrapped messages and the
+ * live pairing attempts' rendezvous tags). Which ones to close and open is call-core's `subscription_plan` (a
+ * subscription is never edited in place, and an unchanged wish costs no relay traffic); this only carries it out.
+ * `reset`: the pool was just (re)built. `refresh`: a relay ended a subscription, open everything again.
+ * Mirrors NostrSignalingClient.kt's resubscribe. */
+function resubscribe(reset = false, refresh = false) {
   if (!pool) return;
   const ownPubkeys = confirmedPeers().map((p) => ownPubkeyHexFor(p.ownPrivateKeyHex));
   const rendezvousTags = pendingPairingsList().map((p) => p.rendezvousTag).filter(Boolean);
-  const relayFilters = JSON.parse(callCore.buildRelayFilters(ownPubkeys, rendezvousTags));
-  if (relayFilters.wrap_filter) {
-    const f = relayFilters.wrap_filter;
-    wrapSub = pool.subscribe(RELAYS, { kinds: [f.kind], [`#${f.tag_name}`]: f.tag_values }, { onevent: handleIncomingEvent, oneose() {}, onclose: onSubscriptionClosed });
+  const plan = JSON.parse(callCore.planSubscriptions(ownPubkeys, rendezvousTags, RELAYS, reset, refresh));
+  for (const id of plan.close) {
+    const handle = subscriptions.get(id);
+    if (handle) handle.close();
+    subscriptions.delete(id);
   }
-  if (relayFilters.bootstrap_filter) {
-    const f = relayFilters.bootstrap_filter;
-    bootstrapSub = pool.subscribe(RELAYS, { kinds: [f.kind], [`#${f.tag_name}`]: f.tag_values }, { onevent: handleIncomingEvent, oneose() {}, onclose: onSubscriptionClosed });
+  for (const sub of plan.subscribe) {
+    subscriptions.set(sub.id, pool.subscribe(RELAYS, { kinds: [sub.kind], [`#${sub.tag_name}`]: sub.tag_values }, { onevent: handleIncomingEvent, oneose() {}, onclose: onSubscriptionClosed }));
   }
+}
+
+/** Closes every subscription this page holds (the connection is going away). */
+function closeSubscriptions() {
+  for (const handle of subscriptions.values()) handle.close();
+  subscriptions.clear();
 }
 
 // nostr-tools never says which relay an event or message came from, nor why
@@ -332,7 +341,7 @@ function connectRelayClient() {
   // ensureRelay() opens the connection directly, independent of any
   // subscription.
   for (const url of RELAYS) pool.ensureRelay(url).catch(() => { /* the socket itself records why (TrackedWebSocket) */ });
-  resubscribe();
+  resubscribe(true);
   onlineCheckTimer = setInterval(monitorOnlineTimeouts, ONLINE_CHECK_INTERVAL_MS);
   scheduleHeartbeat(0);
   backgroundRelayListCheck();
@@ -743,7 +752,7 @@ document.addEventListener('visibilitychange', () => {
   if (connectionPaused) resumeConnection();
   else {
     callCore.requestHello();
-    resubscribe();
+    resubscribe(false, true);
     kickHeartbeat();
   }
   // iOS pauses a playing video when the page is backgrounded; resume it
@@ -791,8 +800,7 @@ async function pauseConnection() {
       return payload ? publish(peer.ownPrivateKeyHex, peer.peerPublicKey, payload) : null;
     });
     await Promise.allSettled(sends);
-    if (wrapSub) { wrapSub.close(); wrapSub = null; }
-    if (bootstrapSub) { bootstrapSub.close(); bootstrapSub = null; }
+    closeSubscriptions();
     try { pool.close(RELAYS); } catch { /* already closed */ }
     pool = null;
     // Everyone is unreachable from here until we reconnect; don't show the
@@ -816,7 +824,7 @@ async function resumeConnection() {
 // as coming back to a backgrounded tab — say hello so peers answer right away.
 window.addEventListener('online', () => {
   callCore.requestHello();
-  resubscribe();
+  resubscribe(false, true);
   kickHeartbeat();
 });
 

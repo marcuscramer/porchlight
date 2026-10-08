@@ -417,17 +417,15 @@ pub fn outcome_text(reason: &str, diagnosis: Option<String>) -> String {
     .unwrap_or_else(|| "never_connected".to_string())
 }
 
-/// See [`crate::nostr_protocol::build_relay_filters`]'s own doc. Returns a
-/// JSON-encoded [`crate::nostr_protocol::RelayFilters`], falling back to
-/// `{"wrap_filter":null,"bootstrap_filter":null}` on a panic — same
-/// "nothing to filter for" no-op `nativeBuildRelayFilters` falls back to.
-#[wasm_bindgen(js_name = buildRelayFilters)]
-pub fn build_relay_filters(confirmed_own_pubkeys: Vec<String>, pending_rendezvous_tags: Vec<String>) -> String {
+/// See [`crate::subscription_plan::plan`]'s own doc. Returns the JSON-encoded plan, falling back to an empty plan
+/// (`{"subscribe":[],"close":[]}`: change nothing) on a panic.
+#[wasm_bindgen(js_name = planSubscriptions)]
+pub fn plan_subscriptions(own_pubkeys: Vec<String>, pending_tags: Vec<String>, relays: Vec<String>, reset: bool, refresh: bool) -> String {
     catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let filters = crate::nostr_protocol::build_relay_filters(&confirmed_own_pubkeys, &pending_rendezvous_tags);
-        serde_json::to_string(&filters).unwrap_or_else(|_| "{\"wrap_filter\":null,\"bootstrap_filter\":null}".to_string())
+        let plan = crate::subscription_plan::plan(&own_pubkeys, &pending_tags, &relays, reset, refresh);
+        serde_json::to_string(&plan).unwrap_or_else(|_| "{\"subscribe\":[],\"close\":[]}".to_string())
     }))
-    .unwrap_or_else(|_| "{\"wrap_filter\":null,\"bootstrap_filter\":null}".to_string())
+    .unwrap_or_else(|_| "{\"subscribe\":[],\"close\":[]}".to_string())
 }
 
 /// See [`crate::nostr_protocol::build_heartbeat_payload`]'s own doc.
