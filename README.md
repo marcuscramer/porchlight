@@ -112,6 +112,8 @@ asks that app to approve or reject installs in the first place. Both are
 reversible (`adb shell pm enable com.facebook.appverifier` and setting the
 value back to `1` restore them).
 
+The confirmation dialog the Portal shows when you press Install may be hard to read, see step 6.
+
 If you'd rather not touch these settings, skip this step. In-app updates won't
 install, but you can still update the way you installed: download the new APK
 and run `adb install -r` yourself.
@@ -228,6 +230,23 @@ on a Portal that does more than make calls. To get updates back:
 ```
 adb shell pm enable com.facebook.aloha.otaui
 adb shell pm enable com.facebook.aloha.alohaotasetup
+```
+
+#### 6. Making system screens readable
+
+System dialogs like the update confirmation (step 1), and Android's own Settings pages, are hard to read on the
+Portal because of two Meta overlays. Switch both off together:
+
+```
+adb shell cmd overlay disable --user 0 com.facebook.aloha.rro.niu.android
+adb shell cmd overlay disable --user 0 com.facebook.aloha.rro.niu.settings
+```
+
+It only changes how screens look and survives restarts. To put Meta's look back:
+
+```
+adb shell cmd overlay enable --user 0 com.facebook.aloha.rro.niu.android
+adb shell cmd overlay enable --user 0 com.facebook.aloha.rro.niu.settings
 ```
 
 ## Using the web version
