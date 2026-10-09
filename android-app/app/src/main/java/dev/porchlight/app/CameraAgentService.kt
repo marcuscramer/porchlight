@@ -352,43 +352,59 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
             stereo[i * 2] = pcm[i]
             stereo[i * 2 + 1] = pcm[i]
         }
-        val track = android.media.AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-            )
-            .setAudioFormat(
-                android.media.AudioFormat.Builder()
-                    .setSampleRate(sr)
-                    .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_STEREO)
-                    .build(),
-            )
-            // MODE_STATIC needs the buffer sized to the exact data length
-            // up front (not AudioTrack.getMinBufferSize()'s small streaming
-            // hint) or write() silently only accepts a fraction of it.
-            .setBufferSizeInBytes(stereo.size * 2)
-            .setTransferMode(android.media.AudioTrack.MODE_STATIC)
-            .build()
-        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-        val speaker = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-        when {
-            speaker == null -> Log.w(TAG, "startRingtone: no TYPE_BUILTIN_SPEAKER output device found; ringtone will follow default routing")
-            !track.setPreferredDevice(speaker) -> Log.w(TAG, "startRingtone: setPreferredDevice(builtin speaker) was rejected")
+        // A ring that can't play must not take the call down with it: an exception here would skip the incoming-call
+        // state and the auto-answer countdown that follow in StartRinging, and on this executor it would reach the
+        // crash handler and restart the app. The call just rings silently.
+        val track = try {
+            android.media.AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build(),
+                )
+                .setAudioFormat(
+                    android.media.AudioFormat.Builder()
+                        .setSampleRate(sr)
+                        .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_STEREO)
+                        .build(),
+                )
+                // MODE_STATIC needs the buffer sized to the exact data length
+                // up front (not AudioTrack.getMinBufferSize()'s small streaming
+                // hint) or write() silently only accepts a fraction of it.
+                .setBufferSizeInBytes(stereo.size * 2)
+                .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                .build()
+        } catch (e: Exception) {
+            Log.w(TAG, "startRingtone: couldn't create the ringtone track; ringing silently", e)
+            return
         }
-        track.write(stereo, 0, stereo.size)
-        track.setLoopPoints(0, pcm.size, -1)
-        applyRingVolume(level)
-        track.play()
+        try {
+            val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+            val speaker = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            when {
+                speaker == null -> Log.w(TAG, "startRingtone: no TYPE_BUILTIN_SPEAKER output device found; ringtone will follow default routing")
+                !track.setPreferredDevice(speaker) -> Log.w(TAG, "startRingtone: setPreferredDevice(builtin speaker) was rejected")
+            }
+            val written = track.write(stereo, 0, stereo.size)
+            if (written != stereo.size) Log.w(TAG, "startRingtone: the track took $written of ${stereo.size} samples")
+            track.setLoopPoints(0, pcm.size, -1)
+            applyRingVolume(level)
+            track.play()
+        } catch (e: Exception) {
+            Log.w(TAG, "startRingtone: couldn't play the ringtone; ringing silently", e)
+            runCatching { track.release() }
+            restoreRingVolume()
+            return
+        }
         ringtoneTrack = track
         ringtoneIsPreview = preview
     }
 
     private fun stopRingtone() {
-        ringtoneTrack?.let { it.stop(); it.release() }
+        ringtoneTrack?.let { runCatching { it.stop() }; runCatching { it.release() } }
         ringtoneTrack = null
         ringtoneIsPreview = false
         restoreRingVolume()
@@ -1171,9 +1187,16 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
     private fun postIncomingCallNotification(pairingId: String) {
         val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (mgr.getNotificationChannel(INCOMING_CALL_CHANNEL_ID) == null) {
+            // Silent: the ring is our own AudioTrack (see startRingtone). A channel's sound can't be changed once
+            // created, so the earlier channel that still played the system notification sound is replaced by id.
+            mgr.deleteNotificationChannel(LEGACY_INCOMING_CALL_CHANNEL_ID)
             mgr.createNotificationChannel(
                 NotificationChannel(INCOMING_CALL_CHANNEL_ID, getString(R.string.notifications_incomingCallChannelName), NotificationManager.IMPORTANCE_HIGH)
-                    .apply { description = getString(R.string.notifications_incomingCallChannelDesc) },
+                    .apply {
+                        description = getString(R.string.notifications_incomingCallChannelDesc)
+                        setSound(null, null)
+                        enableVibration(false)
+                    },
             )
         }
         val fullScreenIntent = Intent(this, MainActivity::class.java)
@@ -1275,7 +1298,8 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
         private const val TAG = "CameraAgent"
         private const val CHANNEL_ID = "camera_agent"
         private const val NOTIF_ID = 1
-        private const val INCOMING_CALL_CHANNEL_ID = "incoming_call"
+        private const val INCOMING_CALL_CHANNEL_ID = "incoming_call_silent"
+        private const val LEGACY_INCOMING_CALL_CHANNEL_ID = "incoming_call"
         private const val INCOMING_CALL_NOTIF_ID = 2
 
         // How long the settings screen's volume preview plays before stopping
