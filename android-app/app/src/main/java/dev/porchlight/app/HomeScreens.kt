@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -541,11 +542,13 @@ private fun CallControlsOverlay(
 @Composable
 private fun CallToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit, contentDescription: String) {
     val interactionSource = remember { MutableInteractionSource() }
+    // See the settings gear's identical pair, this file's own doc there, for why both are collected.
     val focused by interactionSource.collectIsFocusedAsState()
+    val pressed by interactionSource.collectIsPressedAsState()
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             label,
-            color = if (focused) Color.White else GeneratedColor.colorTextDim,
+            color = if (focused || pressed) Color.White else GeneratedColor.colorTextDim,
             style = Type.statusRow.copy(fontSize = Type.statusRow.fontSize * 0.85f),
             modifier = Modifier.padding(bottom = Dimens.dimension4),
         )
@@ -773,7 +776,10 @@ private fun CallOutcomeScreen(
         delay(AUTO_DISMISS_DELAY_MS)
         onDismiss()
     }
-    CenteredDialogScreen(onBack = onDismiss) {
+    // backLabel "OK", not "Back"/"Cancel" — matches web's own callOutcomeCancel
+    // button (data-i18n="call.okButton"): this screen has nothing to decide,
+    // just something to acknowledge.
+    CenteredDialogScreen(onBack = onDismiss, backLabel = stringResource(R.string.call_okButton)) {
         // Bright, not dimmed — this is the one thing the screen exists
         // to say, the same role CallingScreen's contactName/
         // IncomingCallScreen's caller-name Text play (both
@@ -851,7 +857,13 @@ private fun WaitingScreen(
         // Android's system font, unlike "⚙".
         val settingsFocusRequester = remember { FocusRequester() }
         val settingsInteractionSource = remember { MutableInteractionSource() }
+        // clickable(indication = null) below still reports Press/Release into this interactionSource — indication
+        // only controls whether a ripple renders from them, not whether they're emitted — so collecting isPressed
+        // here costs nothing extra and gives a touch tap the same visual feedback D-pad focus already gets. Without
+        // this, a tap here was invisible: the icon only ever brightened for D-pad focus, which a touch tap never
+        // triggers (confirmed live: held a touch down for 2s, the icon never left its dim color).
         val settingsFocused by settingsInteractionSource.collectIsFocusedAsState()
+        val settingsPressed by settingsInteractionSource.collectIsPressedAsState()
         // See fadingEdges' own doc (Theme.kt) for what this decides. Measured
         // live via onGloballyPositioned, not assumed true for a fixed Portal
         // TV screen size — Porchlight isn't guaranteed to run only on the
@@ -892,7 +904,7 @@ private fun WaitingScreen(
                 contentDescription = stringResource(R.string.contacts_deviceSettings),
                 // Pure white on focus, deliberately a step brighter than
                 // colorTextPrimary (which stays as-is for its other uses).
-                tint = if (settingsFocused) Color.White else GeneratedColor.colorTextDim,
+                tint = if (settingsFocused || settingsPressed) Color.White else GeneratedColor.colorTextDim,
                 modifier = Modifier.size(Dimens.dimension24),
             )
         }
@@ -1063,6 +1075,7 @@ private fun ContactRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             val switchInteractionSource = remember { MutableInteractionSource() }
             val switchFocused by switchInteractionSource.collectIsFocusedAsState()
+            val switchPressed by switchInteractionSource.collectIsPressedAsState()
             // Read here, not inside the .semantics{} builder below — that
             // lambda isn't a composable context (it's a plain
             // SemanticsPropertyReceiver.() -> Unit config block), so
@@ -1078,7 +1091,7 @@ private fun ContactRow(
             ) {
                 Text(
                     stringResource(R.string.contacts_autoAnswer),
-                    color = if (switchFocused) Color.White else GeneratedColor.colorTextDim,
+                    color = if (switchFocused || switchPressed) Color.White else GeneratedColor.colorTextDim,
                     // Real fontSize override, not Modifier.scale() — scale
                     // only shrinks what's painted, not the layout box
                     // reserved for it, leaving the same visual gap as
@@ -1133,7 +1146,11 @@ internal fun StatusDot(hue: Color, contentDescription: String, modifier: Modifie
 @Composable
 private fun DeleteIconButton(onClick: () -> Unit, contentDescription: String, modifier: Modifier = Modifier) {
     val interactionSource = remember { MutableInteractionSource() }
+    // See the settings gear's identical pair, HomeScreens.kt's own doc there, for why both are collected: a
+    // touch tap never focuses this (only D-pad does), but clickable(indication = null) still reports it as a
+    // press into this same interactionSource regardless of indication.
     val focused by interactionSource.collectIsFocusedAsState()
+    val pressed by interactionSource.collectIsPressedAsState()
     Box(
         modifier = modifier
             .size(Dimens.dimension36)
@@ -1143,7 +1160,7 @@ private fun DeleteIconButton(onClick: () -> Unit, contentDescription: String, mo
         Icon(
             DeleteBinIcon,
             contentDescription = contentDescription,
-            tint = if (focused) Color.White else GeneratedColor.colorTextDim,
+            tint = if (focused || pressed) Color.White else GeneratedColor.colorTextDim,
             // Touch/D-pad target stays dimension36 regardless — this only
             // shrinks the glyph, not what's actually focusable/clickable.
             modifier = Modifier.size(Dimens.dimension16),

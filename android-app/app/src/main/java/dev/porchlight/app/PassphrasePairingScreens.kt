@@ -66,7 +66,7 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
     val submit = { if (phrase.isNotBlank()) onSubmit(phrase) }
     // Same dim-title/centered-content shape every other settings-gear-
     // reachable page screen uses (PageScreen's own doc, MainActivity.kt).
-    PageScreen(title = stringResource(R.string.pairing_addContactTitle)) {
+    PageScreen(title = stringResource(R.string.pairing_addContactTitle), onBack = onCancel) {
         Text(
             stringResource(R.string.pairing_phraseInstructions),
             color = GeneratedColor.colorTextDim,
@@ -241,15 +241,16 @@ internal fun NameConfirmScreen(candidate: CandidatePeer, onConfirm: () -> Unit, 
 }
 
 /**
- * [CenteredDialogScreen] plus "title + message + one action button" — the
- * shape behind every non-success outcome in the app with a real decision to
- * make: pairing collision/timeout (started here) and WaitingScreen's own
- * delete confirmation (HomeScreens.kt). [CallOutcomeScreen] (HomeScreens.kt)
- * is the passive sibling — same [CenteredDialogScreen] shell, no action
- * button. [onCancel] is reached only via the
- * physical Back key, same as every other screen in this app — no
- * on-screen Cancel button, deliberately, even for the delete-confirmation
- * case.
+ * [CenteredDialogScreen] plus "title + message + one action button, plus a
+ * Cancel button below it" — the shape behind every non-success outcome in
+ * the app with a real decision to make: pairing collision/timeout (started
+ * here) and WaitingScreen's own delete confirmation (HomeScreens.kt).
+ * [CallOutcomeScreen] (HomeScreens.kt) is the passive sibling — same
+ * [CenteredDialogScreen] shell, no action button, an OK button instead of
+ * Cancel. [onCancel] (here [PairingDialogScreen]'s `onBack`) is also
+ * reachable via the physical Back key, same as every other screen in this
+ * app — but the on-screen button is what a touchscreen Portal, with
+ * neither a D-pad nor a hardware Back key, actually has to use.
  */
 @Composable
 internal fun OutcomeScreen(
@@ -278,10 +279,15 @@ private val PairingActionSlotHeight = 48.dp
  * The one shape behind every pairing dialog (progress, collision, timeout,
  * confirm) and, through [OutcomeScreen], the delete confirmation: bright
  * title, dim text, then one action slot holding the spinner or the action
- * button. The text reserves [textLines] lines and the action slot has a fixed
- * height, so the dialogs are all the same size — and since they are centered,
- * the title and the action sit in the same place on each (web's `.pair-text` /
- * `.pair-action`). Back is the only way out (there is no Cancel button).
+ * button, then a Cancel button below that calls [onBack] — the physical
+ * Back key does the same thing, but a touchscreen Portal has neither a
+ * D-pad nor a hardware Back key, so the on-screen button is this family's
+ * only way out there. The text reserves [textLines] lines and the action
+ * slot has a fixed height, so the dialogs are all the same size — and
+ * since they are centered, the title and the action sit in the same place
+ * on each (web's `.pair-text` / `.pair-action`, which has carried its own
+ * on-screen Cancel button all along — see `index.html`'s `progressCancel`/
+ * `pairCancel`/`confirmDeleteCancel`).
  */
 @Composable
 private fun PairingDialogScreen(
@@ -291,7 +297,7 @@ private fun PairingDialogScreen(
     textLines: Int = PAIRING_TEXT_LINES,
     action: @Composable () -> Unit,
 ) {
-    CenteredDialogScreen(onBack = onBack) {
+    CenteredDialogScreen(onBack = onBack, backLabel = stringResource(R.string.common_cancel)) {
         // Bright, not dimmed — the one thing the screen exists to say, the same
         // role CallingScreen's contact name plays; matches web's `.panel h1`.
         Text(title, color = GeneratedColor.colorTextPrimary, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)

@@ -1,10 +1,12 @@
 package dev.porchlight.app
 
 import android.Manifest
+import android.app.UiModeManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -19,8 +21,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -49,6 +54,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +70,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -324,16 +331,57 @@ internal fun TvButton(
     // muted further still (a flat alpha cut, not a separate color — reads
     // correctly against any tint) so "disabled" is unambiguous at a glance.
     var isReallyFocused by remember { mutableStateOf(false) }
-    val resolvedIsFocused = enabled && isReallyFocused
+    // Never null from here down, regardless of what the caller passed — the pointerInput block below needs a
+    // concrete MutableInteractionSource to emit press events into, and routing a caller-supplied one through
+    // this same resolved value (instead of the raw nullable parameter) is what makes a touch press visible to
+    // an external label collecting from it too (see the parameter's own doc: "brightening a label elsewhere
+    // on the same row" — a caller already expects this to carry real interaction state, touch included).
+    val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
+    // True for as long as a touch is held down on this button — see the pointerInput block below. Folded into
+    // the same "focused" color logic D-pad focus already drives (not a separate visual), so a touch tap
+    // brightens exactly the way web's `.tv-button:focus-visible`/`:hover` already does for a tapped <button>
+    // — without this, a tap gave zero visual feedback at all (found live: the button worked, nothing on
+    // screen showed a press happened until whatever it did finished).
+    val isPressed by resolvedInteractionSource.collectIsPressedAsState()
+    val resolvedIsFocused = enabled && (isReallyFocused || isPressed)
     val resolvedContainerAlpha = if (resolvedIsFocused) focusedContainerAlpha else containerAlpha
     val resolvedBorderAlpha = if (resolvedIsFocused) focusedBorderAlpha else borderAlpha
     val resolvedContentColor = if (enabled) contentColor else contentColor.copy(alpha = GeneratedOpacity.opacity50)
 
+    // TvSurface's own onClick fires only from D-pad Center/Enter — confirmed live on a plain (non-TV) phone
+    // AVD that a tap never reaches it. A touchscreen Portal (Portal/Portal+/Mini/Go) has no D-pad at all, so
+    // without this every TvButton would be dead on those models. detectTapGestures, not Modifier.clickable:
+    // clickable also makes its node focusable, which would give every button two focus stops (its own plus
+    // TvSurface's) and break D-pad tab order on the remote-driven Portal TV this app is mainly built for.
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentEnabled by rememberUpdatedState(enabled)
     TvSurface(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.onFocusChanged { isReallyFocused = it.isFocused },
-        interactionSource = interactionSource,
+        modifier = modifier
+            .onFocusChanged { isReallyFocused = it.isFocused }
+            .pointerInput(resolvedInteractionSource) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        if (!currentEnabled) return@detectTapGestures
+                        val press = PressInteraction.Press(offset)
+                        resolvedInteractionSource.emit(press)
+                        // awaitRelease throws (cancelling this coroutine) if the gesture is cancelled instead
+                        // of released — e.g. a drag that turns into a parent's scroll. finally still runs, so
+                        // the button never gets stuck reporting itself pressed; Release vs. Cancel only
+                        // matters for ripple-style indications, which this app doesn't use here (scale =
+                        // ClickableSurfaceScale.None below), so always emitting Release is fine — both equally
+                        // end the pressed state as far as collectIsPressedAsState is concerned.
+                        try {
+                            awaitRelease()
+                        } finally {
+                            resolvedInteractionSource.emit(PressInteraction.Release(press))
+                        }
+                    },
+                    onTap = { if (currentEnabled) currentOnClick() },
+                )
+            },
+        interactionSource = resolvedInteractionSource,
         // None, same as Button's own scale = ButtonScale.None used to be —
         // tv.material3's own default grows a focused surface ~10% larger,
         // and with several buttons sitting close together on a contact row,
@@ -354,6 +402,14 @@ internal fun TvButton(
             contentColor = resolvedContentColor,
             focusedContainerColor = hue.copy(alpha = resolvedContainerAlpha),
             focusedContentColor = resolvedContentColor,
+            // Left unset, these default to focusedContainerColor and contentColorFor(pressedContainerColor) —
+            // the latter is a Material3 lookup that picks black/white off the *theme's* color scheme, which
+            // has no idea our container is a translucent custom token; found live (a touch press turned every
+            // button's text black, D-pad focus was always fine since focusedContentColor above is explicit).
+            // Pressed and focused already resolve to the identical value here (resolvedIsFocused folds both
+            // in), so these just repeat the same two lines rather than needing their own logic.
+            pressedContainerColor = hue.copy(alpha = resolvedContainerAlpha),
+            pressedContentColor = resolvedContentColor,
             disabledContainerColor = hue.copy(alpha = containerAlpha),
             disabledContentColor = contentColor.copy(alpha = GeneratedOpacity.opacity50),
         ),
@@ -424,7 +480,12 @@ internal fun FocusableStepSlider(
     trackWidth: Dp = Dimens.dimension180 * 0.6f,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
 ) {
+    // See the settings gear's identical pair, HomeScreens.kt's own doc there, for why both are collected: a
+    // touch tap never focuses this (only D-pad does), but clickable(indication = null) below still reports it
+    // as a press into this same interactionSource regardless of indication.
     val focused by interactionSource.collectIsFocusedAsState()
+    val pressed by interactionSource.collectIsPressedAsState()
+    val resolvedFocused = focused || pressed
     // Height, knob size and knob inset all match the stock switch beside it
     // (Kiosk mode), measured off its off position: 24dp track, 12dp knob,
     // 6dp gap all round.
@@ -433,8 +494,8 @@ internal fun FocusableStepSlider(
     val inset = Dimens.dimension6
     val shape = CircleShape
     val on = selected > 0
-    val neutralContainerAlpha = if (focused) GeneratedOpacity.buttonTintNeutralContainerFocused else GeneratedOpacity.buttonTintNeutralContainer
-    val fillAlpha = if (focused) GeneratedOpacity.buttonTintAccentBorderFocused else GeneratedOpacity.buttonTintAccentContainerFocused
+    val neutralContainerAlpha = if (resolvedFocused) GeneratedOpacity.buttonTintNeutralContainerFocused else GeneratedOpacity.buttonTintNeutralContainer
+    val fillAlpha = if (resolvedFocused) GeneratedOpacity.buttonTintAccentBorderFocused else GeneratedOpacity.buttonTintAccentContainerFocused
     val knobOffset by animateDpAsState(
         inset + (trackWidth - knobSize - inset * 2) * selected / (steps - 1).coerceAtLeast(1),
         label = "stepSliderKnob",
@@ -502,6 +563,25 @@ internal fun RequestFocusOnMount(focusRequester: FocusRequester) {
 }
 
 /**
+ * Whether this device identifies as Android TV (`UI_MODE_TYPE_TELEVISION`) —
+ * confirmed live on the real Portal TV (`dumpsys uimode`: `mCurUiMode=0x14`;
+ * `pm list features`: `android.software.leanback` + `android.hardware.type.
+ * television`; its own `Configuration` dump: `-touch dpad/v`, i.e. no
+ * touchscreen, a real D-pad). The standard, documented Android TV signal,
+ * not a guess — used only to keep [CenteredDialogScreen]'s/[PageScreen]'s
+ * on-screen Back/Cancel button off the Portal TV's own screens, which
+ * already have a physical Back key and were already reviewed/shipped
+ * without this button; a touchscreen Portal (Portal/Portal+/Mini/Go) has
+ * neither, so it still gets the button. `remember`ed: this can't change
+ * while the process is alive.
+ */
+@Composable
+internal fun isTvDevice(): Boolean {
+    val context = LocalContext.current
+    return remember { (context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION }
+}
+
+/**
  * The shared "centered dialog" shape behind every bright-title, one-thing-
  * to-say prompt in the app: call outcomes, pairing collision/timeout,
  * delete-confirmation, the pairing name-confirm tap, and the "waiting for
@@ -518,15 +598,28 @@ internal fun RequestFocusOnMount(focusRequester: FocusRequester) {
  * which already used this same cap independently.
  */
 @Composable
-internal fun CenteredDialogScreen(onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun CenteredDialogScreen(
+    onBack: () -> Unit,
+    // Non-null adds a labeled button that calls [onBack] below [content] —
+    // the touch/no-remote equivalent of the physical Back key every caller
+    // already relies on (see PairingDialogScreen/OutcomeScreen's own docs:
+    // a touchscreen Portal has no D-pad and no hardware Back key at all, so
+    // without this such a screen was unreachable-from). Null (the default)
+    // keeps a caller that wants to place its own button instead — see
+    // PairingDialogScreen, whose action slot already holds one.
+    backLabel: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     BackHandler(onBack = onBack)
     Box(modifier = Modifier.fillMaxSize().porchlightScreenBackground(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
             modifier = Modifier.widthIn(max = Dimens.sizeMaxContentWidth).padding(horizontal = Dimens.spacingScreenPadding),
-            content = content,
-        )
+        ) {
+            content()
+            if (backLabel != null && !isTvDevice()) TvButton(onClick = onBack) { Text(backLabel) }
+        }
     }
 }
 
@@ -564,7 +657,17 @@ internal fun CenteredDialogScreen(onBack: () -> Unit, content: @Composable Colum
  * safety net when it doesn't.
  */
 @Composable
-internal fun PageScreen(title: String, content: @Composable ColumnScope.() -> Unit) {
+internal fun PageScreen(
+    title: String,
+    // Non-null adds a "Back" button below [content] that calls this — see
+    // [CenteredDialogScreen]'s own `backLabel` doc for why: a touchscreen
+    // Portal has no D-pad and no hardware Back key, so without this a
+    // page reachable from Settings had no way out at all on such a device.
+    // Every current caller already has a real onBack/onCancel it was only
+    // giving to its own BackHandler; this just also renders it.
+    onBack: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     Column(modifier = Modifier.fillMaxSize().padding(Dimens.spacingScreenPadding)) {
         Text(title, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -572,8 +675,10 @@ internal fun PageScreen(title: String, content: @Composable ColumnScope.() -> Un
                 modifier = Modifier.widthIn(max = Dimens.sizeMaxContentWidth).fillMaxWidth().verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
-                content = content,
-            )
+            ) {
+                content()
+                if (onBack != null && !isTvDevice()) TvButton(onClick = onBack) { Text(stringResource(R.string.common_back)) }
+            }
         }
     }
 }
@@ -949,7 +1054,7 @@ private fun NameEntryScreen(
         // Settings-style page destination — upper-left dim title, matching
         // Settings' own (this is reached *from* Settings). Mirrors web's
         // #screenRename, whose own comment says the same thing.
-        PageScreen(title = titleText) {
+        PageScreen(title = titleText, onBack = onCancel) {
             Text(
                 stringResource(R.string.nameEntry_subtitle),
                 color = GeneratedColor.colorTextDim,
@@ -1048,13 +1153,16 @@ private fun AdminChoiceScreen(
     // stretching it to that shared width so the right-column controls
     // (arrow button / switch / Install) land on a consistent right edge
     // despite each row's own content differing.
-    PageScreen(title = stringResource(R.string.settings_title)) {
+    PageScreen(title = stringResource(R.string.settings_title), onBack = onCancel) {
                 // Each row's own left-column label stays muted until the
                 // right-column control it describes actually has focus —
                 // same "label brightens with its control's own focus"
                 // pattern WaitingScreen's Auto-answer switch already uses.
                 val ringVolumeInteractionSource = remember { MutableInteractionSource() }
                 val ringVolumeFocused by ringVolumeInteractionSource.collectIsFocusedAsState()
+                // See TvButton's own interactionSource doc: a touch press is reported into the same
+                // interactionSource the paired control already uses, so the label brightens for a tap too.
+                val ringVolumePressed by ringVolumeInteractionSource.collectIsPressedAsState()
                 // Plays the chime at the chosen level only once the person
                 // has stopped cycling — each press restarts this delay, so
                 // stepping through Off/Low/Medium/High doesn't blast every
@@ -1074,7 +1182,7 @@ private fun AdminChoiceScreen(
                 ) {
                     Text(
                         stringResource(R.string.settings_ringVolume_title),
-                        color = if (ringVolumeFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        color = if (ringVolumeFocused || ringVolumePressed) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         modifier = Modifier.weight(1f),
                     )
                     // Click cycles forward (wrapping); Left/Right step
@@ -1103,6 +1211,7 @@ private fun AdminChoiceScreen(
                 }
                 val renameInteractionSource = remember { MutableInteractionSource() }
                 val renameFocused by renameInteractionSource.collectIsFocusedAsState()
+                val renamePressed by renameInteractionSource.collectIsPressedAsState()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1110,7 +1219,7 @@ private fun AdminChoiceScreen(
                 ) {
                     Text(
                         stringResource(R.string.settings_renameRow),
-                        color = if (renameFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        color = if (renameFocused || renamePressed) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         modifier = Modifier.weight(1f),
                     )
                     TvButton(
@@ -1120,6 +1229,7 @@ private fun AdminChoiceScreen(
                 }
                 val launchOnBootInteractionSource = remember { MutableInteractionSource() }
                 val launchOnBootFocused by launchOnBootInteractionSource.collectIsFocusedAsState()
+                val launchOnBootPressed by launchOnBootInteractionSource.collectIsPressedAsState()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1128,7 +1238,7 @@ private fun AdminChoiceScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             stringResource(R.string.settings_kioskMode_title),
-                            color = if (launchOnBootFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                            color = if (launchOnBootFocused || launchOnBootPressed) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         )
                         Text(
                             stringResource(R.string.settings_kioskMode_subtitle),
@@ -1149,6 +1259,7 @@ private fun AdminChoiceScreen(
                 val callWakeUpPossible by CallWakeUpAccessibilityService.enabled.collectAsState()
                 val callWakeUpInteractionSource = remember { MutableInteractionSource() }
                 val callWakeUpFocused by callWakeUpInteractionSource.collectIsFocusedAsState()
+                val callWakeUpPressed by callWakeUpInteractionSource.collectIsPressedAsState()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1157,7 +1268,7 @@ private fun AdminChoiceScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             stringResource(R.string.settings_callWakeUp_title),
-                            color = if (callWakeUpFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                            color = if (callWakeUpFocused || callWakeUpPressed) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         )
                         Text(
                             stringResource(if (callWakeUpPossible) R.string.settings_callWakeUp_subtitle else R.string.settings_callWakeUp_needsSetup),
@@ -1176,6 +1287,7 @@ private fun AdminChoiceScreen(
                 }
                 val connectionInfoInteractionSource = remember { MutableInteractionSource() }
                 val connectionInfoFocused by connectionInfoInteractionSource.collectIsFocusedAsState()
+                val connectionInfoPressed by connectionInfoInteractionSource.collectIsPressedAsState()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1183,7 +1295,7 @@ private fun AdminChoiceScreen(
                 ) {
                     Text(
                         stringResource(R.string.settings_connectionInfoRow),
-                        color = if (connectionInfoFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                        color = if (connectionInfoFocused || connectionInfoPressed) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                         modifier = Modifier.weight(1f),
                     )
                     TvButton(
@@ -1193,6 +1305,7 @@ private fun AdminChoiceScreen(
                 }
                 val installInteractionSource = remember { MutableInteractionSource() }
                 val installFocused by installInteractionSource.collectIsFocusedAsState()
+                val installPressed by installInteractionSource.collectIsPressedAsState()
                 val selfInstallPossible = remember { UpdateChecker.canSelfInstall(context) }
                 val updateReady = checkResult is UpdateCheckResult.Ready
                 val canInstall = updateReady && selfInstallPossible
@@ -1219,7 +1332,7 @@ private fun AdminChoiceScreen(
                             Text(stringResource(R.string.settings_update_failed, "server (500)"), modifier = Modifier.alpha(0f))
                             Text(
                                 message,
-                                color = if (installFocused) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
+                                color = if (installFocused || installPressed) GeneratedColor.colorTextPrimary else GeneratedColor.colorTextDim,
                             )
                         }
                         // An update is there but installing it from here can't

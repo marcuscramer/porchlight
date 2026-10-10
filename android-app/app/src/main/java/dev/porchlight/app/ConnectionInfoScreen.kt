@@ -64,7 +64,7 @@ internal fun ConnectionInfoScreen(
     val selfInstallPossible = remember(now) { UpdateChecker.canSelfInstall(context) }
     val network = remember(now) { networkStatus(context) }
 
-    PageScreen(title = stringResource(R.string.connectionInfo_title)) {
+    PageScreen(title = stringResource(R.string.connectionInfo_title), onBack = onBack) {
         Column(verticalArrangement = Arrangement.spacedBy(Dimens.dimension8)) {
             InfoRow(stringResource(R.string.connectionInfo_network), stringResource(network.textRes), if (network.good) OK else BAD)
             InfoRow(stringResource(R.string.connectionInfo_lastHeartbeat), agoText(CallCoreBridge.ago(snapshot?.lastHeartbeatSentAtMs, now)))
