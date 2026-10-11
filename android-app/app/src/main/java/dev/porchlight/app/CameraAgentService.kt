@@ -834,13 +834,21 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
 
     private fun startAgent() {
         if (engine != null) return
+        // Unconditional, before the validity check below: BootReceiver always launches this service via
+        // startForegroundService() (even on a brand-new, unpaired device — see its own doc for why that's
+        // deliberate), and Android requires startForeground() to be called within a few seconds of that
+        // regardless of what this method decides to do next. Skipping straight to stopSelf() on an invalid
+        // config used to violate that contract — found live: a crash loop (RemoteServiceException:
+        // "did not then call Service.startForeground()") on every boot/update of an unpaired device, which
+        // is every fresh install before its first successful pairing. stopSelf() below still cleanly exits
+        // the foreground state and removes this same notification; nothing is left dangling.
+        startForeground(NOTIF_ID, buildNotification(getString(R.string.notifications_connectingStatus)))
         val config = Config.load(this)
         if (!config.isValid && pendingFirstAttempt == null) {
             Log.w(TAG, "config invalid; not starting")
             stopSelf()
             return
         }
-        startForeground(NOTIF_ID, buildNotification(getString(R.string.notifications_connectingStatus)))
         acquireWakeLock()
         registerScreensaverReceiver()
         ringScreenGuard.register()
