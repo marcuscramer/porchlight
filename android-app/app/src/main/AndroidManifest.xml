@@ -17,6 +17,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- POST_NOTIFICATIONS is a no-op below API 33 but harmless to declare. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The incoming-call notification's full-screen intent (gets the call screen
+         over a sleeping screen). Required from Android 10 (targetSdk 29); without it
+         the system quietly shows a heads-up banner instead. Not needed on the
+         Portal TV's Android 9. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- Self-updating (see UpdateChecker.kt): declaring this alone doesn't
          grant it — the human must also separately flip "Install unknown

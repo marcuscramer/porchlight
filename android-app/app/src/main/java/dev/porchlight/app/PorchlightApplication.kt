@@ -1,9 +1,11 @@
 package dev.porchlight.app
 
+import android.app.Activity
 import android.app.AlarmManager
 import android.app.Application
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
 import android.os.Process
 import android.util.Log
 import kotlin.system.exitProcess
@@ -34,6 +36,15 @@ class PorchlightApplication : Application() {
             PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions()
         )
         PeerConnectionFactory.builder().createPeerConnectionFactory().dispose()
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) { if (activity is MainActivity) mainActivityResumed = true }
+            override fun onActivityPaused(activity: Activity) { if (activity is MainActivity) mainActivityResumed = false }
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+            override fun onActivityStarted(activity: Activity) = Unit
+            override fun onActivityStopped(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+            override fun onActivityDestroyed(activity: Activity) = Unit
+        })
         Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
             Log.e(TAG, "uncaught exception — restarting", throwable)
             try {
@@ -57,5 +68,15 @@ class PorchlightApplication : Application() {
 
     companion object {
         private const val TAG = "PorchlightApp"
+
+        /**
+         * Whether MainActivity is resumed right now. Tracked here, from process
+         * start, rather than by whoever needs it: a listener registered later
+         * (the service starts after the first pairing, or restarts) would miss
+         * an activity that was already resumed and read false until the next
+         * pause/resume.
+         */
+        @Volatile var mainActivityResumed = false
+            private set
     }
 }

@@ -1,14 +1,11 @@
 package dev.porchlight.app
 
-import android.app.Activity
-import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.PixelFormat
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.PowerManager
 import android.os.SystemClock
@@ -63,7 +60,7 @@ internal class RingScreenGuard(
     private val ringId = AtomicInteger(0)
 
     @Volatile private var dreaming = false
-    @Volatile private var uiResumed = false
+    private val uiResumed get() = PorchlightApplication.mainActivityResumed
     @Volatile private var lastPressAt = Long.MIN_VALUE / 2
     private var registered = false
     private var repost: () -> Unit = {}
@@ -74,16 +71,6 @@ internal class RingScreenGuard(
         override fun onReceive(context: Context, intent: Intent) {
             dreaming = intent.action == Intent.ACTION_DREAMING_STARTED
         }
-    }
-
-    private val lifecycle = object : Application.ActivityLifecycleCallbacks {
-        override fun onActivityResumed(activity: Activity) { if (activity is MainActivity) uiResumed = true }
-        override fun onActivityPaused(activity: Activity) { if (activity is MainActivity) uiResumed = false }
-        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-        override fun onActivityStarted(activity: Activity) = Unit
-        override fun onActivityStopped(activity: Activity) = Unit
-        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
-        override fun onActivityDestroyed(activity: Activity) = Unit
     }
 
     /** Starts tracking the screensaver and the app's own screen. Idempotent. */
@@ -99,7 +86,6 @@ internal class RingScreenGuard(
             @Suppress("UnspecifiedRegisterReceiverFlag")
             context.registerReceiver(dreamReceiver, filter)
         }
-        (context.applicationContext as Application).registerActivityLifecycleCallbacks(lifecycle)
         registered = true
     }
 
@@ -107,7 +93,6 @@ internal class RingScreenGuard(
         cancel()
         if (!registered) return
         runCatching { context.unregisterReceiver(dreamReceiver) }
-        (context.applicationContext as Application).unregisterActivityLifecycleCallbacks(lifecycle)
         registered = false
     }
 
@@ -144,6 +129,13 @@ internal class RingScreenGuard(
      * which must not happen for the app's own press.
      */
     fun pressedHomeRecently(): Boolean = SystemClock.elapsedRealtime() - lastPressAt < CallCoreBridge.wakeUpConstants.ownPressWindowMs
+
+    /**
+     * True while the app's own screen is in front of someone: resumed, display
+     * on, no screensaver. A ring then shows straight on it, so there's nothing
+     * the incoming-call notification would have to bring forward.
+     */
+    fun appOnScreen(): Boolean = uiResumed && power.isInteractive && !dreaming
 
     /** The call stopped ringing (answered, declined, missed or cancelled). */
     fun cancel() {

@@ -722,7 +722,10 @@ class CameraAgentService : Service(), WebRtcEngine.Listener, NostrSignalingClien
                     // much as an already-answered call does — see
                     // bringToForeground's own doc.
                     acquireCallWakeLock()
-                    postIncomingCallNotification(effect.pairingId)
+                    // Only needed to get over a sleeping screen or another app;
+                    // with the app already in front, Android would show it as a
+                    // heads-up "incoming call" banner on top of our own call screen.
+                    if (!ringScreenGuard.appOnScreen()) postIncomingCallNotification(effect.pairingId)
                     ringScreenGuard.ringStarted {
                         cancelIncomingCallNotification()
                         postIncomingCallNotification(effect.pairingId)
