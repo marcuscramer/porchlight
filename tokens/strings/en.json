@@ -29,7 +29,7 @@
     },
     "callWakeUp": {
       "title": "Call wake-up",
-      "subtitle": "A call turns the TV on, switches it to the Portal and shows over the screensaver",
+      "subtitle": "Gets an incoming call past the screensaver, and, on a Portal TV, switches the TV on and HDMI to the Portal",
       "needsSetup": "Call wake-up needs a one-time setup step, see the README"
     },
     "update": {

@@ -29,7 +29,7 @@
     },
     "callWakeUp": {
       "title": "Aufwecken bei Anruf",
-      "subtitle": "Ein Anruf schaltet den Fernseher ein, wechselt auf das Portal und erscheint über dem Bildschirmschoner",
+      "subtitle": "Bringt einen eingehenden Anruf vor den Bildschirmschoner. Ein Portal TV schaltet dabei auch den Fernseher ein und auf den Portal HDMI-Eingang um",
       "needsSetup": "Aufwecken bei Anruf braucht einen einmaligen Einrichtungsschritt, siehe README"
     },
     "update": {

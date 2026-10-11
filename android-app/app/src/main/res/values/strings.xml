@@ -20,7 +20,7 @@
     <string name="settings_kioskMode_title">Kiosk mode</string>
     <string name="settings_kioskMode_subtitle">Bring Porchlight up automatically after (re)boot and when the screensaver ends</string>
     <string name="settings_callWakeUp_title">Call wake-up</string>
-    <string name="settings_callWakeUp_subtitle">A call turns the TV on, switches it to the Portal and shows over the screensaver</string>
+    <string name="settings_callWakeUp_subtitle">Gets an incoming call past the screensaver, and, on a Portal TV, switches the TV on and HDMI to the Portal</string>
     <string name="settings_callWakeUp_needsSetup">Call wake-up needs a one-time setup step, see the README</string>
     <string name="settings_update_checking">Checking for updates…</string>
     <string name="settings_update_disabled">Update checking isn\'t set up for this build.</string>
