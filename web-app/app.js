@@ -1489,6 +1489,33 @@ const screens = {
 const remoteVideoEl = el('remoteVideo');
 const localVideoEl = el('localVideo');
 
+// Escape triggers whichever Back/Cancel/OK button the current screen has — WAI-ARIA's own convention for
+// dismissing a dialog (its Authoring Practices Guide names Escape explicitly), and safe even with a text
+// field focused, since nobody presses Escape mid-edit. Deliberately NOT Backspace too: browsers dropped
+// Backspace-navigates-back as a chrome-level shortcut years ago specifically because of screens exactly like
+// enter-phrase/rename here, where Backspace is the single most ordinary keystroke there is, mid-edit in a
+// text field — rebinding it at the app level would reintroduce the same accidental-navigation hazard that
+// got it removed. `name`/`waiting`/`calling`/`incoming-call`/`call` have no entry: the first has nothing to
+// go back to, the rest already have their own Escape handling below (the call-controls overlay), which is a
+// different thing (hide the overlay, not leave the screen) and must keep working unchanged.
+const SCREEN_BACK_BUTTON = {
+  settings: 'settingsCancel',
+  rename: 'renameCancel',
+  connection: 'connectionBack',
+  'enter-phrase': 'phraseCancel',
+  'confirm-delete': 'confirmDeleteCancel',
+  'pairing-progress': 'progressCancel',
+  pair: 'pairCancel',
+  'call-outcome': 'callOutcomeCancel',
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const buttonId = SCREEN_BACK_BUTTON[screen];
+  if (!buttonId) return;
+  e.preventDefault();
+  el(buttonId).click();
+});
+
 /**
  * The self-view's position during a call — mirrors the Android app's own
  * PreviewCorner cycle: one "Position self-view" button press advances to
