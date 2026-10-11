@@ -36,7 +36,10 @@ class RelayListUpdater(private val context: Context, private val onApplied: () -
 
     private val prefs get() = context.getSharedPreferences("relay_list", Context.MODE_PRIVATE)
     private val http = OkHttpClient()
-    @Volatile private var lastStartedMs = 0L
+    // Guarded by `waiters`: callers of a forced fetch that arrived while a request was already running.
+    private val waiters = mutableListOf<(Result) -> Unit>()
+    private var lastStartedMs = 0L
+    private var inFlight = false
 
     /** Sets the built-in list, then lets the last fetched list (if any, and newer) replace it. Call before relays are used. */
     fun init() {
@@ -54,8 +57,10 @@ class RelayListUpdater(private val context: Context, private val onApplied: () -
 
     /**
      * Fetches the list now. [force] is the Status page's button: it asks the CDN for a fresh copy (a throwaway query
-     * parameter and no-cache) and ignores clicks less than [MIN_FORCED_GAP_MS] apart. Otherwise it is an ordinary
-     * conditional-friendly request. [onDone] gets the result on a background thread.
+     * parameter and no-cache) and doesn't start a new request less than [MIN_FORCED_GAP_MS] after the last one.
+     * Otherwise it is an ordinary conditional-friendly request. [onDone] gets the result on a background thread —
+     * always, even for a press that started no request of its own: it gets the running request's result, or the last
+     * one (a caller waiting on it would otherwise show "Checking…" forever).
      */
     fun fetch(force: Boolean, onDone: ((Result) -> Unit)? = null) {
         val base = url()
@@ -65,8 +70,18 @@ class RelayListUpdater(private val context: Context, private val onApplied: () -
             return
         }
         val now = System.currentTimeMillis()
-        if (force && now - lastStartedMs < MIN_FORCED_GAP_MS) return
-        lastStartedMs = now
+        synchronized(waiters) {
+            if (force && now - lastStartedMs < MIN_FORCED_GAP_MS) {
+                if (inFlight) {
+                    onDone?.let { waiters += it }
+                } else {
+                    onDone?.invoke(status.result ?: Result.UpToDate)
+                }
+                return
+            }
+            lastStartedMs = now
+            inFlight = true
+        }
         val request = Request.Builder()
             .url(if (force) "$base?t=$now" else base)
             .apply { if (force) header("Cache-Control", "no-cache") }
@@ -96,7 +111,12 @@ class RelayListUpdater(private val context: Context, private val onApplied: () -
 
     private fun finish(result: Result, onDone: ((Result) -> Unit)?) {
         record(result)
+        val waiting = synchronized(waiters) {
+            inFlight = false
+            waiters.toList().also { waiters.clear() }
+        }
         onDone?.invoke(result)
+        waiting.forEach { it(result) }
     }
 
     private fun record(result: Result) {

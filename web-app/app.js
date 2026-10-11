@@ -391,6 +391,7 @@ function handleIncomingEvent(event) {
 
 const RELAY_LIST_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const RELAY_LIST_FORCED_GAP_MS = 10_000;
+const RELAY_LIST_TIMEOUT_MS = 15_000;
 const RELAY_LIST_RELOAD_GUARD_KEY = 'porchlight-relaylist-reload';
 const RELAY_LIST_RELOAD_GUARD_MS = 60 * 60 * 1000;
 let relayListCheckedAt = null;
@@ -405,7 +406,9 @@ async function checkRelayList(force) {
   try {
     const url = new URL('relays.json', location.href);
     if (force) url.searchParams.set('t', String(Date.now()));
-    const res = await fetch(url, { cache: force ? 'no-store' : 'no-cache' });
+    // A stalled (not failed) request would otherwise leave "Checking…" up until the browser gives up, minutes later.
+    const res = await fetch(url, { cache: force ? 'no-store' : 'no-cache', signal: AbortSignal.timeout(RELAY_LIST_TIMEOUT_MS) })
+      .catch((err) => { throw err && err.name === 'TimeoutError' ? new Error('timed out') : err; });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const file = JSON.parse((await res.text()).slice(0, 16_384));
     if (!Number.isInteger(file.version) || file.version <= 0 || !Array.isArray(file.relays)) throw new Error('not a relay list');
