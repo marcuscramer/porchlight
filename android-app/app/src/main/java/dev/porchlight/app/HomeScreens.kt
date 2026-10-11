@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -923,6 +924,9 @@ private fun WaitingScreen(
             Column(
                 verticalArrangement = Arrangement.spacedBy(Dimens.spacingContactListGap),
                 modifier = Modifier
+                    // The same width cap and side padding as the pages
+                    // (Settings/Status), so long names get the same room.
+                    .widthIn(max = Dimens.sizeMaxContentWidth)
                     .padding(horizontal = Dimens.listSideMargin)
                     // Every row below fillMaxWidth()s to this Column's own
                     // width — width(IntrinsicSize.Max) resolves that to the

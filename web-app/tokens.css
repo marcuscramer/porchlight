@@ -150,10 +150,10 @@
   --button-tint-accent-container-focused: var(--opacity-50);
   --button-tint-accent-border: var(--opacity-0);
   --button-tint-accent-border-focused: var(--opacity-95);
-  --list-side-margin: var(--dimension-100);
   --list-fade-height-top: var(--dimension-120);
   --list-fade-height-bottom: var(--dimension-120);
   --button-radius: var(--radius-control);
   --input-radius: var(--radius-input);
   --input-border-width: var(--border-width-default);
+  --list-side-margin: var(--spacing-screen-padding);
 }
