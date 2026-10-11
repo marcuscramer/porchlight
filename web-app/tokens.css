@@ -106,10 +106,12 @@
   --size-local-preview-width: var(--dimension-180);
   --size-local-preview-height: var(--dimension-120);
   --size-settings-fab: var(--dimension-44);
+  --size-back-button: var(--dimension-32);
   --size-max-content-width: var(--dimension-640);
   --border-width-default: var(--dimension-1);
   --radius-control: var(--dimension-8);
   --radius-input: var(--dimension-8);
+  --radius-back-button: var(--dimension-4);
   --outline-offset-focus-ring: var(--dimension-2);
   --typography-display-font-family: var(--font-family-inter);
   --typography-display-font-weight: var(--font-weight-semibold);

@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,7 +44,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -106,6 +109,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.stateDescription
 
 /**
@@ -292,6 +296,13 @@ internal fun TvButton(
     interactionSource: MutableInteractionSource? = null,
     // A smaller button (label and padding), for a secondary action on a page of text rows.
     compact: Boolean = false,
+    // Overrides compact's own fixed horizontal/vertical padding — for a button sized to its content
+    // rather than text-button proportions (the on-screen Back button: a fixed-size square icon, where
+    // 10/16dp of padding on each side would leave little to nothing for the icon itself to occupy).
+    contentPadding: PaddingValues? = null,
+    // Overrides the shared TvButtonShape's corner radius — for the on-screen Back button, deliberately
+    // less rounded than every other TvButton in the app (user request), not a new default.
+    shape: Shape? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val hue = when (tint) {
@@ -337,6 +348,7 @@ internal fun TvButton(
     // an external label collecting from it too (see the parameter's own doc: "brightening a label elsewhere
     // on the same row" — a caller already expects this to carry real interaction state, touch included).
     val resolvedInteractionSource = interactionSource ?: remember { MutableInteractionSource() }
+    val resolvedShape = shape ?: TvButtonShape
     // True for as long as a touch is held down on this button — see the pointerInput block below. Folded into
     // the same "focused" color logic D-pad focus already drives (not a separate visual), so a touch tap
     // brightens exactly the way web's `.tv-button:focus-visible`/`:hover` already does for a tapped <button>
@@ -390,12 +402,12 @@ internal fun TvButton(
         // documented design above — focus here is meant to read entirely
         // through color, never size.
         scale = ClickableSurfaceScale.None,
-        shape = ClickableSurfaceDefaults.shape(shape = TvButtonShape),
+        shape = ClickableSurfaceDefaults.shape(shape = resolvedShape),
         border = ClickableSurfaceDefaults.border(
-            border = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = resolvedBorderAlpha)), shape = TvButtonShape),
-            focusedBorder = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = resolvedBorderAlpha)), shape = TvButtonShape),
-            disabledBorder = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = borderAlpha)), shape = TvButtonShape),
-            focusedDisabledBorder = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = borderAlpha)), shape = TvButtonShape),
+            border = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = resolvedBorderAlpha)), shape = resolvedShape),
+            focusedBorder = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = resolvedBorderAlpha)), shape = resolvedShape),
+            disabledBorder = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = borderAlpha)), shape = resolvedShape),
+            focusedDisabledBorder = Border(border = BorderStroke(Dimens.borderWidthDefault, hue.copy(alpha = borderAlpha)), shape = resolvedShape),
         ),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = hue.copy(alpha = resolvedContainerAlpha),
@@ -427,10 +439,14 @@ internal fun TvButton(
             Row(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(
-                    horizontal = if (compact) Dimens.dimension10 else Dimens.buttonPaddingBaseHorizontal,
-                    vertical = if (compact) Dimens.dimension4 else Dimens.buttonPaddingBaseVertical,
-                ),
+                modifier = if (contentPadding != null) {
+                    Modifier.padding(contentPadding)
+                } else {
+                    Modifier.padding(
+                        horizontal = if (compact) Dimens.dimension10 else Dimens.buttonPaddingBaseHorizontal,
+                        vertical = if (compact) Dimens.dimension4 else Dimens.buttonPaddingBaseVertical,
+                    )
+                },
                 content = content,
             )
         }
@@ -659,26 +675,52 @@ internal fun CenteredDialogScreen(
 @Composable
 internal fun PageScreen(
     title: String,
-    // Non-null adds a "Back" button below [content] that calls this — see
-    // [CenteredDialogScreen]'s own `backLabel` doc for why: a touchscreen
-    // Portal has no D-pad and no hardware Back key, so without this a
-    // page reachable from Settings had no way out at all on such a device.
-    // Every current caller already has a real onBack/onCancel it was only
-    // giving to its own BackHandler; this just also renders it.
+    // Non-null adds a square, icon-only Back button to the left of [title]
+    // that calls this — see [CenteredDialogScreen]'s own `backLabel` doc
+    // for why: a touchscreen Portal has no D-pad and no hardware Back key,
+    // so without this a page reachable from Settings had no way out at all
+    // on such a device. Every current caller already has a real
+    // onBack/onCancel it was only giving to its own BackHandler; this just
+    // also renders it. Mirrors web's own #screenSettings etc. (index.html),
+    // which moved its Back button to the same spot for the same reason.
     onBack: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize().padding(Dimens.spacingScreenPadding)) {
-        Text(title, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.dimension16)) {
+            if (onBack != null && !isTvDevice()) {
+                // The same TvButton + Icon combination the Rename/Status rows already use (their own
+                // trailing arrow-forward button) — not a bespoke size/icon-ratio. Square, not that button's
+                // own wide pill, purely because contentPadding is uniform here instead of that button's
+                // default asymmetric (16dp horizontal, 8dp vertical) padding — an equal margin on a square
+                // icon always yields a square button, no explicit width/height needed. No outer .size()
+                // override: forcing one while this Row (TvButton's own content slot) only wraps tightly
+                // around the icon is what caused the icon to render off-center within its own background
+                // (found live) — letting the button size itself from icon + padding keeps the two in sync.
+                // Padding (not the icon) is what controls the button's own overall size — user asked for a
+                // bigger button with the arrow left exactly as it was, so only this grew, Dimens.dimension20
+                // below didn't. Dimens.radiusBackButton: less rounded than every other TvButton (user request).
+                TvButton(
+                    onClick = onBack,
+                    contentPadding = PaddingValues(Dimens.dimension6),
+                    shape = RoundedCornerShape(Dimens.radiusBackButton),
+                ) {
+                    Icon(
+                        Icons.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.common_back),
+                        modifier = Modifier.size(Dimens.dimension20),
+                    )
+                }
+            }
+            Text(title, color = GeneratedColor.colorTextDim, style = MaterialTheme.typography.headlineSmall)
+        }
         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             Column(
                 modifier = Modifier.widthIn(max = Dimens.sizeMaxContentWidth).fillMaxWidth().verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
-            ) {
-                content()
-                if (onBack != null && !isTvDevice()) TvButton(onClick = onBack) { Text(stringResource(R.string.common_back)) }
-            }
+                content = content,
+            )
         }
     }
 }

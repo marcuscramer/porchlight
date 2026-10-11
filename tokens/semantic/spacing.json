@@ -22,6 +22,7 @@
       "height": { "$value": "{dimension.120}" }
     },
     "settingsFab": { "$value": "{dimension.44}" },
+    "backButton": { "$value": "{dimension.20}" },
     "maxContentWidth": { "$value": "{dimension.640}" }
   },
   "border": {
@@ -33,7 +34,11 @@
   "radius": {
     "$type": "dimension",
     "control": { "$value": "{dimension.8}" },
-    "input": { "$value": "{dimension.8}" }
+    "input": { "$value": "{dimension.8}" },
+    "backButton": {
+      "_comment": "A less-rounded corner just for the on-screen Back button (user request, 2026-10-11) — control above stays the shared pill-button radius every other TvButton/.tv-button keeps.",
+      "$value": "{dimension.4}"
+    }
   },
   "outline": {
     "$type": "dimension",

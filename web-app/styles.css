@@ -127,6 +127,80 @@ html, body {
   color: var(--color-text-primary);
 }
 
+/* A screen-title paired with an on-screen Back button (every page-like
+   destination except the ones reached only by tapping Back itself):
+   .screen-header takes over .screen-title's own corner position, and the
+   title becomes a normal flex child beside the button instead of its own
+   absolutely-positioned element. line-height: 1 so the title's own box
+   hugs its glyphs closely — align-items: center below then lands close to
+   true cap-height centering on its own, with .back-button's own height
+   (--size-back-button) doing the rest; see that rule's own doc. */
+.screen-header {
+  position: absolute;
+  top: var(--spacing-screen-padding);
+  left: var(--spacing-screen-padding);
+  display: flex;
+  align-items: center;
+  gap: var(--dimension-16);
+}
+.screen-header .screen-title {
+  position: static;
+  top: auto;
+  left: auto;
+  line-height: 1;
+}
+
+/* Square, including the background — not just the glyph inside it, unlike
+   #settingsBtn's borderless icon (that one floats free in a corner with
+   nothing to align against; this one sits beside a title it has to read as
+   one unit with). Reuses .tv-button's own secondary colors/border/focus
+   treatment (color-mix against --btn-hue, same custom properties) rather
+   than a new visual system, just without that class's own horizontal
+   padding, which would stop the box from being square. --size-back-button
+   is measured, not guessed: the title's rendered cap height (Inter
+   semibold 28px -> a capital letter's own glyph bounds, confirmed via
+   canvas TextMetrics in the browser, not the font's nominal line-height).
+   The SVG inside is smaller than the box so the chevron ink doesn't sit
+   edge-to-edge against the button's own border. */
+.back-button {
+  --btn-hue: var(--color-white);
+  --btn-container-op: var(--button-tint-neutral-container);
+  --btn-container-op-focused: var(--button-tint-neutral-container-focused);
+  --btn-border-op: var(--button-tint-neutral-border);
+  --btn-border-op-focused: var(--button-tint-neutral-border-focused);
+  flex-shrink: 0;
+  width: var(--size-back-button);
+  height: var(--size-back-button);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--btn-hue) calc(var(--btn-container-op) * 100%), transparent);
+  border: var(--border-width-default) solid color-mix(in srgb, var(--btn-hue) calc(var(--btn-border-op) * 100%), transparent);
+  /* Less rounded than every other .tv-button (user request, 2026-10-11) — its own radius token, not --button-radius. */
+  border-radius: var(--radius-back-button);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.back-button svg {
+  width: 70%;
+  height: 70%;
+  fill: currentColor;
+}
+.back-button:focus-visible,
+.back-button:active {
+  outline: none;
+  background: color-mix(in srgb, var(--btn-hue) calc(var(--btn-container-op-focused) * 100%), transparent);
+  border-color: color-mix(in srgb, var(--btn-hue) calc(var(--btn-border-op-focused) * 100%), transparent);
+}
+@media (hover: hover) {
+  .back-button:hover {
+    outline: none;
+    background: color-mix(in srgb, var(--btn-hue) calc(var(--btn-container-op-focused) * 100%), transparent);
+    border-color: color-mix(in srgb, var(--btn-hue) calc(var(--btn-border-op-focused) * 100%), transparent);
+  }
+}
+
 /* Status rows (#connectionRows): label left, value right, one line each. */
 .info-rows {
   display: flex;

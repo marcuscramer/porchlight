@@ -1,9 +1,10 @@
 {
   "typography": {
     "display": {
+      "_comment": "fontSize pinned to match web's own display size (user request, 2026-10-11) — previously 28 on Android (no web override needed before this) vs web's platform-overridden 24 (see platform-overrides/web.json's own _comment on the TV-legibility bump this reverses, for display specifically). Android keeps its own font FILE (InterDisplay, see Type.kt) even though the size now matches web's plain Inter — a separate, pre-existing platform divergence this change doesn't touch.",
       "fontFamily": { "$type": "fontFamily", "$value": "{font.family.inter}" },
       "fontWeight": { "$type": "fontWeight", "$value": "{font.weight.semibold}" },
-      "fontSize": { "$type": "fontSize", "$value": "{fontSize.28}" },
+      "fontSize": { "$type": "fontSize", "$value": "{fontSize.24}" },
       "letterSpacing": { "$type": "letterSpacing", "$value": "{letterSpacing.tight}" }
     },
     "body": {
