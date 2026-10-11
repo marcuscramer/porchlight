@@ -21,6 +21,11 @@ html, body {
   background: var(--color-background-waiting);
   color: var(--color-text-primary);
   font-family: var(--font-family-inter);
+  /* iPhone Safari otherwise enlarges text by its own rules after rotating to
+     landscape, oversizing it against the layout. Pinch-zoom and the system
+     text size are unaffected. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /* clamp() keeps screen padding proportional below ~640-800px instead of
