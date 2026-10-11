@@ -21,6 +21,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -96,6 +98,7 @@ import com.vitorpamplona.quartz.nip01Core.core.toHexKey
 import com.vitorpamplona.quartz.nip01Core.crypto.KeyPair
 import java.util.UUID
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -105,6 +108,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
@@ -485,7 +489,9 @@ internal fun FocusableSwitch(
  * fill). It has no border in any state; focus brightens the fill the same way
  * it does for a switch.
  * Click cycles forward (wrapping); callers handle Left/Right themselves via
- * [modifier].
+ * [modifier]. With [positionOnTouch], a touchscreen instead picks the
+ * position under the finger and follows it while dragged — a real slider
+ * there; the D-pad behaviour is unchanged.
  */
 @Composable
 internal fun FocusableStepSlider(
@@ -495,7 +501,11 @@ internal fun FocusableStepSlider(
     modifier: Modifier = Modifier,
     trackWidth: Dp = Dimens.dimension180 * 0.6f,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
+    positionOnTouch: Boolean = false,
 ) {
+    val touchPositions = positionOnTouch && !isTvDevice()
+    val currentSelected by rememberUpdatedState(selected)
+    val currentOnSelectedChange by rememberUpdatedState(onSelectedChange)
     // See the settings gear's identical pair, HomeScreens.kt's own doc there, for why both are collected: a
     // touch tap never focuses this (only D-pad does), but clickable(indication = null) below still reports it
     // as a press into this same interactionSource regardless of indication.
@@ -522,9 +532,43 @@ internal fun FocusableStepSlider(
             .height(trackHeight)
             .clip(shape)
             .background(Color.White.copy(alpha = neutralContainerAlpha))
-            .clickable(interactionSource = interactionSource, indication = null) {
-                onSelectedChange((selected + 1) % steps)
-            },
+            .then(
+                if (touchPositions) {
+                    Modifier
+                        // Accessibility services still get a plain click (cycles, like D-pad).
+                        .semantics { onClick { currentOnSelectedChange((currentSelected + 1) % steps); true } }
+                        .pointerInput(steps, trackWidth) {
+                            // Knob centres: from one inset + half a knob in from each end.
+                            val first = (inset + knobSize / 2).toPx()
+                            val span = (trackWidth - knobSize - inset * 2).toPx()
+                            fun stepAt(x: Float) =
+                                ((x - first) / span * (steps - 1)).roundToInt().coerceIn(0, steps - 1)
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                down.consume()
+                                val press = PressInteraction.Press(down.position)
+                                interactionSource.tryEmit(press)
+                                var last = currentSelected
+                                fun moveTo(x: Float) {
+                                    val step = stepAt(x)
+                                    if (step != last) { last = step; currentOnSelectedChange(step) }
+                                }
+                                moveTo(down.position.x)
+                                while (true) {
+                                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    moveTo(change.position.x)
+                                    change.consume()
+                                }
+                                interactionSource.tryEmit(PressInteraction.Release(press))
+                            }
+                        }
+                } else {
+                    Modifier.clickable(interactionSource = interactionSource, indication = null) {
+                        onSelectedChange((selected + 1) % steps)
+                    }
+                },
+            ),
     ) {
         // The green fill, from the left edge to one knob-inset past the
         // knob, with a rounded end — the same margin the knob has to the
@@ -572,10 +616,16 @@ private const val RING_VOLUME_PREVIEW_DELAY_MS = 800L
  * related, separate bug this is *not* responsible for: focus itself lands
  * here reliably (confirmed live), the thing that could silently fail was
  * the button's *visual* focused state, not the focus request itself.
+ *
+ * TV only by default: focus is how a D-pad gets started, but on a touch
+ * Portal it just paints a button as highlighted that nobody selected. Pass
+ * [alsoOnTouch] for a target where focus does something on touch too (a text
+ * field, whose focus brings up the keyboard).
  */
 @Composable
-internal fun RequestFocusOnMount(focusRequester: FocusRequester) {
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+internal fun RequestFocusOnMount(focusRequester: FocusRequester, alsoOnTouch: Boolean = false) {
+    val tv = isTvDevice()
+    LaunchedEffect(Unit) { if (tv || alsoOnTouch) focusRequester.requestFocus() }
 }
 
 /**
@@ -1229,12 +1279,13 @@ private fun AdminChoiceScreen(
                     )
                     // Click cycles forward (wrapping); Left/Right step
                     // without wrapping, so overshooting Off doesn't jump to
-                    // High.
+                    // High. On a touchscreen: tap a position or drag the knob.
                     FocusableStepSlider(
                         steps = Config.RingVolume.entries.size,
                         selected = ringVolume.ordinal,
                         onSelectedChange = { ringVolumeTouched = true; onRingVolumeChange(Config.RingVolume.entries[it]) },
                         interactionSource = ringVolumeInteractionSource,
+                        positionOnTouch = true,
                         modifier = Modifier.focusRequester(focusRequester).semantics { stateDescription = ringVolumeLabel }.onPreviewKeyEvent { event ->
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                             when (event.key) {

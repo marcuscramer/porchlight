@@ -61,7 +61,7 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
     KeepScreenOn()
     var phrase by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
-    RequestFocusOnMount(focusRequester)
+    RequestFocusOnMount(focusRequester, alsoOnTouch = true)
     // Shared by the button's onClick and the keyboard's Done action below.
     val submit = { if (phrase.isNotBlank()) onSubmit(phrase) }
     // Same dim-title/centered-content shape every other settings-gear-

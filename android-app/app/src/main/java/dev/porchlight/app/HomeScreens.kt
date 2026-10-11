@@ -393,7 +393,9 @@ internal fun HomeScreen(
                 // same as before) — claim focus explicitly rather than
                 // relying on whatever Android would otherwise default to. Only
                 // while the controls are hidden: with them up, they hold focus.
-                if (!showCallControls) RequestFocusOnMount(focusRequester)
+                // alsoOnTouch: an invisible surface, so focus shows nothing — it
+                // just takes focus back off the hidden controls.
+                if (!showCallControls) RequestFocusOnMount(focusRequester, alsoOnTouch = true)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -483,9 +485,11 @@ private fun CallControlsOverlay(
     val positionFocusRequester = remember { FocusRequester() }
     // Accept holds focus while it's offered; when it goes (the call was
     // answered) focus moves to the first control left rather than getting lost.
+    // D-pad only: on a touch Portal this would just highlight a button nobody selected.
     val ringing = onAccept != null
+    val tv = isTvDevice()
     LaunchedEffect(ringing) {
-        runCatching { (if (ringing) acceptFocusRequester else positionFocusRequester).requestFocus() }
+        if (tv) runCatching { (if (ringing) acceptFocusRequester else positionFocusRequester).requestFocus() }
     }
     // The last Accept action, kept for the slide-away animation after onAccept is gone.
     val latestAccept by rememberUpdatedState(onAccept)
@@ -1022,8 +1026,9 @@ private fun ContactRow(
     // because presence changed, only because there's something to
     // actually act on. Safe to request immediately: a stray hardware-Enter
     // key-up from a preceding screen is caught at the source by
-    // MainActivity's own HardwareEnterKeyUpGuard.
-    LaunchedEffect(canCall) { if (canCall) focusRequester.requestFocus() }
+    // MainActivity's own HardwareEnterKeyUpGuard. TV only, like RequestFocusOnMount.
+    val tv = isTvDevice()
+    LaunchedEffect(canCall) { if (canCall && tv) focusRequester.requestFocus() }
     // Purely informational, same as web's own identical dot — Call itself
     // stays unconditionally offered regardless of status (see this row's
     // own `canCall` param); tapping Call on an offline contact just
