@@ -59,12 +59,16 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Porchlight">
 
+        <!-- No screenOrientation: touch Portals rotate (2018 Portal+, 2019 Portal
+             and Mini), so the screen follows the device; MainActivity locks the
+             Portal TV to landscape itself. configChanges covers everything a
+             rotation changes, so it re-lays out in place instead of recreating
+             the activity (which would lose the screen's state). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden">
             <!-- Plain LAUNCHER: confirmed from Immortal's own source
                  (ScreensaverDismissAppActivity.kt, HomeActivity.kt) that its
                  Manage-mode app list and screensaver-dismiss-target picker

@@ -2,6 +2,11 @@ package dev.porchlight.app
 
 import android.Manifest
 import android.app.UiModeManager
+import android.content.pm.ActivityInfo
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.BoxWithConstraints
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -190,17 +195,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The Portal TV stays landscape as it always was; touch Portals follow the device (see the manifest).
+        val tv = (getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        if (tv) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         requestPermissions()
         setContent {
             PorchlightTheme {
-                Surface(modifier = Modifier.fillMaxSize().porchlightScreenBackground(), color = Color.Transparent) {
-                    AppRoot(
-                        service = service,
-                        showAdminChoice = showAdminChoice,
-                        onAdminChoiceHandled = { showAdminChoice = false },
-                        onReopenAdminChoice = { showAdminChoice = true },
-                        onConnect = { cfg -> Config.save(this, cfg); CameraAgentService.start(this) },
-                    )
+                ScaleToDesignCanvas {
+                    Surface(modifier = Modifier.fillMaxSize().porchlightScreenBackground(), color = Color.Transparent) {
+                        AppRoot(
+                            service = service,
+                            showAdminChoice = showAdminChoice,
+                            onAdminChoiceHandled = { showAdminChoice = false },
+                            onReopenAdminChoice = { showAdminChoice = true },
+                            onConnect = { cfg -> Config.save(this, cfg); CameraAgentService.start(this) },
+                        )
+                    }
                 }
             }
         }
@@ -645,6 +655,41 @@ internal fun RequestFocusOnMount(focusRequester: FocusRequester, alsoOnTouch: Bo
 internal fun isTvDevice(): Boolean {
     val context = LocalContext.current
     return remember { (context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION }
+}
+
+/**
+ * The window size, in dp, every screen was designed and checked at: the
+ * Portal TV's 1920x1080 at density 320. Its long and short side, so the same
+ * pair also describes an upright (portrait) screen.
+ */
+private const val DESIGN_CANVAS_LONG_DP = 960f
+private const val DESIGN_CANVAS_SHORT_DP = 540f
+
+/**
+ * Scales the whole UI on a touch Portal so its window works out to the
+ * Portal TV's canvas ([DESIGN_CANVAS_LONG_DP] x [DESIGN_CANVAS_SHORT_DP]),
+ * keeping every screen's proportions the same as on the TV. Without it the
+ * touch models (density 160, 180 on the 2021 Portal+ — read from their
+ * firmware) get 1280x800 to 1920x1280 dp, and everything comes out 25-50%
+ * smaller relative to the screen. The scale fits the design canvas inside the
+ * window in both directions, so a rotated (portrait) screen fits too. It only
+ * ever scales up: a screen with less room than the design keeps the system
+ * density. The Portal TV is left alone (its own density already gives exactly
+ * this canvas).
+ */
+@Composable
+internal fun ScaleToDesignCanvas(content: @Composable () -> Unit) {
+    if (isTvDevice()) {
+        content()
+        return
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val system = LocalDensity.current
+        val longPx = maxOf(constraints.maxWidth, constraints.maxHeight).toFloat()
+        val shortPx = minOf(constraints.maxWidth, constraints.maxHeight).toFloat()
+        val scale = minOf(longPx / DESIGN_CANVAS_LONG_DP, shortPx / DESIGN_CANVAS_SHORT_DP).coerceAtLeast(system.density)
+        CompositionLocalProvider(LocalDensity provides Density(scale, system.fontScale), content = content)
+    }
 }
 
 /**
@@ -1416,7 +1461,10 @@ private fun AdminChoiceScreen(
                     // cost nothing and still guard the Install button's own
                     // left edge from any future layout that isn't fixed-width).
                     Column(modifier = Modifier.weight(1f)) {
-                        Box {
+                        // CenterStart: on a narrow (upright) screen a longer
+                        // probe wraps to two lines, and the shown message must
+                        // sit in the middle of that height, level with Install.
+                        Box(contentAlignment = Alignment.CenterStart) {
                             Text(stringResource(R.string.settings_update_checking), modifier = Modifier.alpha(0f))
                             Text(stringResource(R.string.settings_update_disabled), modifier = Modifier.alpha(0f))
                             Text(stringResource(R.string.settings_update_upToDate, BuildConfig.VERSION_NAME), modifier = Modifier.alpha(0f))
