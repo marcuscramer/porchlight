@@ -148,7 +148,9 @@
           This only needs to be done once — once paired, you'll be able to
           call each other any time.
         </p>
-        <input id="phraseInput" type="text" data-i18n-placeholder="pairing.phraseFieldLabel" data-i18n-aria-label="pairing.phraseAriaLabel" placeholder="Phrase" aria-label="Pairing phrase" />
+        <!-- The phrase is compared exactly on both sides: no auto-capitalisation or
+             auto-correct from on-screen keyboards. -->
+        <input id="phraseInput" type="text" autocapitalize="none" autocorrect="off" autocomplete="off" spellcheck="false" data-i18n-placeholder="pairing.phraseFieldLabel" data-i18n-aria-label="pairing.phraseAriaLabel" placeholder="Phrase" aria-label="Pairing phrase" />
         <button id="phraseSubmit" class="tv-button" data-i18n="pairing.startPairingButton">Start pairing</button>
       </div>
     </section>

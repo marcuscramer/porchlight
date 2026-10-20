@@ -94,6 +94,7 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
             label = stringResource(R.string.pairing_phraseFieldLabel),
             onSubmit = submit,
             modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            exact = true,
         )
         TvButton(onClick = submit, enabled = phrase.isNotBlank()) {
             Text(stringResource(R.string.pairing_startPairingButton))

@@ -84,6 +84,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -857,6 +858,10 @@ internal fun SubmitOnEnterTextField(
     label: String,
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
+    // For text that must arrive exactly as typed (the pairing phrase, which
+    // is compared case- and spelling-exact): no auto-capitalisation and no
+    // auto-correct from the on-screen keyboard. Names keep both.
+    exact: Boolean = false,
 ) {
     OutlinedTextField(
         value = value,
@@ -875,7 +880,11 @@ internal fun SubmitOnEnterTextField(
         // newline key for Enter/Return — without it, Enter just inserts
         // "\n" into the field, with no way to submit from the keyboard.
         singleLine = true,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardOptions = if (exact) {
+            KeyboardOptions(imeAction = ImeAction.Done, capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false)
+        } else {
+            KeyboardOptions(imeAction = ImeAction.Done)
+        },
         keyboardActions = KeyboardActions(onDone = { onSubmit() }),
     )
 }
