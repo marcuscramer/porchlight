@@ -2,15 +2,11 @@ package dev.porchlight.app
 
 import android.Manifest
 import android.app.UiModeManager
-import android.content.pm.ActivityInfo
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.foundation.layout.BoxWithConstraints
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -66,6 +62,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -82,6 +80,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -119,7 +119,9 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.layout.onSizeChanged
 
 /**
  * Closes a real, unresolved upstream Compose bug
@@ -198,6 +200,11 @@ class MainActivity : ComponentActivity() {
         // The Portal TV stays landscape as it always was; touch Portals follow the device (see the manifest).
         val tv = (getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
         if (tv) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        // Touch Portals: the soft keyboard covers up to half the screen, so it
+        // shrinks the window (pages then drop their explanation text, see
+        // LocalSoftKeyboardOpen) instead of panning the title off the top. The
+        // Portal TV keeps its own keyboard behaviour.
+        else window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         requestPermissions()
         setContent {
             PorchlightTheme {
@@ -672,10 +679,15 @@ private const val DESIGN_CANVAS_SHORT_DP = 540f
  * touch models (density 160, 180 on the 2021 Portal+ — read from their
  * firmware) get 1280x800 to 1920x1280 dp, and everything comes out 25-50%
  * smaller relative to the screen. The scale fits the design canvas inside the
- * window in both directions, so a rotated (portrait) screen fits too. It only
+ * screen in both directions, so a rotated (portrait) screen fits too. It only
  * ever scales up: a screen with less room than the design keeps the system
  * density. The Portal TV is left alone (its own density already gives exactly
  * this canvas).
+ *
+ * Measured from the configuration's screen size (the app area without the
+ * system bars), not from this composable's own constraints: the window
+ * shrinks while the soft keyboard is up (adjustResize), and the scale must not
+ * jump with it.
  */
 @Composable
 internal fun ScaleToDesignCanvas(content: @Composable () -> Unit) {
@@ -683,13 +695,13 @@ internal fun ScaleToDesignCanvas(content: @Composable () -> Unit) {
         content()
         return
     }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val system = LocalDensity.current
-        val longPx = maxOf(constraints.maxWidth, constraints.maxHeight).toFloat()
-        val shortPx = minOf(constraints.maxWidth, constraints.maxHeight).toFloat()
-        val scale = minOf(longPx / DESIGN_CANVAS_LONG_DP, shortPx / DESIGN_CANVAS_SHORT_DP).coerceAtLeast(system.density)
-        CompositionLocalProvider(LocalDensity provides Density(scale, system.fontScale), content = content)
-    }
+    val system = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val widthPx = configuration.screenWidthDp * system.density
+    val heightPx = configuration.screenHeightDp * system.density
+    val scale = minOf(maxOf(widthPx, heightPx) / DESIGN_CANVAS_LONG_DP, minOf(widthPx, heightPx) / DESIGN_CANVAS_SHORT_DP)
+        .coerceAtLeast(system.density)
+    CompositionLocalProvider(LocalDensity provides Density(scale, system.fontScale), content = content)
 }
 
 /**
@@ -733,6 +745,9 @@ internal fun CenteredDialogScreen(
         }
     }
 }
+
+/** Whether the soft keyboard is open over the current [PageScreen] (touch devices only). */
+internal val LocalSoftKeyboardOpen = compositionLocalOf { false }
 
 /**
  * The shared "page" shape behind every settings-gear-reachable screen that
@@ -781,7 +796,14 @@ internal fun PageScreen(
     onBack: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize().padding(Dimens.spacingScreenPadding)) {
+    // On a touch device the soft keyboard shrinks the window (see onCreate);
+    // it's open when the page is clearly shorter than the screen. Pages read
+    // it through [LocalSoftKeyboardOpen] to drop what isn't needed while
+    // typing, so the field and its button stay in view.
+    val screenHeightPx = LocalConfiguration.current.screenHeightDp * LocalContext.current.resources.displayMetrics.density
+    var pageHeightPx by remember { mutableStateOf(0) }
+    val keyboardOpen = pageHeightPx in 1 until (screenHeightPx * 0.8f).toInt()
+    Column(modifier = Modifier.fillMaxSize().onSizeChanged { pageHeightPx = it.height }.padding(Dimens.spacingScreenPadding)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Dimens.dimension16)) {
             if (onBack != null && !isTvDevice()) {
                 // The same TvButton + Icon combination the Rename/Status rows already use (their own
@@ -814,8 +836,9 @@ internal fun PageScreen(
                 modifier = Modifier.widthIn(max = Dimens.sizeMaxContentWidth).fillMaxWidth().verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Dimens.spacingPanelContentGap),
-                content = content,
-            )
+            ) {
+                CompositionLocalProvider(LocalSoftKeyboardOpen provides keyboardOpen) { content() }
+            }
         }
     }
 }
@@ -1192,7 +1215,8 @@ private fun NameEntryScreen(
         // Settings' own (this is reached *from* Settings). Mirrors web's
         // #screenRename, whose own comment says the same thing.
         PageScreen(title = titleText, onBack = onCancel) {
-            Text(
+            // Not needed while typing; dropping it keeps the field and Save in view.
+            if (!LocalSoftKeyboardOpen.current) Text(
                 stringResource(R.string.nameEntry_subtitle),
                 color = GeneratedColor.colorTextDim,
                 style = MaterialTheme.typography.bodyMedium,

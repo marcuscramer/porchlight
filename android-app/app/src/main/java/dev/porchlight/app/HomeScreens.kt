@@ -924,10 +924,12 @@ private fun WaitingScreen(
             Column(
                 verticalArrangement = Arrangement.spacedBy(Dimens.spacingContactListGap),
                 modifier = Modifier
-                    // The same width cap and side padding as the pages
-                    // (Settings/Status), so long names get the same room.
-                    .widthIn(max = Dimens.sizeMaxContentWidth)
+                    // The same side padding and content width cap as the
+                    // pages (Settings/Status), in their order: the padding
+                    // is the gap to the screen edge, the cap applies to the
+                    // rows themselves, so long names get the same room.
                     .padding(horizontal = Dimens.listSideMargin)
+                    .widthIn(max = Dimens.sizeMaxContentWidth)
                     // Every row below fillMaxWidth()s to this Column's own
                     // width — width(IntrinsicSize.Max) resolves that to the
                     // widest row's natural content width, so Call/

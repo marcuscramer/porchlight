@@ -67,20 +67,23 @@ fun EnterPhraseScreen(onSubmit: (String) -> Unit, onCancel: () -> Unit) {
     // Same dim-title/centered-content shape every other settings-gear-
     // reachable page screen uses (PageScreen's own doc, MainActivity.kt).
     PageScreen(title = stringResource(R.string.pairing_addContactTitle), onBack = onCancel) {
-        Text(
-            stringResource(R.string.pairing_phraseInstructions),
-            color = GeneratedColor.colorTextDim,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            stringResource(R.string.pairing_oneTimeNote),
-            color = GeneratedColor.colorTextDim,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        // Not needed while typing; dropping it keeps the field and Start pairing in view.
+        if (!LocalSoftKeyboardOpen.current) {
+            Text(
+                stringResource(R.string.pairing_phraseInstructions),
+                color = GeneratedColor.colorTextDim,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                stringResource(R.string.pairing_oneTimeNote),
+                color = GeneratedColor.colorTextDim,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         SubmitOnEnterTextField(
             value = phrase,
             // take(200): generous for "a short phrase," but a real bound —
