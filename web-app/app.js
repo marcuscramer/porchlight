@@ -1492,6 +1492,21 @@ const screens = {
 const remoteVideoEl = el('remoteVideo');
 const localVideoEl = el('localVideo');
 
+// The other side's video fills the screen when both are landscape or both are portrait, and is shown whole
+// (letterboxed) when they differ: a Portal's landscape video filled into an upright phone showed only about a
+// third of its width. Same rule as the Android app (SurfaceVideoView, HomeScreens.kt). The self-view's corner box
+// takes the camera's own shape (portrait on an upright phone) instead of always being landscape.
+function updateVideoShapes() {
+  const v = remoteVideoEl;
+  const videoPortrait = v.videoHeight > v.videoWidth;
+  const boxPortrait = v.clientHeight > v.clientWidth;
+  v.classList.toggle('fit-whole', v.videoWidth > 0 && videoPortrait !== boxPortrait);
+  localVideoEl.classList.toggle('portrait', localVideoEl.videoHeight > localVideoEl.videoWidth);
+}
+// 'resize' on a <video> fires whenever its picture's size changes (a rotated phone or Portal on either end).
+remoteVideoEl.addEventListener('resize', updateVideoShapes);
+localVideoEl.addEventListener('resize', updateVideoShapes);
+
 // Escape triggers whichever Back/Cancel/OK button the current screen has — WAI-ARIA's own convention for
 // dismissing a dialog (its Authoring Practices Guide names Escape explicitly), and safe even with a text
 // field focused, since nobody presses Escape mid-edit. Deliberately NOT Backspace too: browsers dropped
@@ -1934,6 +1949,7 @@ window.addEventListener('resize', () => {
   fadeShapeResizeHandle = requestAnimationFrame(() => {
     fadeShapeResizeHandle = null;
     updateContactListFadeShape();
+    updateVideoShapes();
   });
 });
 

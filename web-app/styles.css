@@ -780,6 +780,11 @@ video {
   object-fit: cover;
   background: var(--color-video-background);
 }
+/* Video and window differ in shape (landscape vs portrait): show it whole
+   instead of cropping it; see updateVideoShapes, app.js. */
+#remoteVideo.fit-whole {
+  object-fit: contain;
+}
 
 /* Self-view — full-screen while calling / ringing (#screenCall.mode-calling /
    .mode-incoming), then shrinking to its corner once the call connects. The
@@ -793,9 +798,12 @@ video {
   z-index: 1;
   object-fit: cover;
   /* Fluid below ~563px (where 32vw drops under the 180px ceiling), floors
-     at 112px on the smallest realistic phone widths. */
-  --lv-w: clamp(112px, 32vw, var(--size-local-preview-width));
-  --lv-h: calc(var(--lv-w) * 2 / 3);
+     at 112px on the smallest realistic phone widths. The long side; the box
+     is landscape (3:2), or portrait (2:3) when the camera picture is
+     (.portrait, see updateVideoShapes, app.js). */
+  --lv-long: clamp(112px, 32vw, var(--size-local-preview-width));
+  --lv-w: var(--lv-long);
+  --lv-h: calc(var(--lv-long) * 2 / 3);
   width: var(--lv-w);
   height: var(--lv-h);
   background: var(--color-video-background);
@@ -805,6 +813,10 @@ video {
 #localVideo.preview-bottom-end { left: calc(100% - var(--dimension-24) - var(--lv-w)); top: calc(100% - var(--dimension-24) - var(--lv-h)); }
 #localVideo.preview-top-start { left: var(--dimension-24); top: var(--dimension-24); }
 #localVideo.preview-top-end { left: calc(100% - var(--dimension-24) - var(--lv-w)); top: var(--dimension-24); }
+#localVideo.portrait {
+  --lv-w: calc(var(--lv-long) * 2 / 3);
+  --lv-h: var(--lv-long);
+}
 #localVideo.preview-invisible { display: none; }
 #screenCall.mode-calling #localVideo,
 #screenCall.mode-incoming #localVideo {

@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -414,11 +415,17 @@ internal fun HomeScreen(
                 // back doesn't replay it).
                 var selfViewFull by remember { mutableStateOf(true) }
                 LaunchedEffect(Unit) { selfViewFull = false }
+                // The corner box takes the camera's own shape: upright (portrait)
+                // on a touch Portal standing up, landscape otherwise — a fixed
+                // landscape box showed only a thin band of a portrait picture.
+                var selfViewPortrait by remember { mutableStateOf(false) }
                 if (config.previewCorner != PreviewCorner.INVISIBLE) {
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val shrink = tween<Dp>(durationMillis = GeneratedSharedConfig.SELF_VIEW_SHRINK_MS)
-                        val width by animateDpAsState(if (selfViewFull) maxWidth else Dimens.sizeLocalPreviewWidth, shrink, label = "selfViewWidth")
-                        val height by animateDpAsState(if (selfViewFull) maxHeight else Dimens.sizeLocalPreviewHeight, shrink, label = "selfViewHeight")
+                        val cornerWidth = if (selfViewPortrait) Dimens.sizeLocalPreviewHeight else Dimens.sizeLocalPreviewWidth
+                        val cornerHeight = if (selfViewPortrait) Dimens.sizeLocalPreviewWidth else Dimens.sizeLocalPreviewHeight
+                        val width by animateDpAsState(if (selfViewFull) maxWidth else cornerWidth, shrink, label = "selfViewWidth")
+                        val height by animateDpAsState(if (selfViewFull) maxHeight else cornerHeight, shrink, label = "selfViewHeight")
                         val inset by animateDpAsState(if (selfViewFull) 0.dp else Dimens.spacingContactRowGap, shrink, label = "selfViewInset")
                         Box(
                             modifier = Modifier
@@ -426,7 +433,7 @@ internal fun HomeScreen(
                                 .padding(inset)
                                 .size(width, height),
                         ) {
-                            LocalPreviewView(service = service, ready = state.capturing)
+                            LocalPreviewView(service = service, ready = state.capturing, onPortraitChange = { selfViewPortrait = it })
                         }
                     }
                 }
@@ -1196,26 +1203,56 @@ private fun SurfaceVideoView(
     attach: CameraAgentService.(VideoSink) -> Unit,
     detach: CameraAgentService.() -> Unit,
     modifier: Modifier = Modifier,
+    // Whether the video, as displayed (after its rotation), is taller than
+    // wide; called on the main thread whenever that changes.
+    onPortraitChange: ((Boolean) -> Unit)? = null,
+    // Show the video whole (letterboxed) when it and this view differ in shape
+    // (landscape vs portrait) instead of filling and cropping: a landscape
+    // video filled into an upright touch Portal showed only about a third of
+    // its width. The renderer itself always crops to its own view, so this
+    // sizes the view to the video. Same rule as web's #remoteVideo.fit-whole.
+    fitWhenShapesDiffer: Boolean = false,
 ) {
+    val currentOnPortraitChange by rememberUpdatedState(onPortraitChange)
     val renderer = remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     val initialized = remember { mutableStateOf(false) }
-    AndroidView(
-        modifier = modifier.fillMaxSize(),
-        factory = { ctx -> SurfaceViewRenderer(ctx).also { renderer.value = it } },
-        // Runs exactly once, when this leaves composition for good —
-        // unlike the DisposableEffect below, which re-fires on every
-        // `ready` flip. SurfaceView is a hardware overlay outside
-        // Compose's normal drawing; without an explicit release() its
-        // Surface can keep compositing its last (black) frame on top of
-        // whatever Compose draws next.
-        onRelease = { view -> if (initialized.value) runCatching { view.release() } },
-    )
+    // Width / height of the video as displayed; null until the first frame.
+    var videoAspect by remember { mutableStateOf<Float?>(null) }
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize().then(if (fitWhenShapesDiffer) Modifier.background(GeneratedColor.colorVideoBackground) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        val aspect = videoAspect
+        val letterbox = fitWhenShapesDiffer && aspect != null && (aspect < 1f) != (maxHeight > maxWidth)
+        AndroidView(
+            modifier = if (letterbox) Modifier.aspectRatio(aspect!!) else Modifier.fillMaxSize(),
+            factory = { ctx -> SurfaceViewRenderer(ctx).also { renderer.value = it } },
+            // Runs exactly once, when this leaves composition for good —
+            // unlike the DisposableEffect below, which re-fires on every
+            // `ready` flip. SurfaceView is a hardware overlay outside
+            // Compose's normal drawing; without an explicit release() its
+            // Surface can keep compositing its last (black) frame on top of
+            // whatever Compose draws next.
+            onRelease = { view -> if (initialized.value) runCatching { view.release() } },
+        )
+    }
     DisposableEffect(service, renderer.value, ready) {
         val view = renderer.value
         val eglContext = service?.eglContext
         if (view != null && eglContext != null && ready) {
             if (!initialized.value) {
-                runCatching { view.init(eglContext, null) }
+                val events = object : RendererCommon.RendererEvents {
+                    override fun onFirstFrameRendered() = Unit
+                    override fun onFrameResolutionChanged(videoWidth: Int, videoHeight: Int, rotation: Int) {
+                        if (videoWidth <= 0 || videoHeight <= 0) return
+                        val shown = if (rotation % 180 == 0) videoWidth.toFloat() / videoHeight else videoHeight.toFloat() / videoWidth
+                        view.post {
+                            videoAspect = shown
+                            currentOnPortraitChange?.invoke(shown < 1f)
+                        }
+                    }
+                }
+                runCatching { view.init(eglContext, events) }
                 view.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                 if (mirror) view.setMirror(true)
                 // Without this, a plain SurfaceView can claim a dedicated
@@ -1243,14 +1280,21 @@ private fun RemoteVideoView(service: CameraAgentService?, ready: Boolean, modifi
     attach = CameraAgentService::attachRemoteView,
     detach = CameraAgentService::detachRemoteView,
     modifier = modifier,
+    fitWhenShapesDiffer = true,
 )
 
 @Composable
-private fun LocalPreviewView(service: CameraAgentService?, ready: Boolean, modifier: Modifier = Modifier) = SurfaceVideoView(
+private fun LocalPreviewView(
+    service: CameraAgentService?,
+    ready: Boolean,
+    modifier: Modifier = Modifier,
+    onPortraitChange: ((Boolean) -> Unit)? = null,
+) = SurfaceVideoView(
     service = service,
     ready = ready,
     mirror = true,
     attach = CameraAgentService::attachLocalPreview,
     detach = CameraAgentService::detachLocalPreview,
     modifier = modifier,
+    onPortraitChange = onPortraitChange,
 )
