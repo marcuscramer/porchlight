@@ -1,9 +1,9 @@
 name: Setup zip
 
 # Attaches porchlight-setup.zip (the setup/ folder: double-click setup for a Portal) to a release, so the README can
-# link to releases/latest/download/porchlight-setup.zip. Runs when a release is published; run it by hand for an
-# existing release. The in-app updater only looks at the asset named app-release.apk, so this extra asset doesn't
-# affect it.
+# link to releases/latest/download/porchlight-setup.zip. Runs when a release is published, from that release's
+# tag; run it by hand to attach the current branch's setup/ to an existing release (e.g. one cut before setup/
+# existed). The in-app updater only looks at the asset named app-release.apk, so this extra asset doesn't affect it.
 
 on:
   release:
@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ github.event.release.tag_name || github.ref }}
       - name: Build the zip
         # zip keeps the Unix permissions, so the .command and .sh files stay executable when unpacked on macOS.
         run: |
