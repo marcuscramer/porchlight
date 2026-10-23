@@ -1,0 +1,39 @@
+name: Setup zip
+
+# Attaches porchlight-setup.zip (the setup/ folder: double-click setup for a Portal) to a release, so the README can
+# link to releases/latest/download/porchlight-setup.zip. Runs when a release is published; run it by hand for an
+# existing release. The in-app updater only looks at the asset named app-release.apk, so this extra asset doesn't
+# affect it.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the zip to (e.g. v39)"
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - name: Build the zip
+        # zip keeps the Unix permissions, so the .command and .sh files stay executable when unpacked on macOS.
+        run: |
+          mkdir -p out/porchlight-setup
+          cp setup/README.md setup/setup.sh setup/setup.ps1 setup/*.command setup/*.bat out/porchlight-setup/
+          chmod +x out/porchlight-setup/*.sh out/porchlight-setup/*.command
+          (cd out && zip -r ../porchlight-setup.zip porchlight-setup)
+          unzip -l porchlight-setup.zip
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name || inputs.tag }}" porchlight-setup.zip --clobber

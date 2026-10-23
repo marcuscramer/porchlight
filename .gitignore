@@ -37,3 +37,7 @@ android-app/app/src/main/java/dev/porchlight/app/ui/theme/GeneratedOpacity.kt
 
 # Local tooling config (preview dev-server launch config etc.)
 .claude/
+
+# setup/: adb downloaded by the setup scripts, and the APK they fetch
+setup/platform-tools/
+setup/*.apk

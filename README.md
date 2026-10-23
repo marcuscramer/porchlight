@@ -51,21 +51,32 @@ Open Porchlight in your browser:
 
 Have someone else open it too. Agree on a phrase. Pair. Call. No signup required.
 
-## Installing on a Portal TV
+## Installing on a Portal
 
-Porchlight is sideloaded from a computer, so you need three things:
+The easiest way is the setup tool: it installs the latest Porchlight and makes
+all the one-time settings below for you, with nothing to type.
 
-1. **USB debugging allowed on the Portal**, in its Settings (**Settings >
-   Debug > ADB Enabled**).
-2. **The Portal connected to the computer by USB.** The first time, the
-   Portal asks "Allow USB debugging?" on its screen: choose Allow, and tick
-   "Always allow".
-3. **adb and the Porchlight APK on the computer:** download Google's
-   [platform-tools](https://developer.android.com/tools/releases/platform-tools)
-   (which contain [adb](https://developer.android.com/tools/adb)) and
-   `app-release.apk` from the
-   [latest release](https://github.com/marcuscramer/porchlight/releases/latest).
+1. On the Portal: **Settings > Debug > ADB Enabled**.
+2. Connect the Portal to a computer (macOS, Windows or Linux) with a USB-C
+   cable that carries data.
+3. Download [porchlight-setup.zip](https://github.com/marcuscramer/porchlight/releases/latest/download/porchlight-setup.zip),
+   unpack it and double-click **Setup-Portal** (`.command` on macOS, `.bat`
+   on Windows; `./setup.sh` on Linux). When the Portal asks "Allow USB
+   debugging?", tick "Always allow" and choose Allow.
 
+It downloads Google's `adb` into its own folder if the computer doesn't have
+it, asks before switching off Meta's system updates (step 5 below), and can be
+run again at any time. **Restore-Portal** undoes its changes. Details and
+troubleshooting are in the zip's README ([setup/README.md](setup/README.md)).
+The Windows version hasn't been run on a Windows PC yet.
+
+### Installing by hand
+
+With USB debugging allowed and the Portal connected as above, download Google's
+[platform-tools](https://developer.android.com/tools/releases/platform-tools)
+(which contain [adb](https://developer.android.com/tools/adb)) and
+`app-release.apk` from the
+[latest release](https://github.com/marcuscramer/porchlight/releases/latest).
 Then, from the folder with the APK, install it:
 
 ```
@@ -77,11 +88,10 @@ grant camera and microphone permissions.
 
 ### Convenience (optional but recommended)
 
-A few one-time setups make a Portal much nicer to live with. Most are done
-with `adb` commands run from the same computer you used for the install,
-because they touch protected system settings that no ordinary app is allowed
-to change. None of them is needed for calls to
-work.
+The setup tool does all of these except Kiosk mode (a switch in Porchlight's
+Settings). By hand, most are `adb` commands run from the same computer you used
+for the install, because they touch protected system settings that no ordinary
+app is allowed to change. None of them is needed for calls to work.
 
 #### 1. Updating from inside the app
 
